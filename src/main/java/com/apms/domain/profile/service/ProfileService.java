@@ -185,31 +185,36 @@ public class ProfileService {
     private CompanyProfile.Identity mapIdentity(CompanyCandidate.Identity i) {
         if (i == null) return null;
         return CompanyProfile.Identity.builder()
-                .name(i.getName())
+                .legalName(i.getLegalName())
+                .tradeName(i.getTradeName())
+                .taxCode(i.getTaxCode())
                 .registrationNumber(i.getRegistrationNumber())
-                .taxId(i.getTaxId())
-                .legalForm(i.getLegalForm())
-                .foundedYear(i.getFoundedYear())
                 .build();
     }
 
     private CompanyProfile.Business mapBusiness(CompanyCandidate.Business b) {
         if (b == null) return null;
         return CompanyProfile.Business.builder()
-                .industry(b.getIndustry())
-                .subIndustry(b.getSubIndustry())
-                .description(b.getDescription())
-                .coreProducts(b.getCoreProducts())
-                .marketPosition(b.getMarketPosition())
+                .industries(b.getIndustries())
+                .businessModel(b.getBusinessModel())
+                .products(b.getProducts() != null ? b.getProducts().stream()
+                        .map(p -> CompanyProfile.Product.builder()
+                                .name(p.getName())
+                                .category(p.getCategory())
+                                .description(p.getDescription())
+                                .build())
+                        .toList() : null)
+                .markets(b.getMarkets())
+                .targetCustomers(b.getTargetCustomers())
                 .build();
     }
 
     private CompanyProfile.CompanySize mapCompanySize(CompanyCandidate.CompanySize s) {
         if (s == null) return null;
         return CompanyProfile.CompanySize.builder()
-                .employeeCountRange(s.getEmployeeCountRange())
-                .estimatedRevenueRange(s.getEstimatedRevenueRange())
-                .physicalLocationsCount(s.getPhysicalLocationsCount())
+                .employeeTier(s.getEmployeeTier())
+                .employeeCount(s.getEmployeeCount())
+                .revenueTier(s.getRevenueTier())
                 .build();
     }
 
@@ -217,10 +222,16 @@ public class ProfileService {
         if (c == null) return null;
         return CompanyProfile.Contact.builder()
                 .website(c.getWebsite())
-                .primaryEmail(c.getPrimaryEmail())
-                .primaryPhone(c.getPrimaryPhone())
-                .headquartersAddress(c.getHeadquartersAddress())
-                .keyExecutives(c.getKeyExecutives())
+                .emails(c.getEmails())
+                .phones(c.getPhones())
+                .addresses(c.getAddresses() != null ? c.getAddresses().stream()
+                        .map(a -> CompanyProfile.Address.builder()
+                                .type(a.getType())
+                                .fullAddress(a.getFullAddress())
+                                .city(a.getCity())
+                                .country(a.getCountry())
+                                .build())
+                        .toList() : null)
                 .build();
     }
 
@@ -231,7 +242,6 @@ public class ProfileService {
                 .weaknesses(i.getWeaknesses())
                 .opportunities(i.getOpportunities())
                 .threats(i.getThreats())
-                .strategicValue(i.getStrategicValue())
                 .build();
     }
 }

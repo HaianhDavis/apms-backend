@@ -62,6 +62,9 @@ public class CompanyCandidate {
      */
     private RelationshipType relationshipTypeOverride;
 
+    private RelationshipSuggestion relationshipSuggestion;
+    private Lifecycle lifecycle;
+
     // ─────────────────────────────────────────────────────────────
     // Flexible Data Embedded Documents
     // ─────────────────────────────────────────────────────────────
@@ -94,11 +97,10 @@ public class CompanyCandidate {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Identity {
-        private String name;
+        private String legalName;
+        private String tradeName;
+        private String taxCode;
         private String registrationNumber;
-        private String taxId;
-        private String legalForm;
-        private String foundedYear;
     }
 
     @Data
@@ -106,11 +108,21 @@ public class CompanyCandidate {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Business {
-        private String industry;
-        private String subIndustry;
+        private java.util.List<String> industries;
+        private String businessModel;
+        private java.util.List<Product> products;
+        private java.util.List<String> markets;
+        private java.util.List<String> targetCustomers;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Product {
+        private String name;
+        private String category;
         private String description;
-        private String coreProducts;
-        private String marketPosition;
     }
 
     @Data
@@ -118,9 +130,9 @@ public class CompanyCandidate {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CompanySize {
-        private String employeeCountRange;
-        private String estimatedRevenueRange;
-        private String physicalLocationsCount;
+        private String employeeTier;
+        private Integer employeeCount;
+        private String revenueTier;
     }
 
     @Data
@@ -129,10 +141,20 @@ public class CompanyCandidate {
     @AllArgsConstructor
     public static class Contact {
         private String website;
-        private String primaryEmail;
-        private String primaryPhone;
-        private String headquartersAddress;
-        private String keyExecutives;
+        private java.util.List<String> emails;
+        private java.util.List<String> phones;
+        private java.util.List<Address> addresses;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Address {
+        private String type;
+        private String fullAddress;
+        private String city;
+        private String country;
     }
 
     @Data
@@ -140,11 +162,39 @@ public class CompanyCandidate {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Insights {
-        private String strengths;
-        private String weaknesses;
-        private String opportunities;
-        private String threats;
-        private String strategicValue;
+        private java.util.List<String> strengths;
+        private java.util.List<String> weaknesses;
+        private java.util.List<String> opportunities;
+        private java.util.List<String> threats;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class RelationshipSuggestion {
+        private RelationshipType suggestedType;
+        private Double confidence;
+        private java.util.List<AlternativeRelationship> alternatives;
+        private java.util.List<String> reasoning;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class AlternativeRelationship {
+        private RelationshipType type;
+        private Double confidence;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Lifecycle {
+        private CandidateStatus status;
+        private String convertedCompanyProfileId;
     }
 
     @Data

@@ -62,12 +62,10 @@ public class AiExtractionService {
         RawDocument rawDocument = rawDocumentRepository.findById(rawDocumentId)
                 .orElseThrow(() -> new ResourceNotFoundException("RawDocument not found with id: " + rawDocumentId));
 
-        // 3. Read extracted text or manual input content
+        // 3. Read text content: manual input from source.inputText; file extraction TBD
         String sourceText = "";
         if (rawDocument.getSource() != null && StringUtils.hasText(rawDocument.getSource().getInputText())) {
             sourceText = rawDocument.getSource().getInputText();
-        } else if (rawDocument.getProcessing() != null && StringUtils.hasText(rawDocument.getProcessing().getExtractedText())) {
-            sourceText = rawDocument.getProcessing().getExtractedText();
         }
 
         log.info("Starting AI extraction for ImportJob {}, text length: {}", importJobId, sourceText.length());
@@ -90,17 +88,28 @@ public class AiExtractionService {
     }
 
     private AiExtractionResult generateMockResult(Long importJobId, String rawDocumentId, String sourceText) {
-        ExtractedCompanyData.SuggestedRelationship suggestion = ExtractedCompanyData.SuggestedRelationship.builder()
-                .relationshipType(RelationshipType.POTENTIAL_PARTNER_OF)
-                .reasoning("Skeleton mock reasoning based on generic keywords.")
+        ExtractedCompanyData.RelationshipSuggestion suggestion = ExtractedCompanyData.RelationshipSuggestion.builder()
+                .suggestedType(RelationshipType.POTENTIAL_PARTNER_OF)
+                .confidence(0.87)
+                .reasoning(List.of("Strong synergy in cloud services", "Complementary target markets"))
                 .build();
 
         ExtractedCompanyData mockData = ExtractedCompanyData.builder()
-                .companyName("Acme Corp (AI Extracted)")
-                .industry("Technology")
-                .website("https://acme.example.com")
-                .description("A sample technology company extracted from document context.")
-                .suggestedRelationships(List.of(suggestion))
+                .legalName("CMC Corporation")
+                .tradeName("CMC")
+                .taxCode(null)
+                .industries(List.of("Technology", "Cloud", "Cybersecurity"))
+                .businessModel("B2B Technology Services")
+                .products(List.of("Cloud Services", "Cybersecurity Services", "Software Outsourcing"))
+                .markets(List.of("Vietnam", "International"))
+                .targetCustomers(List.of("Enterprise", "SME"))
+                .employeeTier("UNKNOWN")
+                .website("https://www.cmc.com.vn")
+                .strengths(List.of("Strong market presence in Vietnam", "Diversified tech portfolio"))
+                .weaknesses(List.of("High competition in cloud space"))
+                .opportunities(List.of("Growing demand for digital transformation"))
+                .threats(List.of("Global tech giants entering local market"))
+                .relationshipSuggestion(suggestion)
                 .build();
 
         return AiExtractionResult.builder()

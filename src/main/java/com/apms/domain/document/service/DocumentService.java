@@ -19,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
-import java.util.Optional;
 
 @Slf4j
 @Service
@@ -31,18 +30,23 @@ public class DocumentService {
     private final ProjectRepository projectRepository;
     private final StorageService storageService;
 
+    // ─────────────────────────────────────────────
+    // FILE UPLOAD
+    // ─────────────────────────────────────────────
+
     @Transactional
     public ImportJobResponse uploadDocument(Long projectId, MultipartFile file, Long uploaderUserId) {
         validateProjectExists(projectId);
 
         // Save file locally
         String localFilePath = storageService.store(file);
+        String sourceType = deriveSourceType(file.getOriginalFilename());
 
         // Create ImportJob in SQL
         ImportJob importJob = ImportJob.builder()
                 .projectId(projectId)
                 .inputType(InputType.FILE_UPLOAD)
-                .sourceType(getFileExtension(file.getOriginalFilename()))
+                .sourceType(sourceType)
                 .fileName(file.getOriginalFilename())
                 .localFilePath(localFilePath)
                 .uploadedBy(uploaderUserId)
@@ -54,23 +58,29 @@ public class DocumentService {
         importJob = importJobRepository.save(importJob);
 
         // Create RawDocument in MongoDB
+        LocalDateTime now = LocalDateTime.now();
         RawDocument rawDocument = RawDocument.builder()
                 .projectId(String.valueOf(projectId))
                 .importJobId(String.valueOf(importJob.getId()))
-                .inputType(InputType.FILE_UPLOAD.name())
                 .source(RawDocument.Source.builder()
-                        .originalFileName(file.getOriginalFilename())
-                        .contentType(file.getContentType())
+                        .type(sourceType)
+                        .fileName(file.getOriginalFilename())
                         .build())
                 .storage(RawDocument.Storage.builder()
-                        .localFilePath(localFilePath)
-                        .fileSizeBytes(file.getSize())
-                        .storedAt(LocalDateTime.now())
+                        .provider("LOCAL")
+                        .path(localFilePath)
+                        .mimeType(file.getContentType())
+                        .sizeBytes(file.getSize())
+                        .build())
+                .processing(RawDocument.Processing.builder()
+                        .status("UPLOADED")
+                        .candidateCount(0)
+                        .startedAt(now)
                         .build())
                 .metadata(RawDocument.Metadata.builder()
                         .uploadedBy(String.valueOf(uploaderUserId))
-                        .createdAt(LocalDateTime.now())
-                        .updatedAt(LocalDateTime.now())
+                        .uploadedAt(now)
+                        .updatedAt(now)
                         .build())
                 .build();
 
@@ -84,6 +94,10 @@ public class DocumentService {
 
         return toImportJobResponse(importJob);
     }
+
+    // ─────────────────────────────────────────────
+    // MANUAL INPUT
+    // ─────────────────────────────────────────────
 
     @Transactional
     public ImportJobResponse manualInput(Long projectId, ManualInputRequest request, Long uploaderUserId) {
@@ -103,18 +117,28 @@ public class DocumentService {
         importJob = importJobRepository.save(importJob);
 
         // Create RawDocument in MongoDB
+        LocalDateTime now = LocalDateTime.now();
         RawDocument rawDocument = RawDocument.builder()
                 .projectId(String.valueOf(projectId))
                 .importJobId(String.valueOf(importJob.getId()))
-                .inputType(InputType.MANUAL_INPUT.name())
                 .source(RawDocument.Source.builder()
+                        .type("MANUAL_INPUT")
                         .inputText(request.getInputText())
                         .companyNameHint(request.getCompanyNameHint())
                         .build())
+                .storage(RawDocument.Storage.builder()
+                        .provider("MANUAL")
+                        .build())
+                .processing(RawDocument.Processing.builder()
+                        .status("EXTRACTED")
+                        .candidateCount(0)
+                        .startedAt(now)
+                        .completedAt(now)
+                        .build())
                 .metadata(RawDocument.Metadata.builder()
                         .uploadedBy(String.valueOf(uploaderUserId))
-                        .createdAt(LocalDateTime.now())
-                        .updatedAt(LocalDateTime.now())
+                        .uploadedAt(now)
+                        .updatedAt(now)
                         .build())
                 .build();
 
@@ -128,6 +152,10 @@ public class DocumentService {
 
         return toImportJobResponse(importJob);
     }
+
+    // ─────────────────────────────────────────────
+    // READ OPERATIONS
+    // ─────────────────────────────────────────────
 
     @Transactional(readOnly = true)
     public Page<ImportJobResponse> getProjectImportJobs(Long projectId, Pageable pageable) {
@@ -143,17 +171,28 @@ public class DocumentService {
         return toImportJobResponse(importJob);
     }
 
+    // ─────────────────────────────────────────────
+    // HELPERS
+    // ─────────────────────────────────────────────
+
     private void validateProjectExists(Long projectId) {
         if (!projectRepository.existsById(projectId)) {
             throw new ResourceNotFoundException("Project not found with id: " + projectId);
         }
     }
 
-    private String getFileExtension(String fileName) {
+    private String deriveSourceType(String fileName) {
         if (fileName == null || !fileName.contains(".")) {
             return "OTHER";
         }
-        return fileName.substring(fileName.lastIndexOf(".") + 1).toUpperCase();
+        String ext = fileName.substring(fileName.lastIndexOf(".") + 1).toUpperCase();
+        return switch (ext) {
+            case "PDF"  -> "PDF";
+            case "DOC", "DOCX" -> "DOCX";
+            case "XLS", "XLSX" -> "XLSX";
+            case "CSV"  -> "CSV";
+            default -> "OTHER";
+        };
     }
 
     private ImportJobResponse toImportJobResponse(ImportJob importJob) {

@@ -52,30 +52,59 @@ public class CandidateService {
 
         // 2. Map extracted data to Candidate flexible embedded documents
         CompanyCandidate.Identity identity = CompanyCandidate.Identity.builder()
-                .name(extractedData.getCompanyName())
+                .legalName(extractedData.getLegalName())
+                .tradeName(extractedData.getTradeName())
+                .taxCode(extractedData.getTaxCode())
                 .build();
 
         CompanyCandidate.Business business = CompanyCandidate.Business.builder()
-                .industry(extractedData.getIndustry())
-                .description(extractedData.getDescription())
+                .industries(extractedData.getIndustries())
+                .businessModel(extractedData.getBusinessModel())
+                .products(extractedData.getProducts() != null ? extractedData.getProducts().stream()
+                        .map(pName -> CompanyCandidate.Product.builder().name(pName).build())
+                        .toList() : null)
+                .markets(extractedData.getMarkets())
+                .targetCustomers(extractedData.getTargetCustomers())
+                .build();
+                
+        CompanyCandidate.CompanySize size = CompanyCandidate.CompanySize.builder()
+                .employeeTier(extractedData.getEmployeeTier())
                 .build();
 
         CompanyCandidate.Contact contact = CompanyCandidate.Contact.builder()
                 .website(extractedData.getWebsite())
                 .build();
+                
+        CompanyCandidate.Insights insights = CompanyCandidate.Insights.builder()
+                .strengths(extractedData.getStrengths())
+                .weaknesses(extractedData.getWeaknesses())
+                .opportunities(extractedData.getOpportunities())
+                .threats(extractedData.getThreats())
+                .build();
 
+        CompanyCandidate.RelationshipSuggestion suggestion = null;
         RelationshipType suggestedRel = null;
         Double confidence = null;
-        if (extractedData.getSuggestedRelationships() != null && !extractedData.getSuggestedRelationships().isEmpty()) {
-            ExtractedCompanyData.SuggestedRelationship firstRel = extractedData.getSuggestedRelationships().get(0);
-            suggestedRel = firstRel.getRelationshipType();
-            confidence = firstRel.getConfidenceScore();
+        
+        if (extractedData.getRelationshipSuggestion() != null) {
+            ExtractedCompanyData.RelationshipSuggestion extSug = extractedData.getRelationshipSuggestion();
+            suggestion = CompanyCandidate.RelationshipSuggestion.builder()
+                    .suggestedType(extSug.getSuggestedType())
+                    .confidence(extSug.getConfidence())
+                    .reasoning(extSug.getReasoning())
+                    .build();
+            suggestedRel = extSug.getSuggestedType();
+            confidence = extSug.getConfidence();
         }
 
         CompanyCandidate.Metadata metadata = CompanyCandidate.Metadata.builder()
                 .createdBy(String.valueOf(creatorId))
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
+                .build();
+                
+        CompanyCandidate.Lifecycle lifecycle = CompanyCandidate.Lifecycle.builder()
+                .status(CandidateStatus.DRAFT)
                 .build();
 
         // 3. Create Candidate
@@ -88,9 +117,13 @@ public class CandidateService {
                 .status(CandidateStatus.DRAFT)
                 .suggestedRelationshipType(suggestedRel)
                 .relationshipConfidenceScore(confidence)
+                .relationshipSuggestion(suggestion)
                 .identity(identity)
                 .business(business)
+                .companySize(size)
                 .contact(contact)
+                .insights(insights)
+                .lifecycle(lifecycle)
                 .metadata(metadata)
                 .build();
 
@@ -272,6 +305,8 @@ public class CandidateService {
                 .suggestedRelationshipType(c.getSuggestedRelationshipType())
                 .relationshipConfidenceScore(c.getRelationshipConfidenceScore())
                 .relationshipTypeOverride(c.getRelationshipTypeOverride())
+                .relationshipSuggestion(c.getRelationshipSuggestion())
+                .lifecycle(c.getLifecycle())
                 .identity(c.getIdentity())
                 .business(c.getBusiness())
                 .companySize(c.getCompanySize())

@@ -19,6 +19,8 @@ public class CandidateResponse {
     private RelationshipType suggestedRelationshipType;
     private Double relationshipConfidenceScore;
     private RelationshipType relationshipTypeOverride;
+    private CompanyCandidate.RelationshipSuggestion relationshipSuggestion;
+    private CompanyCandidate.Lifecycle lifecycle;
 
     private CompanyCandidate.Identity identity;
     private CompanyCandidate.Business business;

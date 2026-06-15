@@ -36,22 +36,17 @@ public class RawDocument {
     private String importJobId;
 
     /**
-     * FILE_UPLOAD or MANUAL_INPUT (mirrors ImportJob.inputType).
-     */
-    private String inputType;
-
-    /**
      * Source information about the original document or manual entry.
      */
     private Source source;
 
     /**
-     * File storage information on the local filesystem.
+     * File storage metadata.
      */
     private Storage storage;
 
     /**
-     * AI processing output — populated later by AI extraction phase.
+     * Processing lifecycle tracking.
      */
     @Builder.Default
     private Processing processing = new Processing();
@@ -70,19 +65,24 @@ public class RawDocument {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Source {
-        /** Original file name — null for MANUAL_INPUT. */
-        private String originalFileName;
+        /**
+         * MANUAL_INPUT, PDF, DOCX, XLSX, CSV, WEBSITE
+         */
+        private String type;
 
-        /** MIME content type — null for MANUAL_INPUT. */
-        private String contentType;
+        /** Original file name — null for MANUAL_INPUT. */
+        private String fileName;
+
+        /** Original URL — used for WEBSITE type. */
+        private String originalUrl;
 
         /**
-         * The raw text content entered by staff for MANUAL_INPUT.
-         * Also used to store extracted text from FILE_UPLOAD once AI runs.
+         * Raw text content entered by staff for MANUAL_INPUT,
+         * or extracted text from file after parsing.
          */
         private String inputText;
 
-        /** Optional company name provided at manual input time for quick reference. */
+        /** Optional company name hint provided at manual input time. */
         private String companyNameHint;
     }
 
@@ -91,13 +91,22 @@ public class RawDocument {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class Storage {
-        /** Relative path in uploads/ directory — null for MANUAL_INPUT. */
-        private String localFilePath;
+        /**
+         * LOCAL, MANUAL, WEBSITE
+         */
+        private String provider;
+
+        /** Relative path on the local filesystem — null for MANUAL or WEBSITE. */
+        private String path;
+
+        /** MIME content type — null for MANUAL_INPUT. */
+        private String mimeType;
 
         /** File size in bytes — null for MANUAL_INPUT. */
-        private Long fileSizeBytes;
+        private Long sizeBytes;
 
-        private LocalDateTime storedAt;
+        /** File checksum (MD5/SHA256) — optional integrity check. */
+        private String checksum;
     }
 
     @Data
@@ -106,15 +115,16 @@ public class RawDocument {
     @AllArgsConstructor
     public static class Processing {
         /**
-         * Full text extracted from the document — populated by AI extraction.
-         * For MANUAL_INPUT, this mirrors source.inputText until AI runs.
+         * UPLOADED, EXTRACTED, FAILED
          */
-        private String extractedText;
+        private String status;
 
-        /** Raw JSON response from Spring AI — null until AI extraction is triggered. */
-        private String aiRawOutput;
+        /** Number of candidates created from this document. */
+        private Integer candidateCount;
 
-        private LocalDateTime processedAt;
+        private LocalDateTime startedAt;
+        private LocalDateTime completedAt;
+        private String errorMessage;
     }
 
     @Data
@@ -124,7 +134,7 @@ public class RawDocument {
     public static class Metadata {
         /** userId of who uploaded/submitted this document (stored as String). */
         private String uploadedBy;
-        private LocalDateTime createdAt;
+        private LocalDateTime uploadedAt;
         private LocalDateTime updatedAt;
     }
 }

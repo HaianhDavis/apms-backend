@@ -101,8 +101,9 @@ public class GraphService {
     }
 
     private void mergeCompanyNode(CompanyProfile profile) {
-        String name = profile.getIdentity() != null ? profile.getIdentity().getName() : "Unknown";
-        String industry = profile.getBusiness() != null ? profile.getBusiness().getIndustry() : "Unknown";
+        String name = profile.getIdentity() != null && profile.getIdentity().getLegalName() != null ? profile.getIdentity().getLegalName() : "Unknown";
+        String industry = profile.getBusiness() != null && profile.getBusiness().getIndustries() != null && !profile.getBusiness().getIndustries().isEmpty() 
+                ? profile.getBusiness().getIndustries().get(0) : "Unknown";
 
         String cypher = """
             MERGE (c:Company {companyId: $companyId})
