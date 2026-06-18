@@ -17,9 +17,9 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
 
     Page<Project> findByStatusAndProjectType(ProjectStatus status, ProjectType projectType, Pageable pageable);
 
-    @Query("SELECT p FROM Project p JOIN p.members m WHERE m.userId = :userId")
-    Page<Project> findByMemberUserId(@Param("userId") Long userId, Pageable pageable);
+    @Query("SELECT p FROM Project p JOIN p.members m WHERE m.account.id = :accountId")
+    Page<Project> findByMemberAccountId(@Param("accountId") Long accountId, Pageable pageable);
 
-    @Query("SELECT CASE WHEN COUNT(m) > 0 THEN true ELSE false END FROM ProjectMember m WHERE m.project.id = :projectId AND m.userId = :userId")
-    boolean existsByIdAndMembersUserId(@Param("projectId") Long projectId, @Param("userId") Long userId);
+    @Query("SELECT CASE WHEN COUNT(m) > 0 THEN true ELSE false END FROM ProjectMember m WHERE m.project.id = :projectId AND m.account.id = :accountId")
+    boolean existsByIdAndMembersAccountId(@Param("projectId") Long projectId, @Param("accountId") Long accountId);
 }

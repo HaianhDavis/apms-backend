@@ -22,8 +22,15 @@ public class ScoreSnapshot {
     @Column(nullable = false, length = 36)
     private String companyId;
 
-    @Column(nullable = false)
-    private String projectId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "project_id", nullable = false)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private com.apms.domain.project.Project project;
+
+    public String getProjectId() {
+        return project != null ? String.valueOf(project.getId()) : null;
+    }
 
     @Column(nullable = false)
     private String candidateId;
@@ -44,8 +51,15 @@ public class ScoreSnapshot {
     @Column(nullable = false)
     private String ruleVersion;
 
-    @Column(nullable = false)
-    private String generatedBy;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "generated_by_account_id", nullable = true)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private com.apms.domain.user.Account generatedByAccount;
+
+    public String getGeneratedBy() {
+        return generatedByAccount != null ? String.valueOf(generatedByAccount.getId()) : "SYSTEM";
+    }
 
     @CreationTimestamp
     @Column(updatable = false)

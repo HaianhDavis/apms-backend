@@ -11,7 +11,8 @@ import org.springframework.context.annotation.FilterType;
     basePackages = {
         "com.apms.domain.candidate.repository.mongo",
         "com.apms.domain.profile.repository.mongo",
-        "com.apms.domain.document.repository.mongo"
+        "com.apms.domain.document.repository.mongo",
+        "com.apms.domain.ai.repository.mongo"
     },
     includeFilters = @Filter(type = FilterType.ASSIGNABLE_TYPE, classes = MongoRepository.class)
 )

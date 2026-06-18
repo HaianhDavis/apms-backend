@@ -10,6 +10,7 @@ import com.apms.domain.document.dto.ManualInputRequest;
 import com.apms.domain.document.repository.mongo.RawDocumentRepository;
 import com.apms.domain.document.repository.sql.ImportJobRepository;
 import com.apms.domain.project.repository.sql.ProjectRepository;
+import com.apms.domain.user.repository.sql.AccountRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -28,6 +29,7 @@ public class DocumentService {
     private final ImportJobRepository importJobRepository;
     private final RawDocumentRepository rawDocumentRepository;
     private final ProjectRepository projectRepository;
+    private final AccountRepository accountRepository;
     private final StorageService storageService;
 
     // ─────────────────────────────────────────────
@@ -44,12 +46,12 @@ public class DocumentService {
 
         // Create ImportJob in SQL
         ImportJob importJob = ImportJob.builder()
-                .projectId(projectId)
+                .project(projectRepository.getReferenceById(projectId))
                 .inputType(InputType.FILE_UPLOAD)
                 .sourceType(sourceType)
                 .fileName(file.getOriginalFilename())
                 .localFilePath(localFilePath)
-                .uploadedBy(uploaderUserId)
+                .uploadedByAccount(accountRepository.getReferenceById(uploaderUserId))
                 .startedAt(LocalDateTime.now())
                 .status(ImportJobStatus.COMPLETED) // AI not implemented yet
                 .completedAt(LocalDateTime.now())
@@ -105,10 +107,10 @@ public class DocumentService {
 
         // Create ImportJob in SQL
         ImportJob importJob = ImportJob.builder()
-                .projectId(projectId)
+                .project(projectRepository.getReferenceById(projectId))
                 .inputType(InputType.MANUAL_INPUT)
                 .sourceType("MANUAL")
-                .uploadedBy(uploaderUserId)
+                .uploadedByAccount(accountRepository.getReferenceById(uploaderUserId))
                 .startedAt(LocalDateTime.now())
                 .status(ImportJobStatus.COMPLETED) // AI not implemented yet
                 .completedAt(LocalDateTime.now())
@@ -160,7 +162,7 @@ public class DocumentService {
     @Transactional(readOnly = true)
     public Page<ImportJobResponse> getProjectImportJobs(Long projectId, Pageable pageable) {
         validateProjectExists(projectId);
-        return importJobRepository.findByProjectId(projectId, pageable)
+        return importJobRepository.findByProject_Id(projectId, pageable)
                 .map(this::toImportJobResponse);
     }
 
@@ -204,7 +206,7 @@ public class DocumentService {
                 .sourceType(importJob.getSourceType())
                 .fileName(importJob.getFileName())
                 .status(importJob.getStatus())
-                .uploadedBy(importJob.getUploadedBy())
+                .uploadedBy(importJob.getUploadedById())
                 .startedAt(importJob.getStartedAt())
                 .completedAt(importJob.getCompletedAt())
                 .errorMessage(importJob.getErrorMessage())

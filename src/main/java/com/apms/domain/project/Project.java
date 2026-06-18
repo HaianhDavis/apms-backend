@@ -54,10 +54,17 @@ public class Project {
     private ProjectStatus status = ProjectStatus.DRAFT;
 
     /**
-     * ID of the User (SQL) who created this project.
+     * Account (SQL) who created this project.
      */
-    @Column(nullable = false)
-    private Long createdBy;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "created_by", nullable = false)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private com.apms.domain.user.Account createdByAccount;
+
+    public Long getCreatedById() {
+        return createdByAccount != null ? createdByAccount.getId() : null;
+    }
 
     @OneToMany(mappedBy = "project", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @Builder.Default

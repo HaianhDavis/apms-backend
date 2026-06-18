@@ -4,8 +4,8 @@ import com.apms.common.exception.BusinessValidationException;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.auth.RefreshToken;
 import com.apms.domain.auth.repository.sql.RefreshTokenRepository;
-import com.apms.domain.user.User;
-import com.apms.domain.user.repository.sql.UserRepository;
+import com.apms.domain.user.Account;
+import com.apms.domain.user.repository.sql.AccountRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -19,23 +19,23 @@ import java.util.UUID;
 public class RefreshTokenService {
 
     private final RefreshTokenRepository refreshTokenRepository;
-    private final UserRepository userRepository;
+    private final AccountRepository accountRepository;
     private final PasswordEncoder passwordEncoder;
 
     // 7 days
     private final Long refreshTokenDurationMs = 604800000L;
 
     @Transactional
-    public String createOrUpdateRefreshToken(Long userId) {
-        String rawToken = userId + ":" + UUID.randomUUID().toString();
+    public String createOrUpdateRefreshToken(Long accountId) {
+        String rawToken = accountId + ":" + UUID.randomUUID().toString();
         String hashedToken = passwordEncoder.encode(rawToken);
 
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
 
-        RefreshToken refreshToken = refreshTokenRepository.findByUser(user)
+        RefreshToken refreshToken = refreshTokenRepository.findByAccount(account)
                 .orElse(RefreshToken.builder()
-                        .user(user)
+                        .account(account)
                         .build());
 
         refreshToken.setTokenHash(hashedToken);
@@ -52,17 +52,17 @@ public class RefreshTokenService {
             throw new BusinessValidationException("Invalid refresh token format");
         }
         
-        Long userId;
+        Long accountId;
         try {
-            userId = Long.parseLong(parts[0]);
+            accountId = Long.parseLong(parts[0]);
         } catch (NumberFormatException e) {
             throw new BusinessValidationException("Invalid refresh token format");
         }
 
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessValidationException("User not found for token"));
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new BusinessValidationException("Account not found for token"));
 
-        RefreshToken token = refreshTokenRepository.findByUser(user)
+        RefreshToken token = refreshTokenRepository.findByAccount(account)
                 .orElseThrow(() -> new BusinessValidationException("Refresh token not found"));
 
         if (token.isRevoked()) {
@@ -82,9 +82,9 @@ public class RefreshTokenService {
     }
 
     @Transactional
-    public void revokeToken(Long userId) {
-        User user = userRepository.findById(userId).orElseThrow();
-        refreshTokenRepository.findByUser(user)
+    public void revokeToken(Long accountId) {
+        Account account = accountRepository.findById(accountId).orElseThrow();
+        refreshTokenRepository.findByAccount(account)
                 .ifPresent(token -> {
                     token.setRevoked(true);
                     refreshTokenRepository.save(token);

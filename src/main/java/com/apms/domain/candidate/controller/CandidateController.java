@@ -26,9 +26,9 @@ public class CandidateController {
     private final CandidateService candidateService;
 
     // ─────────────────────────────────────────────
-    // POST /api/v1/import-jobs/{importJobId}/candidates/from-ai
-    // Role: RESEARCH_STAFF
+    // POST /api/v1/import-jobs/{importJobId}/candidates/from-ai (Legacy)
     // ─────────────────────────────────────────────
+    @Deprecated
     @PostMapping("/import-jobs/{importJobId}/candidates/from-ai")
     @PreAuthorize("hasRole('RESEARCH_STAFF')")
     public ResponseEntity<ApiResponse<CandidateResponse>> createFromAi(
@@ -37,7 +37,21 @@ public class CandidateController {
 
         CandidateResponse response = candidateService.createFromAi(importJobId, currentUser.getId());
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success(response, "Candidate created from AI extraction"));
+                .body(ApiResponse.success(response, "Candidate created from AI extraction (legacy)"));
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/v1/ai-extractions/{extractionId}/candidate
+    // ─────────────────────────────────────────────
+    @PostMapping("/ai-extractions/{extractionId}/candidate")
+    @PreAuthorize("hasRole('RESEARCH_STAFF')")
+    public ResponseEntity<ApiResponse<CandidateResponse>> createFromExtractionId(
+            @PathVariable String extractionId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        CandidateResponse response = candidateService.createFromExtractionId(extractionId, currentUser.getId());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(response, "Candidate created from reviewed AI extraction"));
     }
 
     // ─────────────────────────────────────────────

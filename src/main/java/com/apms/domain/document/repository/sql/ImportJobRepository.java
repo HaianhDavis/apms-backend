@@ -6,5 +6,5 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ImportJobRepository extends JpaRepository<ImportJob, Long> {
-    Page<ImportJob> findByProjectId(Long projectId, Pageable pageable);
+    Page<ImportJob> findByProject_Id(Long projectId, Pageable pageable);
 }

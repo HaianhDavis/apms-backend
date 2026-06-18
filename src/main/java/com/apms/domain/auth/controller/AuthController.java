@@ -63,18 +63,18 @@ public class AuthController {
 
         RefreshToken refreshToken = refreshTokenService.findAndVerifyToken(requestRefreshToken);
 
-        String newRefreshToken = refreshTokenService.createOrUpdateRefreshToken(refreshToken.getUser().getId());
-        String newAccessToken = jwtUtils.generateJwtTokenFromUsername(refreshToken.getUser().getEmail());
+        String newRefreshToken = refreshTokenService.createOrUpdateRefreshToken(refreshToken.getAccount().getId());
+        String newAccessToken = jwtUtils.generateJwtTokenFromUsername(refreshToken.getAccount().getEmail());
 
-        List<String> roles = refreshToken.getUser().getRoles().stream()
+        List<String> roles = refreshToken.getAccount().getRoles().stream()
                 .map(r -> "ROLE_" + r.name())
                 .collect(Collectors.toList());
 
         return ResponseEntity.ok(ApiResponse.success(JwtResponse.builder()
                 .accessToken(newAccessToken)
                 .refreshToken(newRefreshToken)
-                .id(refreshToken.getUser().getId())
-                .email(refreshToken.getUser().getEmail())
+                .id(refreshToken.getAccount().getId())
+                .email(refreshToken.getAccount().getEmail())
                 .roles(roles)
                 .build()));
     }

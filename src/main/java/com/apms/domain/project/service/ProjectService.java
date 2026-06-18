@@ -10,7 +10,7 @@ import com.apms.domain.project.ProjectMember;
 import com.apms.domain.project.dto.*;
 import com.apms.domain.project.repository.sql.ProjectMemberRepository;
 import com.apms.domain.project.repository.sql.ProjectRepository;
-import com.apms.domain.user.repository.sql.UserRepository;
+import com.apms.domain.user.repository.sql.AccountRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -29,14 +29,14 @@ public class ProjectService {
 
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
-    private final UserRepository userRepository;
+    private final AccountRepository accountRepository;
 
     // ─────────────────────────────────────────────
     // CREATE
     // ─────────────────────────────────────────────
 
     @Transactional
-    public ProjectResponse createProject(CreateProjectRequest request, Long creatorUserId) {
+    public ProjectResponse createProject(CreateProjectRequest request, Long creatorAccountId) {
         validateProjectTypeInvariants(request.getProjectType(),
                 request.getTargetCompanyProfileId(),
                 request.getTargetCompanyName());
@@ -48,7 +48,7 @@ public class ProjectService {
                 .targetCompanyName(request.getTargetCompanyName())
                 .description(request.getDescription())
                 .status(ProjectStatus.DRAFT)
-                .createdBy(creatorUserId)
+                .createdByAccount(accountRepository.getReferenceById(creatorAccountId))
                 .build();
 
         project = projectRepository.save(project);
@@ -56,12 +56,12 @@ public class ProjectService {
         // Creator is automatically added as MANAGER
         ProjectMember creator = ProjectMember.builder()
                 .project(project)
-                .userId(creatorUserId)
+                .account(accountRepository.getReferenceById(creatorAccountId))
                 .memberRole(MemberRole.MANAGER)
                 .build();
         projectMemberRepository.save(creator);
 
-        log.info("Project created: id={}, type={}, createdBy={}", project.getId(), project.getProjectType(), creatorUserId);
+        log.info("Project created: id={}, type={}, createdBy={}", project.getId(), project.getProjectType(), creatorAccountId);
         return toResponse(project, List.of(creator));
     }
 
@@ -72,7 +72,7 @@ public class ProjectService {
     @Transactional(readOnly = true)
     public ProjectResponse getProjectById(Long id) {
         Project project = findProjectOrThrow(id);
-        List<ProjectMember> members = projectMemberRepository.findByProjectId(id);
+        List<ProjectMember> members = projectMemberRepository.findByProject_Id(id);
         return toResponse(project, members);
     }
 
@@ -91,7 +91,7 @@ public class ProjectService {
         }
 
         return page.map(p -> {
-            List<ProjectMember> members = projectMemberRepository.findByProjectId(p.getId());
+            List<ProjectMember> members = projectMemberRepository.findByProject_Id(p.getId());
             return toResponse(p, members);
         });
     }
@@ -99,7 +99,7 @@ public class ProjectService {
     @Transactional(readOnly = true)
     public List<ProjectMemberResponse> getProjectMembers(Long projectId) {
         findProjectOrThrow(projectId);
-        return projectMemberRepository.findByProjectId(projectId)
+        return projectMemberRepository.findByProject_Id(projectId)
                 .stream()
                 .map(this::toMemberResponse)
                 .collect(Collectors.toList());
@@ -124,7 +124,7 @@ public class ProjectService {
         }
 
         project = projectRepository.save(project);
-        List<ProjectMember> members = projectMemberRepository.findByProjectId(id);
+        List<ProjectMember> members = projectMemberRepository.findByProject_Id(id);
         return toResponse(project, members);
     }
 
@@ -136,46 +136,46 @@ public class ProjectService {
     public ProjectMemberResponse addMember(Long projectId, AddMemberRequest request) {
         findProjectOrThrow(projectId);
 
-        if (!userRepository.existsById(request.getUserId())) {
-            throw new ResourceNotFoundException("User not found with id: " + request.getUserId());
+        if (!accountRepository.existsById(request.getAccountId())) {
+            throw new ResourceNotFoundException("Account not found with id: " + request.getAccountId());
         }
-        if (projectMemberRepository.existsByProjectIdAndUserId(projectId, request.getUserId())) {
-            throw new BusinessValidationException("User " + request.getUserId() + " is already a member of project " + projectId);
+        if (projectMemberRepository.existsByProject_IdAndAccount_Id(projectId, request.getAccountId())) {
+            throw new BusinessValidationException("Account " + request.getAccountId() + " is already a member of project " + projectId);
         }
 
         Project project = findProjectOrThrow(projectId);
         ProjectMember member = ProjectMember.builder()
                 .project(project)
-                .userId(request.getUserId())
+                .account(accountRepository.getReferenceById(request.getAccountId()))
                 .memberRole(request.getMemberRole())
                 .build();
 
         member = projectMemberRepository.save(member);
-        log.info("Member added: projectId={}, userId={}, role={}", projectId, request.getUserId(), request.getMemberRole());
+        log.info("Member added: projectId={}, accountId={}, role={}", projectId, request.getAccountId(), request.getMemberRole());
         return toMemberResponse(member);
     }
 
     @Transactional
-    public void removeMember(Long projectId, Long userId) {
+    public void removeMember(Long projectId, Long accountId) {
         findProjectOrThrow(projectId);
 
-        if (!projectMemberRepository.existsByProjectIdAndUserId(projectId, userId)) {
-            throw new ResourceNotFoundException("User " + userId + " is not a member of project " + projectId);
+        if (!projectMemberRepository.existsByProject_IdAndAccount_Id(projectId, accountId)) {
+            throw new ResourceNotFoundException("Account " + accountId + " is not a member of project " + projectId);
         }
 
         // Prevent removing the last MANAGER
-        List<ProjectMember> members = projectMemberRepository.findByProjectId(projectId);
+        List<ProjectMember> members = projectMemberRepository.findByProject_Id(projectId);
         long managerCount = members.stream()
                 .filter(m -> m.getMemberRole() == MemberRole.MANAGER)
                 .count();
-        ProjectMember toRemove = projectMemberRepository.findByProjectIdAndUserId(projectId, userId)
+        ProjectMember toRemove = projectMemberRepository.findByProject_IdAndAccount_Id(projectId, accountId)
                 .orElseThrow();
         if (toRemove.getMemberRole() == MemberRole.MANAGER && managerCount <= 1) {
             throw new BusinessValidationException("Cannot remove the last MANAGER from a project.");
         }
 
-        projectMemberRepository.deleteByProjectIdAndUserId(projectId, userId);
-        log.info("Member removed: projectId={}, userId={}", projectId, userId);
+        projectMemberRepository.deleteByProject_IdAndAccount_Id(projectId, accountId);
+        log.info("Member removed: projectId={}, accountId={}", projectId, accountId);
     }
 
     // ─────────────────────────────────────────────
@@ -238,7 +238,7 @@ public class ProjectService {
                 .targetCompanyName(project.getTargetCompanyName())
                 .description(project.getDescription())
                 .status(project.getStatus())
-                .createdBy(project.getCreatedBy())
+                .createdBy(project.getCreatedById())
                 .createdAt(project.getCreatedAt())
                 .updatedAt(project.getUpdatedAt())
                 .members(members.stream().map(this::toMemberResponse).collect(Collectors.toList()))
@@ -248,7 +248,7 @@ public class ProjectService {
     private ProjectMemberResponse toMemberResponse(ProjectMember m) {
         return ProjectMemberResponse.builder()
                 .id(m.getId())
-                .userId(m.getUserId())
+                .accountId(m.getAccountId())
                 .memberRole(m.getMemberRole())
                 .joinedAt(m.getJoinedAt())
                 .build();

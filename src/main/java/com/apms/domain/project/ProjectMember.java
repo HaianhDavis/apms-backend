@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 @Entity
 @Table(
     name = "project_members",
-    uniqueConstraints = @UniqueConstraint(columnNames = {"project_id", "user_id"})
+    uniqueConstraints = @UniqueConstraint(columnNames = {"project_id", "account_id"})
 )
 @Data
 @Builder
@@ -28,8 +28,19 @@ public class ProjectMember {
     @EqualsAndHashCode.Exclude
     private Project project;
 
-    @Column(name = "user_id", nullable = false)
-    private Long userId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "account_id", nullable = false)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private com.apms.domain.user.Account account;
+
+    public Long getAccountId() {
+        return account != null ? account.getId() : null;
+    }
+
+    public Long getProjectId() {
+        return project != null ? project.getId() : null;
+    }
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

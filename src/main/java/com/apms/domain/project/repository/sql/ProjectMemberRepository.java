@@ -8,11 +8,11 @@ import java.util.Optional;
 
 public interface ProjectMemberRepository extends JpaRepository<ProjectMember, Long> {
 
-    List<ProjectMember> findByProjectId(Long projectId);
+    List<ProjectMember> findByProject_Id(Long projectId);
 
-    Optional<ProjectMember> findByProjectIdAndUserId(Long projectId, Long userId);
+    Optional<ProjectMember> findByProject_IdAndAccount_Id(Long projectId, Long accountId);
 
-    boolean existsByProjectIdAndUserId(Long projectId, Long userId);
+    boolean existsByProject_IdAndAccount_Id(Long projectId, Long accountId);
 
-    void deleteByProjectIdAndUserId(Long projectId, Long userId);
+    void deleteByProject_IdAndAccount_Id(Long projectId, Long accountId);
 }

@@ -19,8 +19,25 @@ public class AuditLog {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
-    private Long userId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "actor_account_id", nullable = false)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private com.apms.domain.user.Account actorAccount;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "project_id", nullable = true)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private com.apms.domain.project.Project project;
+
+    public Long getActorAccountId() {
+        return actorAccount != null ? actorAccount.getId() : null;
+    }
+
+    public Long getProjectId() {
+        return project != null ? project.getId() : null;
+    }
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

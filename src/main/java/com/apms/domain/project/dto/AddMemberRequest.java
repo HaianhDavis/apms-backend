@@ -7,8 +7,8 @@ import lombok.Data;
 @Data
 public class AddMemberRequest {
 
-    @NotNull(message = "userId is required")
-    private Long userId;
+    @NotNull(message = "accountId is required")
+    private Long accountId;
 
     @NotNull(message = "memberRole is required")
     private MemberRole memberRole;

@@ -10,6 +10,7 @@ import com.apms.domain.score.dto.ScoreRuleDto;
 import com.apms.domain.score.dto.ScoreSnapshotDto;
 import com.apms.domain.score.repository.sql.ScoreRuleRepository;
 import com.apms.domain.score.repository.sql.ScoreSnapshotRepository;
+import com.apms.domain.project.repository.sql.ProjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -27,6 +28,7 @@ public class ScoreService {
     private final ScoreSnapshotRepository scoreSnapshotRepository;
     private final ScoreRuleRepository scoreRuleRepository;
     private final CompanyProfileRepository profileRepository;
+    private final ProjectRepository projectRepository;
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER (Score Generation)
@@ -49,7 +51,7 @@ public class ScoreService {
         // Mock Score Engine evaluation
         ScoreSnapshot snapshot = ScoreSnapshot.builder()
                 .companyId(profile.getCompanyId())
-                .projectId(event.getProjectId())
+                .project(projectRepository.getReferenceById(Long.valueOf(event.getProjectId())))
                 .candidateId(event.getCandidateId())
                 .partnerFitScore(85)
                 .competitionLevel(30)
@@ -58,7 +60,7 @@ public class ScoreService {
                 .totalScore(80)
                 .factorsJson("{\"strengths\": [\"Market leader\", \"Strong tech\"], \"weaknesses\": [\"High debt\"]}")
                 .ruleVersion("v1.0")
-                .generatedBy("SYSTEM")
+                .generatedByAccount(null) // SYSTEM generated
                 .build();
 
         snapshot = scoreSnapshotRepository.save(snapshot);

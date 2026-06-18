@@ -46,10 +46,23 @@ public class CandidateService {
         ImportJob importJob = importJobRepository.findById(importJobId)
                 .orElseThrow(() -> new ResourceNotFoundException("ImportJob not found: " + importJobId));
 
-        // 1. Call AI Extraction (skeleton)
-        AiExtractionResult aiResult = aiExtractionService.extractCompanyData(importJobId);
-        ExtractedCompanyData extractedData = aiResult.getExtractedData();
+        // 1. Load extraction from cache (set by /ai/extract), or run if not yet cached
+        AiExtractionResult aiResult = aiExtractionService.getOrExtractCompanyData(importJobId);
+        
+        return buildAndSaveCandidate(String.valueOf(importJob.getProjectId()), String.valueOf(importJobId), importJob.getRawDocumentId(), aiResult.getExtractedData(), creatorId);
+    }
 
+    @Transactional
+    public CandidateResponse createFromExtractionId(String extractionId, Long creatorId) {
+        com.apms.domain.ai.AiExtractionCache cache = aiExtractionService.getExtractionById(extractionId);
+        
+        ImportJob importJob = importJobRepository.findById(cache.getImportJobId())
+                .orElseThrow(() -> new ResourceNotFoundException("ImportJob not found: " + cache.getImportJobId()));
+
+        return buildAndSaveCandidate(String.valueOf(importJob.getProjectId()), String.valueOf(importJob.getId()), importJob.getRawDocumentId(), cache.getExtractedData(), creatorId);
+    }
+
+    private CandidateResponse buildAndSaveCandidate(String projectId, String importJobId, String rawDocumentId, ExtractedCompanyData extractedData, Long creatorId) {
         // 2. Map extracted data to Candidate flexible embedded documents
         CompanyCandidate.Identity identity = CompanyCandidate.Identity.builder()
                 .legalName(extractedData.getLegalName())
@@ -61,7 +74,11 @@ public class CandidateService {
                 .industries(extractedData.getIndustries())
                 .businessModel(extractedData.getBusinessModel())
                 .products(extractedData.getProducts() != null ? extractedData.getProducts().stream()
-                        .map(pName -> CompanyCandidate.Product.builder().name(pName).build())
+                        .map(p -> CompanyCandidate.Product.builder()
+                                .name(p.getName())
+                                .category(p.getCategory())
+                                .description(p.getDescription())
+                                .build())
                         .toList() : null)
                 .markets(extractedData.getMarkets())
                 .targetCustomers(extractedData.getTargetCustomers())
@@ -109,9 +126,9 @@ public class CandidateService {
 
         // 3. Create Candidate
         CompanyCandidate candidate = CompanyCandidate.builder()
-                .projectId(String.valueOf(importJob.getProjectId()))
-                .importJobId(String.valueOf(importJobId))
-                .rawDocumentId(importJob.getRawDocumentId())
+                .projectId(projectId)
+                .importJobId(importJobId)
+                .rawDocumentId(rawDocumentId)
                 .candidateOrder(1)
                 .revisionNumber(1)
                 .status(CandidateStatus.DRAFT)

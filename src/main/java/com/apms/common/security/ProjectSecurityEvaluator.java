@@ -39,7 +39,7 @@ public class ProjectSecurityEvaluator {
         UserDetailsImpl user = currentUser();
         if (user == null) return false;
         if (isOwner(user)) return true;
-        return projectRepository.existsByIdAndMembersUserId(projectId, user.getId());
+        return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
     }
 
     /**
@@ -49,7 +49,7 @@ public class ProjectSecurityEvaluator {
     public boolean isMember(Long projectId) {
         UserDetailsImpl user = currentUser();
         if (user == null) return false;
-        return projectRepository.existsByIdAndMembersUserId(projectId, user.getId());
+        return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
     }
 
     /**
@@ -59,7 +59,7 @@ public class ProjectSecurityEvaluator {
         UserDetailsImpl user = currentUser();
         if (user == null) return false;
         if (isOwner(user)) return true;
-        return projectRepository.existsByIdAndMembersUserId(projectId, user.getId());
+        return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
     }
 
     // ─────────────────────────────────────────────
@@ -81,7 +81,7 @@ public class ProjectSecurityEvaluator {
         Long projectId = resolveProjectId(candidateId);
         if (projectId == null) return false;
 
-        return projectRepository.existsByIdAndMembersUserId(projectId, user.getId());
+        return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
     }
 
     /**
@@ -98,7 +98,7 @@ public class ProjectSecurityEvaluator {
         Long projectId = resolveProjectId(candidateId);
         if (projectId == null) return false;
 
-        return projectRepository.existsByIdAndMembersUserId(projectId, user.getId());
+        return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
     }
 
     // ─────────────────────────────────────────────

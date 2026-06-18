@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 public class ProjectMemberResponse {
 
     private Long id;
-    private Long userId;
+    private Long accountId;
     private MemberRole memberRole;
     private LocalDateTime joinedAt;
 }

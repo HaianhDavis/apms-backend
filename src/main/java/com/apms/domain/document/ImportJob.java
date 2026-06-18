@@ -23,8 +23,15 @@ public class ImportJob {
     /**
      * FK reference to SQL Server projects.id
      */
-    @Column(nullable = false)
-    private Long projectId;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "project_id", nullable = false)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private com.apms.domain.project.Project project;
+
+    public Long getProjectId() {
+        return project != null ? project.getId() : null;
+    }
 
     /**
      * MongoDB ObjectId of the linked RawDocument.
@@ -57,10 +64,17 @@ public class ImportJob {
     private ImportJobStatus status = ImportJobStatus.PENDING;
 
     /**
-     * ID of the User who uploaded/submitted this document.
+     * Account who uploaded/submitted this document.
      */
-    @Column(nullable = false)
-    private Long uploadedBy;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "uploaded_by", nullable = false)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private com.apms.domain.user.Account uploadedByAccount;
+
+    public Long getUploadedById() {
+        return uploadedByAccount != null ? uploadedByAccount.getId() : null;
+    }
 
     private LocalDateTime startedAt;
 

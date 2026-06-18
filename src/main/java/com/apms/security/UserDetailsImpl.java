@@ -1,6 +1,6 @@
 package com.apms.security;
 
-import com.apms.domain.user.User;
+import com.apms.domain.user.Account;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -25,17 +25,17 @@ public class UserDetailsImpl implements UserDetails {
     private Collection<? extends GrantedAuthority> authorities;
     private boolean isActive;
 
-    public static UserDetailsImpl build(User user) {
-        List<GrantedAuthority> authorities = user.getRoles().stream()
+    public static UserDetailsImpl build(Account account) {
+        List<GrantedAuthority> authorities = account.getRoles().stream()
                 .map(role -> new SimpleGrantedAuthority("ROLE_" + role.name()))
                 .collect(Collectors.toList());
 
         return new UserDetailsImpl(
-                user.getId(),
-                user.getEmail(),
-                user.getPasswordHash(),
+                account.getId(),
+                account.getEmail(),
+                account.getPasswordHash(),
                 authorities,
-                user.getIsActive()
+                account.getIsActive()
         );
     }
 
