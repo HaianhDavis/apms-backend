@@ -14,9 +14,12 @@ import org.springframework.stereotype.Component;
 
 import java.util.Set;
 
+import org.springframework.core.annotation.Order;
+
 @Slf4j
 @Component
 @Profile("dev")
+@Order(1)
 @RequiredArgsConstructor
 public class DataSeeder implements CommandLineRunner {
 

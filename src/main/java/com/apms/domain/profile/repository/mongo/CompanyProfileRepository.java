@@ -17,4 +17,7 @@ public interface CompanyProfileRepository extends MongoRepository<CompanyProfile
 
     @Query("{ 'sourceRefs.candidateIds': ?0 }")
     Optional<CompanyProfile> findByCandidateId(String candidateId);
+
+    @Query("{ 'sourceRefs.projectIds': ?0 }")
+    java.util.List<CompanyProfile> findByProjectId(String projectId);
 }

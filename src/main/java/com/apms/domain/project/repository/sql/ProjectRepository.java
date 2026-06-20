@@ -9,6 +9,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Optional;
+
 public interface ProjectRepository extends JpaRepository<Project, Long> {
 
     Page<Project> findByStatus(ProjectStatus status, Pageable pageable);
@@ -22,4 +24,6 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
 
     @Query("SELECT CASE WHEN COUNT(m) > 0 THEN true ELSE false END FROM ProjectMember m WHERE m.project.id = :projectId AND m.account.id = :accountId")
     boolean existsByIdAndMembersAccountId(@Param("projectId") Long projectId, @Param("accountId") Long accountId);
+
+    Optional<Project> findFirstByCreatedByAccountIdOrderByIdAsc(Long accountId);
 }
