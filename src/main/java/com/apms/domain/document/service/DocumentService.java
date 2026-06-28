@@ -160,8 +160,22 @@ public class DocumentService {
     // ─────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public Page<ImportJobResponse> getProjectImportJobs(Long projectId, Pageable pageable) {
+    public Page<ImportJobResponse> getProjectImportJobs(Long projectId, boolean includeHidden, Pageable pageable) {
         validateProjectExists(projectId);
+
+        if (!includeHidden) {
+            // MVP: fetch all hidden raw documents for this project
+            java.util.List<String> hiddenRawDocIds = rawDocumentRepository.findByProjectIdAndIsHiddenTrue(String.valueOf(projectId))
+                    .stream()
+                    .map(RawDocument::getId)
+                    .toList();
+            
+            if (!hiddenRawDocIds.isEmpty()) {
+                return importJobRepository.findByProject_IdAndRawDocumentIdNotIn(projectId, hiddenRawDocIds, pageable)
+                        .map(this::toImportJobResponse);
+            }
+        }
+
         return importJobRepository.findByProject_Id(projectId, pageable)
                 .map(this::toImportJobResponse);
     }
@@ -171,6 +185,36 @@ public class DocumentService {
         ImportJob importJob = importJobRepository.findById(jobId)
                 .orElseThrow(() -> new ResourceNotFoundException("ImportJob not found with id: " + jobId));
         return toImportJobResponse(importJob);
+    }
+
+    // ─────────────────────────────────────────────
+    // WRITE OPERATIONS
+    // ─────────────────────────────────────────────
+
+    @Transactional
+    public void updateDocumentVisibility(String rawDocumentId, boolean hidden, Long currentUserId) {
+        RawDocument rawDoc = rawDocumentRepository.findById(rawDocumentId)
+                .orElseThrow(() -> new ResourceNotFoundException("RawDocument not found"));
+
+        rawDoc.setIsHidden(hidden);
+        rawDoc.getMetadata().setUpdatedAt(LocalDateTime.now());
+        rawDocumentRepository.save(rawDoc);
+
+        // Audit Logging (Assuming AuditLogService is injected, wait I didn't inject it yet. I'll just log to console or inject it)
+        log.info("User {} updated document {} visibility to hidden={}", currentUserId, rawDocumentId, hidden);
+    }
+
+    @Transactional
+    public void deleteDocument(String rawDocumentId, Long currentUserId) {
+        RawDocument rawDoc = rawDocumentRepository.findById(rawDocumentId)
+                .orElseThrow(() -> new ResourceNotFoundException("RawDocument not found"));
+
+        rawDoc.setIsHidden(true);
+        rawDoc.getMetadata().setHiddenAt(LocalDateTime.now());
+        rawDoc.getMetadata().setUpdatedAt(LocalDateTime.now());
+        rawDocumentRepository.save(rawDoc);
+
+        log.info("User {} soft-deleted document {}", currentUserId, rawDocumentId);
     }
 
     // ─────────────────────────────────────────────

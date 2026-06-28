@@ -9,9 +9,26 @@ import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.dto.ProfileResponse;
 import com.apms.domain.profile.dto.ProfileSourcesResponse;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
+import com.apms.domain.profile.dto.UpdateCompanyProfileRequest;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.repository.sql.ProjectRepository;
+import com.apms.common.enums.AuditAction;
+import com.apms.domain.audit.service.AuditLogService;
+import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
+import org.springframework.core.annotation.Order;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.neo4j.core.Neo4jClient;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Service;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
@@ -32,6 +49,9 @@ public class ProfileService {
     private final CompanyProfileRepository profileRepository;
     private final CompanyCandidateRepository candidateRepository;
     private final ProjectRepository projectRepository;
+    private final MongoTemplate mongoTemplate;
+    private final Neo4jClient neo4jClient;
+    private final AuditLogService auditLogService;
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER
@@ -140,18 +160,87 @@ public class ProfileService {
     public ProfileResponse getProfileByCompanyId(String companyId) {
         CompanyProfile profile = profileRepository.findByCompanyId(companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId));
+        
+        if (Boolean.TRUE.equals(profile.getIsDeleted())) {
+            throw new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId);
+        }
+        
         return toResponse(profile);
     }
 
     @Transactional(readOnly = true)
+    public Page<ProfileResponse> searchCompanyProfiles(String keyword, String industry, String market, String reviewStatus, String relationshipType, Pageable pageable) {
+        Criteria criteria = Criteria.where("isDeleted").ne(true);
+
+        if (StringUtils.hasText(keyword)) {
+            criteria.orOperator(
+                    Criteria.where("identity.legalName").regex(keyword, "i"),
+                    Criteria.where("identity.tradeName").regex(keyword, "i")
+            );
+        }
+        if (StringUtils.hasText(industry)) {
+            criteria.and("business.industries").is(industry);
+        }
+        if (StringUtils.hasText(market)) {
+            criteria.and("business.markets").is(market);
+        }
+        if (StringUtils.hasText(reviewStatus)) {
+            criteria.and("reviewStatus").is(reviewStatus);
+        }
+
+        if (StringUtils.hasText(relationshipType)) {
+            // 1. Validate relationshipType
+            java.util.List<String> validTypes = java.util.List.of("PARTNER_WITH", "COMPETITOR_OF", "POTENTIAL_PARTNER_OF", "SUPPLIER_OF", "CUSTOMER_OF");
+            if (!validTypes.contains(relationshipType)) {
+                return Page.empty(pageable);
+            }
+
+            // 2. Query Neo4j
+            String cypher = String.format("MATCH (c:CompanyNode)-[:%s]-(:CompanyNode) RETURN DISTINCT c.companyId AS companyId", relationshipType);
+            java.util.List<String> neo4jCompanyIds = new java.util.ArrayList<>(neo4jClient.query(cypher)
+                    .fetchAs(String.class)
+                    .mappedBy((typeSystem, record) -> record.get("companyId").asString())
+                    .all());
+
+            if (neo4jCompanyIds.isEmpty()) {
+                return Page.empty(pageable);
+            }
+
+            // 3. Add to Mongo criteria
+            criteria.and("companyId").in(neo4jCompanyIds);
+        }
+
+        Query query = new Query(criteria);
+        long total = mongoTemplate.count(query, CompanyProfile.class);
+        query.with(pageable);
+        java.util.List<CompanyProfile> profiles = mongoTemplate.find(query, CompanyProfile.class);
+
+        return new PageImpl<>(profiles, pageable, total).map(this::toResponse);
+    }
+
+    @Transactional(readOnly = true)
     public Page<ProfileResponse> searchProfilesByName(String name, Pageable pageable) {
-        return profileRepository.searchByName(name, pageable).map(this::toResponse);
+        Criteria criteria = Criteria.where("isDeleted").ne(true);
+        if (StringUtils.hasText(name)) {
+            criteria.orOperator(
+                    Criteria.where("identity.legalName").regex(name, "i"),
+                    Criteria.where("identity.tradeName").regex(name, "i")
+            );
+        }
+        Query query = new Query(criteria).with(pageable);
+        java.util.List<CompanyProfile> profiles = mongoTemplate.find(query, CompanyProfile.class);
+        long total = mongoTemplate.count(new Query(criteria), CompanyProfile.class);
+        return new PageImpl<>(profiles, pageable, total).map(this::toResponse);
     }
 
     @Transactional(readOnly = true)
     public ProfileSourcesResponse getProfileSources(String companyId) {
         CompanyProfile profile = profileRepository.findByCompanyId(companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId));
+        
+        if (Boolean.TRUE.equals(profile.getIsDeleted())) {
+            throw new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId);
+        }
         
         return ProfileSourcesResponse.builder()
                 .companyId(profile.getCompanyId())
@@ -160,6 +249,81 @@ public class ProfileService {
                 .rawDocumentIds(profile.getSourceRefs().getRawDocumentIds())
                 .candidateIds(profile.getSourceRefs().getCandidateIds())
                 .build();
+    }
+
+    // ─────────────────────────────────────────────
+    // WRITE OPERATIONS
+    // ─────────────────────────────────────────────
+
+    @Transactional
+    public ProfileResponse updateProfile(String companyId, UpdateCompanyProfileRequest request) {
+        CompanyProfile profile = profileRepository.findByCompanyId(companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found"));
+
+        if (Boolean.TRUE.equals(profile.getIsDeleted())) {
+            throw new ResourceNotFoundException("CompanyProfile not found");
+        }
+
+        if (profile.getIdentity() == null) profile.setIdentity(new CompanyProfile.Identity());
+        if (StringUtils.hasText(request.getLegalName())) profile.getIdentity().setLegalName(request.getLegalName());
+        if (StringUtils.hasText(request.getTradeName())) profile.getIdentity().setTradeName(request.getTradeName());
+
+        if (profile.getBusiness() == null) profile.setBusiness(new CompanyProfile.Business());
+        if (request.getIndustries() != null) profile.getBusiness().setIndustries(request.getIndustries());
+        if (request.getMarkets() != null) profile.getBusiness().setMarkets(request.getMarkets());
+
+        if (profile.getCompanySize() == null) profile.setCompanySize(new CompanyProfile.CompanySize());
+        if (request.getEmployeeTier() != null) profile.getCompanySize().setEmployeeTier(request.getEmployeeTier());
+        if (request.getEmployeeCount() != null) profile.getCompanySize().setEmployeeCount(request.getEmployeeCount());
+        if (request.getRevenueTier() != null) profile.getCompanySize().setRevenueTier(request.getRevenueTier());
+
+        if (profile.getContact() == null) profile.setContact(new CompanyProfile.Contact());
+        if (StringUtils.hasText(request.getWebsite())) profile.getContact().setWebsite(request.getWebsite());
+        if (request.getEmails() != null) profile.getContact().setEmails(request.getEmails());
+        if (request.getPhones() != null) profile.getContact().setPhones(request.getPhones());
+
+        if (request.getTags() != null) profile.setTags(request.getTags());
+
+        profile.setVersion(profile.getVersion() + 1);
+        profile.getMetadata().setUpdatedAt(LocalDateTime.now());
+        
+        Long currentUserId = getCurrentUserId();
+        profile.getMetadata().setLastModifiedBy(currentUserId != null ? String.valueOf(currentUserId) : "SYSTEM");
+
+        profileRepository.save(profile);
+
+        if (currentUserId != null) {
+            auditLogService.log(currentUserId, AuditAction.COMPANY_PROFILE_UPDATED, "CompanyProfile", companyId, "Profile updated manually");
+        }
+
+        return toResponse(profile);
+    }
+
+    @Transactional
+    public void deleteProfile(String companyId) {
+        CompanyProfile profile = profileRepository.findByCompanyId(companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found"));
+
+        if (!Boolean.TRUE.equals(profile.getIsDeleted())) {
+            profile.setIsDeleted(true);
+            profile.getMetadata().setDeletedAt(LocalDateTime.now());
+            profileRepository.save(profile);
+
+            Long currentUserId = getCurrentUserId();
+            if (currentUserId != null) {
+                auditLogService.log(currentUserId, AuditAction.COMPANY_PROFILE_ARCHIVED, "CompanyProfile", companyId, "Profile archived/soft-deleted");
+            }
+        }
+    }
+
+    private Long getCurrentUserId() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getPrincipal() instanceof UserDetailsImpl) {
+                return ((UserDetailsImpl) auth.getPrincipal()).getId();
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 
     // ─────────────────────────────────────────────

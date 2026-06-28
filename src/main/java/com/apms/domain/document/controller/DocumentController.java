@@ -64,12 +64,13 @@ public class DocumentController {
     @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)")
     public ResponseEntity<ApiResponse<PageResponse<ImportJobResponse>>> getProjectDocuments(
             @PathVariable Long projectId,
+            @RequestParam(defaultValue = "false") boolean includeHidden,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         PageResponse<ImportJobResponse> response = PageResponse.of(
-                documentService.getProjectImportJobs(projectId, pageable));
+                documentService.getProjectImportJobs(projectId, includeHidden, pageable));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -83,5 +84,36 @@ public class DocumentController {
             @PathVariable Long importJobId) {
 
         return ResponseEntity.ok(ApiResponse.success(documentService.getImportJob(importJobId)));
+    }
+
+    // ─────────────────────────────────────────────
+    // PATCH /api/v1/projects/{projectId}/documents/{rawDocumentId}/visibility
+    // Role: SYSTEM_ADMIN or (BUSINESS_DEVELOPMENT_MANAGER + isMemberOrOwner)
+    // ─────────────────────────────────────────────
+    @PatchMapping("/projects/{projectId}/documents/{rawDocumentId}/visibility")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId))")
+    public ResponseEntity<ApiResponse<Void>> updateDocumentVisibility(
+            @PathVariable Long projectId,
+            @PathVariable String rawDocumentId,
+            @Valid @RequestBody com.apms.domain.document.dto.DocumentVisibilityRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        documentService.updateDocumentVisibility(rawDocumentId, request.getHidden(), currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(null, "Document visibility updated"));
+    }
+
+    // ─────────────────────────────────────────────
+    // DELETE /api/v1/projects/{projectId}/documents/{rawDocumentId}
+    // Role: SYSTEM_ADMIN or (BUSINESS_DEVELOPMENT_MANAGER + isMemberOrOwner)
+    // ─────────────────────────────────────────────
+    @DeleteMapping("/projects/{projectId}/documents/{rawDocumentId}")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId))")
+    public ResponseEntity<ApiResponse<Void>> deleteDocument(
+            @PathVariable Long projectId,
+            @PathVariable String rawDocumentId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        documentService.deleteDocument(rawDocumentId, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(null, "Document deleted"));
     }
 }

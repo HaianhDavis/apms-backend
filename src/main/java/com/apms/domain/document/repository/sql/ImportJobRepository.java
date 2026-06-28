@@ -7,4 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ImportJobRepository extends JpaRepository<ImportJob, Long> {
     Page<ImportJob> findByProject_Id(Long projectId, Pageable pageable);
+
+    Page<ImportJob> findByProject_IdAndRawDocumentIdNotIn(Long projectId, java.util.Collection<String> rawDocumentIds, Pageable pageable);
 }

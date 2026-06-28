@@ -60,6 +60,9 @@ public class CompanyProfile {
     @Builder.Default
     private List<String> tags = new ArrayList<>();
 
+    @Builder.Default
+    private Boolean isDeleted = false;
+
     private Metadata metadata;
 
     @Builder.Default
@@ -173,5 +176,6 @@ public class CompanyProfile {
         private LocalDateTime createdAt;
         private String lastModifiedBy;
         private LocalDateTime updatedAt;
+        private LocalDateTime deletedAt;
     }
 }

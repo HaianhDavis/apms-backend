@@ -51,6 +51,9 @@ public class RawDocument {
     @Builder.Default
     private Processing processing = new Processing();
 
+    @Builder.Default
+    private Boolean isHidden = false;
+
     /**
      * Audit metadata.
      */
@@ -136,5 +139,6 @@ public class RawDocument {
         private String uploadedBy;
         private LocalDateTime uploadedAt;
         private LocalDateTime updatedAt;
+        private LocalDateTime hiddenAt;
     }
 }
