@@ -64,7 +64,7 @@ public class ProjectController {
     // Role: All authenticated
     // ─────────────────────────────────────────────
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'RESEARCH_STAFF') and @projectSecurity.isProjectReadable(#id)")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isProjectReadable(#id)")
     public ResponseEntity<ApiResponse<ProjectResponse>> getProjectById(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success(projectService.getProjectById(id)));
     }
@@ -85,10 +85,10 @@ public class ProjectController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/projects/{id}/members
-    // Role: BUSINESS_DEVELOPMENT_MANAGER, RESEARCH_STAFF
+    // Role: BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/{id}/members")
-    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'RESEARCH_STAFF') and @projectSecurity.isMember(#id)")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMember(#id)")
     public ResponseEntity<ApiResponse<List<ProjectMemberResponse>>> getProjectMembers(
             @PathVariable Long id) {
 

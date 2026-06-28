@@ -71,7 +71,7 @@ public class ProjectSecurityEvaluator {
      *
      * Rules:
      *   - BUSINESS_OWNER: always allowed
-     *   - BDM / RESEARCH_STAFF: must be a member of the candidate's project
+     *   - BDM / BUSINESS_DEVELOPMENT_STAFF: must be a member of the candidate's project
      */
     public boolean canAccessCandidate(String candidateId) {
         UserDetailsImpl user = currentUser();
@@ -89,7 +89,7 @@ public class ProjectSecurityEvaluator {
      *
      * Rules:
      *   - BUSINESS_OWNER: denied (read-only role for candidates)
-     *   - BDM / RESEARCH_STAFF: must be a member of the candidate's project
+     *   - BDM / BUSINESS_DEVELOPMENT_STAFF: must be a member of the candidate's project
      */
     public boolean canModifyCandidate(String candidateId) {
         UserDetailsImpl user = currentUser();

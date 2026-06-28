@@ -30,7 +30,7 @@ public class CandidateController {
     // ─────────────────────────────────────────────
     @Deprecated
     @PostMapping("/import-jobs/{importJobId}/candidates/from-ai")
-    @PreAuthorize("hasRole('RESEARCH_STAFF')")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<CandidateResponse>> createFromAi(
             @PathVariable Long importJobId,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
@@ -44,7 +44,7 @@ public class CandidateController {
     // POST /api/v1/ai-extractions/{extractionId}/candidate
     // ─────────────────────────────────────────────
     @PostMapping("/ai-extractions/{extractionId}/candidate")
-    @PreAuthorize("hasRole('RESEARCH_STAFF')")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<CandidateResponse>> createFromExtractionId(
             @PathVariable String extractionId,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
@@ -56,10 +56,10 @@ public class CandidateController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/projects/{projectId}/candidates
-    // Role: RESEARCH_STAFF, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
+    // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
     // ─────────────────────────────────────────────
     @GetMapping("/projects/{projectId}/candidates")
-    @PreAuthorize("hasAnyRole('RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.isMemberOrOwner(#projectId == null ? -1 : Long.parseLong(#projectId))")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.isMemberOrOwner(#projectId == null ? -1 : Long.parseLong(#projectId))")
     public ResponseEntity<ApiResponse<PageResponse<CandidateResponse>>> getProjectCandidates(
             @PathVariable String projectId,
             @RequestParam(defaultValue = "0") int page,
@@ -73,10 +73,10 @@ public class CandidateController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/candidates/{candidateId}
-    // Role: RESEARCH_STAFF, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
+    // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
     // ─────────────────────────────────────────────
     @GetMapping("/candidates/{candidateId}")
-    @PreAuthorize("hasAnyRole('RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.canAccessCandidate(#candidateId)")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.canAccessCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> getCandidate(
             @PathVariable String candidateId) {
 
@@ -85,10 +85,10 @@ public class CandidateController {
 
     // ─────────────────────────────────────────────
     // PATCH /api/v1/candidates/{candidateId}
-    // Role: RESEARCH_STAFF
+    // Role: BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @PatchMapping("/candidates/{candidateId}")
-    @PreAuthorize("hasRole('RESEARCH_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> updateCandidate(
             @PathVariable String candidateId,
             @RequestBody UpdateCandidateRequest request,
@@ -100,10 +100,10 @@ public class CandidateController {
 
     // ─────────────────────────────────────────────
     // POST /api/v1/candidates/{candidateId}/submit
-    // Role: RESEARCH_STAFF
+    // Role: BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @PostMapping("/candidates/{candidateId}/submit")
-    @PreAuthorize("hasRole('RESEARCH_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> submitCandidate(
             @PathVariable String candidateId) {
 
@@ -113,10 +113,10 @@ public class CandidateController {
 
     // ─────────────────────────────────────────────
     // POST /api/v1/candidates/{candidateId}/correct
-    // Role: RESEARCH_STAFF
+    // Role: BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @PostMapping("/candidates/{candidateId}/correct")
-    @PreAuthorize("hasRole('RESEARCH_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> correctCandidate(
             @PathVariable String candidateId) {
 

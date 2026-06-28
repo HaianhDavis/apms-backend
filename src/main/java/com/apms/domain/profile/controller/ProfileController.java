@@ -20,10 +20,10 @@ public class ProfileController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/profiles
-    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, RESEARCH_STAFF
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<PageResponse<ProfileResponse>>> getAllProfiles(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
@@ -35,10 +35,10 @@ public class ProfileController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/profiles/{companyId}
-    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, RESEARCH_STAFF
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/{companyId}")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<ProfileResponse>> getProfile(
             @PathVariable String companyId) {
 
@@ -47,10 +47,10 @@ public class ProfileController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/profiles/search?name=
-    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, RESEARCH_STAFF
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/search")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<PageResponse<ProfileResponse>>> searchProfiles(
             @RequestParam String name,
             @RequestParam(defaultValue = "0") int page,
@@ -63,10 +63,10 @@ public class ProfileController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/profiles/{companyId}/sources
-    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, RESEARCH_STAFF
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/{companyId}/sources")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<ProfileSourcesResponse>> getProfileSources(
             @PathVariable String companyId) {
 

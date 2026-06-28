@@ -24,7 +24,7 @@ public class ScoreController {
     // ─────────────────────────────────────────────
 
     @GetMapping("/profiles/{companyId}/scores")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<List<ScoreSnapshotDto>>> getCompanyScores(@PathVariable String companyId) {
         return ResponseEntity.ok(ApiResponse.success(scoreService.getCompanyScores(companyId)));
     }

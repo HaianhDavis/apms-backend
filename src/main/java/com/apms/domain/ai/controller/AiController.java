@@ -24,7 +24,7 @@ public class AiController {
     // POST /api/v1/ai/extract/{importJobId} (Legacy)
     // ─────────────────────────────────────────────
     @PostMapping("/ai/extract/{importJobId}")
-    @PreAuthorize("hasRole('RESEARCH_STAFF')")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<AiExtractionResult>> extractCompanyDataLegacy(
             @PathVariable Long importJobId) {
 
@@ -36,7 +36,7 @@ public class AiController {
     // POST /api/v1/import-jobs/{importJobId}/ai-extractions
     // ─────────────────────────────────────────────
     @PostMapping("/import-jobs/{importJobId}/ai-extractions")
-    @PreAuthorize("hasRole('RESEARCH_STAFF')")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<AiExtractionResult>> extractCompanyData(
             @PathVariable Long importJobId) {
 
@@ -48,7 +48,7 @@ public class AiController {
     // GET /api/v1/import-jobs/{importJobId}/ai-extractions/latest
     // ─────────────────────────────────────────────
     @GetMapping("/import-jobs/{importJobId}/ai-extractions/latest")
-    @PreAuthorize("hasAnyRole('RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER')")
     public ResponseEntity<ApiResponse<com.apms.domain.ai.AiExtractionCache>> getLatestExtraction(
             @PathVariable Long importJobId) {
 
@@ -60,7 +60,7 @@ public class AiController {
     // PATCH /api/v1/ai-extractions/{extractionId}
     // ─────────────────────────────────────────────
     @PatchMapping("/ai-extractions/{extractionId}")
-    @PreAuthorize("hasRole('RESEARCH_STAFF')")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<com.apms.domain.ai.AiExtractionCache>> updateExtraction(
             @PathVariable String extractionId,
             @org.springframework.web.bind.annotation.RequestBody com.apms.domain.ai.dto.ExtractedCompanyData request,

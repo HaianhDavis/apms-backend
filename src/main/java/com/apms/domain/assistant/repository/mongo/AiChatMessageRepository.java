@@ -12,4 +12,8 @@ public interface AiChatMessageRepository extends MongoRepository<AiChatMessage, 
     List<AiChatMessage> findBySessionIdOrderByCreatedAtAsc(String sessionId);
 
     Page<AiChatMessage> findByUserIdAndProjectId(Long userId, Long projectId, Pageable pageable);
+
+    List<AiChatMessage> findByUserIdOrderByCreatedAtAsc(Long userId);
+
+    List<AiChatMessage> findByUserIdAndSessionIdOrderByCreatedAtAsc(Long userId, String sessionId);
 }

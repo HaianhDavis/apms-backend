@@ -26,10 +26,10 @@ public class DocumentController {
 
     // ─────────────────────────────────────────────
     // POST /api/v1/projects/{projectId}/documents/upload
-    // Role: RESEARCH_STAFF, BUSINESS_DEVELOPMENT_MANAGER
+    // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @PostMapping("/projects/{projectId}/documents/upload")
-    @PreAuthorize("hasAnyRole('RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#projectId)")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#projectId)")
     public ResponseEntity<ApiResponse<ImportJobResponse>> uploadDocument(
             @PathVariable Long projectId,
             @RequestParam("file") MultipartFile file,
@@ -42,10 +42,10 @@ public class DocumentController {
 
     // ─────────────────────────────────────────────
     // POST /api/v1/projects/{projectId}/documents/manual
-    // Role: RESEARCH_STAFF, BUSINESS_DEVELOPMENT_MANAGER
+    // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @PostMapping("/projects/{projectId}/documents/manual")
-    @PreAuthorize("hasAnyRole('RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#projectId)")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#projectId)")
     public ResponseEntity<ApiResponse<ImportJobResponse>> manualInput(
             @PathVariable Long projectId,
             @Valid @RequestBody ManualInputRequest request,
@@ -58,10 +58,10 @@ public class DocumentController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/projects/{projectId}/documents
-    // Role: RESEARCH_STAFF, BUSINESS_DEVELOPMENT_MANAGER
+    // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @GetMapping("/projects/{projectId}/documents")
-    @PreAuthorize("hasAnyRole('RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)")
     public ResponseEntity<ApiResponse<PageResponse<ImportJobResponse>>> getProjectDocuments(
             @PathVariable Long projectId,
             @RequestParam(defaultValue = "0") int page,
@@ -75,10 +75,10 @@ public class DocumentController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/import-jobs/{importJobId}
-    // Role: RESEARCH_STAFF, BUSINESS_DEVELOPMENT_MANAGER
+    // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @GetMapping("/import-jobs/{importJobId}")
-    @PreAuthorize("hasAnyRole('RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<ImportJobResponse>> getImportJob(
             @PathVariable Long importJobId) {
 
