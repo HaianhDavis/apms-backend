@@ -1,0 +1,48 @@
+package com.apms.domain.profile;
+
+import com.apms.common.enums.SubmissionStatus;
+import lombok.Builder;
+import lombok.Data;
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.mongodb.core.mapping.Document;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+
+@Data
+@Builder
+@Document(collection = "company_profile_update_proposals")
+public class CompanyProfileUpdateProposal {
+
+    @Id
+    private String id;
+    
+    private Long projectId;
+    private Long taskId;
+    
+    private String companyProfileId;
+    
+    private Map<String, Object> proposedIdentity;
+    private Map<String, Object> proposedBusiness;
+    private Map<String, Object> proposedContact;
+    private Map<String, Object> proposedInsights;
+    
+    private List<String> sourceDocumentIds;
+    private String extractionId;
+    
+    private SubmissionStatus status;
+    
+    private Long submittedBy;
+    private Long reviewedBy;
+    private String reviewComment;
+    private String changeSummary;
+
+    @CreatedDate
+    private LocalDateTime createdAt;
+
+    @LastModifiedDate
+    private LocalDateTime updatedAt;
+}
