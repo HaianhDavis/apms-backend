@@ -1,6 +1,7 @@
 package com.apms.domain.profile;
 
 import com.apms.common.enums.SubmissionStatus;
+import com.apms.domain.ai.dto.FieldEvidence;
 import lombok.Builder;
 import lombok.Data;
 import org.springframework.data.annotation.CreatedDate;
@@ -31,8 +32,11 @@ public class CompanyProfileUpdateProposal {
     private Map<String, Object> proposedInsights;
     
     private List<String> sourceDocumentIds;
-    private String extractionId;
-    
+    private String extractionId;        // Legacy: single extraction ID
+    private List<String> extractionIds; // Multi-extraction merge IDs
+    private List<FieldEvidence> fieldEvidence;
+    private Boolean hasConflicts;
+    private Integer conflictCount;
     private SubmissionStatus status;
     
     private Long submittedBy;
