@@ -2,6 +2,8 @@ package com.apms.domain.project.dto;
 
 import com.apms.common.enums.TaskPriority;
 import com.apms.common.enums.TaskStatus;
+import com.apms.common.enums.TaskType;
+import com.apms.common.enums.TaskAction;
 import lombok.Builder;
 import lombok.Data;
 
@@ -23,4 +25,6 @@ public class ProjectTaskResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime completedAt;
+    private TaskType taskType;
+    private java.util.List<TaskAction> availableActions;
 }

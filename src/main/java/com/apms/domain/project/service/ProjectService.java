@@ -15,11 +15,18 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import com.apms.domain.project.repository.sql.ProjectTaskRepository;
+import com.apms.domain.audit.service.AuditLogService;
+import com.apms.common.enums.AuditAction;
+import com.apms.common.enums.TaskStatus;
+import com.apms.domain.project.dto.UpdateProjectStatusRequest;
 import java.util.List;
+import java.util.Arrays;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -30,6 +37,11 @@ public class ProjectService {
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
     private final AccountRepository accountRepository;
+    private final Neo4jClient neo4jClient;
+    private final ProjectTaskRepository projectTaskRepository;
+    private final AuditLogService auditLogService;
+
+    private static final String OWNER_ORG_COMPANY_ID = "6a31a0000000000000000000";
 
     // ─────────────────────────────────────────────
     // CREATE
@@ -37,15 +49,48 @@ public class ProjectService {
 
     @Transactional
     public ProjectResponse createProject(CreateProjectRequest request, Long creatorAccountId) {
+        com.apms.common.enums.RelationshipType resolvedRelationshipType = request.getTargetRelationshipType();
+
+        if (request.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY && resolvedRelationshipType == null) {
+            String cypher = """
+                MATCH (c1:Company {companyId: $ownerId})-[r]->(c2:Company {companyId: $targetId})
+                RETURN type(r) AS relType
+                LIMIT 1
+                """;
+            java.util.Collection<String> relTypes = neo4jClient.query(cypher)
+                    .bindAll(java.util.Map.of(
+                            "ownerId", OWNER_ORG_COMPANY_ID,
+                            "targetId", request.getTargetCompanyProfileId()
+                    ))
+                    .fetchAs(String.class)
+                    .mappedBy((ts, record) -> record.get("relType").asString())
+                    .all();
+
+            if (relTypes != null && !relTypes.isEmpty()) {
+                String relString = relTypes.iterator().next();
+                try {
+                    resolvedRelationshipType = com.apms.common.enums.RelationshipType.valueOf(relString);
+                } catch (IllegalArgumentException e) {
+                    log.warn("Unknown relationship type in Neo4j: {}", relString);
+                }
+            }
+            
+            if (resolvedRelationshipType == null) {
+                throw new BusinessValidationException("No existing relationship found for this company. Please provide targetRelationshipType.");
+            }
+        }
+
         validateProjectTypeInvariants(request.getProjectType(),
                 request.getTargetCompanyProfileId(),
-                request.getTargetCompanyName());
+                request.getTargetCompanyName(),
+                resolvedRelationshipType);
 
         Project project = Project.builder()
                 .projectName(request.getProjectName())
                 .projectType(request.getProjectType())
                 .targetCompanyProfileId(request.getTargetCompanyProfileId())
                 .targetCompanyName(request.getTargetCompanyName())
+                .targetRelationshipType(resolvedRelationshipType)
                 .description(request.getDescription())
                 .status(ProjectStatus.DRAFT)
                 .createdByAccount(accountRepository.getReferenceById(creatorAccountId))
@@ -119,13 +164,68 @@ public class ProjectService {
         if (request.getDescription() != null) {
             project.setDescription(request.getDescription());
         }
-        if (request.getStatus() != null) {
-            project.setStatus(request.getStatus());
+        if (request.getTargetRelationshipType() != null) {
+            project.setTargetRelationshipType(request.getTargetRelationshipType());
         }
-
         project = projectRepository.save(project);
         List<ProjectMember> members = projectMemberRepository.findByProject_Id(id);
         return toResponse(project, members);
+    }
+
+    @Transactional
+    public ProjectResponse updateProjectStatus(Long id, UpdateProjectStatusRequest request, Long actorId) {
+        Project project = findProjectOrThrow(id);
+        ProjectStatus oldStatus = project.getStatus();
+        ProjectStatus newStatus = request.getStatus();
+
+        if (oldStatus == newStatus) {
+            return toResponse(project, projectMemberRepository.findByProject_Id(id));
+        }
+
+        validateStatusTransition(oldStatus, newStatus, request.getForce());
+
+        if (newStatus == ProjectStatus.COMPLETED && !Boolean.TRUE.equals(request.getForce())) {
+            int unfinishedCount = projectTaskRepository.countByProjectIdAndStatusIn(
+                    id, Arrays.asList(TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.BLOCKED));
+            if (unfinishedCount > 0) {
+                throw new BusinessValidationException("Project cannot be completed while there are unfinished tasks (" + unfinishedCount + ").");
+            }
+        }
+
+        project.setStatus(newStatus);
+        project = projectRepository.save(project);
+
+        AuditAction action = AuditAction.PROJECT_STATUS_CHANGED;
+        if (newStatus == ProjectStatus.COMPLETED) action = AuditAction.PROJECT_COMPLETED;
+        else if (newStatus == ProjectStatus.CANCELLED) action = AuditAction.PROJECT_CANCELLED;
+        else if (newStatus == ProjectStatus.ARCHIVED) action = AuditAction.PROJECT_ARCHIVED;
+
+        String detail = String.format("Status changed from %s to %s. Note: %s", oldStatus, newStatus, request.getNote() != null ? request.getNote() : "");
+        auditLogService.log(actorId, action, "Project", String.valueOf(project.getId()), detail);
+
+        List<ProjectMember> members = projectMemberRepository.findByProject_Id(id);
+        return toResponse(project, members);
+    }
+
+    private void validateStatusTransition(ProjectStatus oldStatus, ProjectStatus newStatus, Boolean force) {
+        boolean valid = false;
+        switch (oldStatus) {
+            case DRAFT -> {
+                if (newStatus == ProjectStatus.ACTIVE || newStatus == ProjectStatus.CANCELLED) valid = true;
+                if (newStatus == ProjectStatus.COMPLETED && Boolean.TRUE.equals(force)) valid = true;
+            }
+            case ACTIVE -> {
+                if (newStatus == ProjectStatus.COMPLETED || newStatus == ProjectStatus.CANCELLED) valid = true;
+            }
+            case COMPLETED, CANCELLED -> {
+                if (newStatus == ProjectStatus.ARCHIVED) valid = true;
+            }
+            case ARCHIVED -> valid = false;
+        }
+
+        if (!valid) {
+            throw new BusinessValidationException("Invalid project status transition: " + oldStatus + " -> " + newStatus + ". Complete or cancel the project before archiving.");
+        }
     }
 
     // ─────────────────────────────────────────────
@@ -199,9 +299,13 @@ public class ProjectService {
      */
     private void validateProjectTypeInvariants(ProjectType type,
                                                String targetCompanyProfileId,
-                                               String targetCompanyName) {
+                                               String targetCompanyName,
+                                               com.apms.common.enums.RelationshipType targetRelationshipType) {
         if (!StringUtils.hasText(targetCompanyName)) {
             throw new BusinessValidationException("targetCompanyName is required for all project types.");
+        }
+        if (type == ProjectType.RESEARCH_NEW_COMPANY && targetRelationshipType == null) {
+            throw new BusinessValidationException("targetRelationshipType is required for RESEARCH_NEW_COMPANY projects.");
         }
 
         switch (type) {
@@ -211,7 +315,7 @@ public class ProjectService {
                             "targetCompanyProfileId is required when projectType is UPDATE_EXISTING_COMPANY.");
                 }
             }
-            case RESEARCH_NEW_COMPANY, RESEARCH_MULTIPLE_COMPANIES -> {
+            case RESEARCH_NEW_COMPANY -> {
                 if (StringUtils.hasText(targetCompanyProfileId)) {
                     throw new BusinessValidationException(
                             "targetCompanyProfileId must be null for projectType " + type + ".");
@@ -236,6 +340,7 @@ public class ProjectService {
                 .projectType(project.getProjectType())
                 .targetCompanyProfileId(project.getTargetCompanyProfileId())
                 .targetCompanyName(project.getTargetCompanyName())
+                .targetRelationshipType(project.getTargetRelationshipType())
                 .description(project.getDescription())
                 .status(project.getStatus())
                 .createdBy(project.getCreatedById())

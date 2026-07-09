@@ -1,5 +1,6 @@
 package com.apms.domain.project.dto;
 
+import com.apms.common.enums.RelationshipType;
 import com.apms.common.enums.ProjectStatus;
 import lombok.Data;
 
@@ -10,5 +11,5 @@ public class UpdateProjectRequest {
 
     private String description;
 
-    private ProjectStatus status;
+    private RelationshipType targetRelationshipType;
 }

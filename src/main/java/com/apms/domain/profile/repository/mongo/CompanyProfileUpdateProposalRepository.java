@@ -4,4 +4,5 @@ import com.apms.domain.profile.CompanyProfileUpdateProposal;
 import org.springframework.data.mongodb.repository.MongoRepository;
 
 public interface CompanyProfileUpdateProposalRepository extends MongoRepository<CompanyProfileUpdateProposal, String> {
+    java.util.List<CompanyProfileUpdateProposal> findByTaskId(Long taskId);
 }

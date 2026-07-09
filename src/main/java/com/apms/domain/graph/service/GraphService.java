@@ -25,10 +25,20 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class GraphService {
+
+    private static final String OWNER_ORG_COMPANY_ID = "6a31a0000000000000000000";
 
     private final CompanyNodeRepository companyNodeRepository;
     private final Neo4jClient neo4jClient;
@@ -69,34 +79,20 @@ public class GraphService {
         // 1. Create or merge CompanyNode for the approved CompanyProfile
         mergeCompanyNode(profile);
 
-        // 2. Determine target company node (from project targetCompanyProfileId)
-        String targetCompanyProfileId = project.getTargetCompanyProfileId();
-        
-        if (StringUtils.hasText(targetCompanyProfileId) && finalRelType != null) {
-            CompanyProfile targetProfile = profileRepository.findById(targetCompanyProfileId)
-                    .orElse(null);
-            
-            if (targetProfile != null) {
-                // Ensure target node exists
-                mergeCompanyNode(targetProfile);
-                
-                // Create relationship: Target --[rel]-> Candidate
-                // Wait, if project is UPDATE_EXISTING_COMPANY, the target is the source or the target?
-                // The relationship semantics: e.g. "Candidate is PARTNER_WITH Target" -> (Candidate)-[:PARTNER_WITH]->(Target)
-                createRelationship(
-                        profile.getCompanyId(),
-                        targetProfile.getCompanyId(),
-                        finalRelType.name(),
-                        candidate.getReview() != null ? candidate.getReview().getReviewedBy() : "SYSTEM",
-                        String.valueOf(project.getId()),
-                        candidate.getId(),
-                        event.getConfidenceScore() != null ? event.getConfidenceScore() : 1.0
-                );
-            } else {
-                log.warn("Target CompanyProfile not found for ID: {}. Relationship not created.", targetCompanyProfileId);
-            }
+        // 2. The relationship is from OwnerCompany to the target company (which is `profile`)
+        if (finalRelType != null) {
+            // Create relationship: OwnerCompany --[rel]-> TargetCompany (which is `profile.getCompanyId()`)
+            createRelationship(
+                    OWNER_ORG_COMPANY_ID,
+                    profile.getCompanyId(),
+                    finalRelType.name(),
+                    candidate.getReview() != null ? candidate.getReview().getReviewedBy() : "SYSTEM",
+                    String.valueOf(project.getId()),
+                    candidate.getId(),
+                    event.getConfidenceScore() != null ? event.getConfidenceScore() : 1.0
+            );
         } else {
-            log.info("No target relationship data or project does not have a target company. Merged node only.");
+            log.warn("No finalRelType provided for candidate approval, cannot create relationship.");
         }
     }
 

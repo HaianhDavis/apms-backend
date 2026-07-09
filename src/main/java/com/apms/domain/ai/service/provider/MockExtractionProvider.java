@@ -1,23 +1,20 @@
 package com.apms.domain.ai.service.provider;
 
-import com.apms.common.enums.RelationshipType;
 import com.apms.domain.ai.dto.ExtractedCompanyData;
+import com.apms.domain.ai.dto.ExtractionFieldResult;
+import com.apms.domain.ai.dto.RawExtractionOutput;
 import org.springframework.stereotype.Component;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Component
 public class MockExtractionProvider implements ExtractionProvider {
 
     @Override
-    public ExtractedCompanyData extract(String sourceText) {
-        ExtractedCompanyData.RelationshipSuggestion suggestion = ExtractedCompanyData.RelationshipSuggestion.builder()
-                .suggestedType(RelationshipType.POTENTIAL_PARTNER_OF)
-                .confidence(0.87)
-                .reasoning(List.of("Strong synergy in cloud services", "Complementary target markets"))
-                .build();
-
-        return ExtractedCompanyData.builder()
+    public RawExtractionOutput extract(String sourceText) {
+        ExtractedCompanyData data = ExtractedCompanyData.builder()
                 .legalName("CMC Corporation")
                 .tradeName("CMC")
                 .taxCode(null)
@@ -36,7 +33,17 @@ public class MockExtractionProvider implements ExtractionProvider {
                 .weaknesses(List.of("High competition in cloud space"))
                 .opportunities(List.of("Growing demand for digital transformation"))
                 .threats(List.of("Global tech giants entering local market"))
-                .relationshipSuggestion(suggestion)
+                .build();
+                
+        Map<String, ExtractionFieldResult> fieldResults = new HashMap<>();
+        fieldResults.put("legalName", ExtractionFieldResult.builder().fieldName("legalName").value("CMC Corporation").evidenceText("Document states CMC Corporation").build());
+        fieldResults.put("tradeName", ExtractionFieldResult.builder().fieldName("tradeName").value("CMC").build());
+        fieldResults.put("website", ExtractionFieldResult.builder().fieldName("website").value("https://www.cmc.com.vn").build());
+
+        return RawExtractionOutput.builder()
+                .extractedData(data)
+                .fieldResults(fieldResults)
+                .rawAiOutputString("{}")
                 .build();
     }
 }

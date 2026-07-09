@@ -1,6 +1,5 @@
 package com.apms.domain.ai.dto;
 
-import com.apms.common.enums.RelationshipType;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -26,12 +25,18 @@ public class ExtractedCompanyData {
     private List<String> targetCustomers;
     private String employeeTier;
     private String website;
+    private List<String> email; // Adding missing fields based on prompt
+    private List<String> phone;
+    private String address;
+    private String headquarters;
+    private String description;
+    private String companySize;
+    private List<String> keyPeople;
+    private String notes;
     private List<String> strengths;
     private List<String> weaknesses;
     private List<String> opportunities;
     private List<String> threats;
-
-    private RelationshipSuggestion relationshipSuggestion;
 
     @Data
     @Builder
@@ -42,27 +47,5 @@ public class ExtractedCompanyData {
         private String name;
         private String category;
         private String description;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class RelationshipSuggestion {
-        private RelationshipType suggestedType;
-        private Double confidence;
-        private List<AlternativeRelationship> alternatives;
-        private List<String> reasoning;
-    }
-
-    @Data
-    @Builder
-    @NoArgsConstructor
-    @AllArgsConstructor
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class AlternativeRelationship {
-        private RelationshipType type;
-        private Double confidence;
     }
 }

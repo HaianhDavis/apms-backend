@@ -84,6 +84,21 @@ public class ProjectController {
     }
 
     // ─────────────────────────────────────────────
+    // PATCH /api/v1/projects/{id}/status
+    // Role: SYSTEM_ADMIN, BUSINESS_DEVELOPMENT_MANAGER
+    // ─────────────────────────────────────────────
+    @PatchMapping("/{id}/status")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#id))")
+    public ResponseEntity<ApiResponse<ProjectResponse>> updateProjectStatus(
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateProjectStatusRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        return ResponseEntity.ok(ApiResponse.success(
+                projectService.updateProjectStatus(id, request, currentUser.getId()), "Project status updated successfully"));
+    }
+
+    // ─────────────────────────────────────────────
     // GET /api/v1/projects/{id}/members
     // Role: BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────

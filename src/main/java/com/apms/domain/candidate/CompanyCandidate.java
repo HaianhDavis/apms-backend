@@ -36,6 +36,13 @@ public class CompanyCandidate {
 
     private String rawDocumentId; // References Mongo raw_documents.id
 
+    @Indexed
+    private Long taskId; // References SQL project_tasks.id
+
+    private java.util.List<String> extractionIds; // References Mongo ai_extraction_caches.id
+
+    private java.util.List<String> sourceDocumentIds; // Source raw doc IDs across all extractions
+
     /**
      * For projects extracting multiple companies, this keeps the ordering.
      */

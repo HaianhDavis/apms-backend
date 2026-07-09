@@ -2,6 +2,7 @@ package com.apms.domain.project;
 
 import com.apms.common.enums.TaskPriority;
 import com.apms.common.enums.TaskStatus;
+import com.apms.common.enums.TaskType;
 import com.apms.domain.user.Account;
 import jakarta.persistence.*;
 import lombok.*;
@@ -44,6 +45,10 @@ public class ProjectTask {
     @Column(nullable = false)
     @Builder.Default
     private TaskStatus status = TaskStatus.TODO;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "task_type", length = 50)
+    private TaskType taskType;
 
     @Enumerated(EnumType.STRING)
     private TaskPriority priority;

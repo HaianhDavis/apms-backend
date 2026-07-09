@@ -14,6 +14,8 @@ import com.apms.domain.candidate.dto.CandidateResponse;
 import com.apms.domain.candidate.dto.RejectCandidateRequest;
 import com.apms.domain.candidate.dto.UpdateCandidateRequest;
 import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
+import com.apms.domain.project.Project;
+import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.document.ImportJob;
 import com.apms.domain.document.repository.sql.ImportJobRepository;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +36,7 @@ public class CandidateService {
 
     private final CompanyCandidateRepository candidateRepository;
     private final ImportJobRepository importJobRepository;
+    private final ProjectRepository projectRepository;
     private final AiExtractionService aiExtractionService;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -102,18 +105,6 @@ public class CandidateService {
         CompanyCandidate.RelationshipSuggestion suggestion = null;
         RelationshipType suggestedRel = null;
         Double confidence = null;
-        
-        if (extractedData.getRelationshipSuggestion() != null) {
-            ExtractedCompanyData.RelationshipSuggestion extSug = extractedData.getRelationshipSuggestion();
-            suggestion = CompanyCandidate.RelationshipSuggestion.builder()
-                    .suggestedType(extSug.getSuggestedType())
-                    .confidence(extSug.getConfidence())
-                    .reasoning(extSug.getReasoning())
-                    .build();
-            suggestedRel = extSug.getSuggestedType();
-            confidence = extSug.getConfidence();
-        }
-
         CompanyCandidate.Metadata metadata = CompanyCandidate.Metadata.builder()
                 .createdBy(String.valueOf(creatorId))
                 .createdAt(LocalDateTime.now())
@@ -286,9 +277,22 @@ public class CandidateService {
         candidate = candidateRepository.save(candidate);
 
         // Determine final relationship type
-        RelationshipType finalType = candidate.getRelationshipTypeOverride() != null
-                ? candidate.getRelationshipTypeOverride()
-                : candidate.getSuggestedRelationshipType();
+        final String projectId = candidate.getProjectId();
+        Project project = projectRepository.findById(Long.valueOf(projectId))
+                .orElseThrow(() -> new BusinessValidationException("Project not found: " + projectId));
+
+        RelationshipType finalType = null;
+        if (request.getRelationshipTypeOverride() != null) {
+            finalType = request.getRelationshipTypeOverride();
+        } else if (candidate.getRelationshipTypeOverride() != null) {
+            finalType = candidate.getRelationshipTypeOverride();
+        } else {
+            finalType = project.getTargetRelationshipType();
+        }
+
+        if (finalType == null) {
+            throw new BusinessValidationException("targetRelationshipType is required. Project must define relationship type before approving candidate.");
+        }
 
         Double confidence = candidate.getRelationshipConfidenceScore() != null 
                 ? candidate.getRelationshipConfidenceScore() 

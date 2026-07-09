@@ -31,6 +31,12 @@ public class AiExtractionCache {
     private ExtractedCompanyData extractedData;
     private String rawAiOutput;
 
+    private java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> fieldResults;
+    private com.apms.domain.ai.dto.ExtractionQualityStatus qualityStatus;
+    private com.apms.domain.ai.dto.ExtractionQualityMetrics qualityMetrics;
+    private Long reviewedByUserId;
+    private LocalDateTime reviewedAt;
+
     private LocalDateTime createdAt;
     
     private String lastModifiedBy;

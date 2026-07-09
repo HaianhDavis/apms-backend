@@ -21,8 +21,11 @@ public class CandidateMergeController {
     /**
      * POST /api/v1/projects/{projectId}/tasks/{taskId}/candidates/from-extractions
      *
-     * Merges multiple AI extraction results into a single DRAFT CompanyCandidate.
-     * DOES NOT submit the task — Staff must separately submit via the task submission endpoint.
+     * Generates a DRAFT CompanyCandidate from the selected extraction results.
+     * Staff may call this multiple times with different extraction subsets
+     * to create multiple independent drafts as reviewable alternatives.
+     * The generated draft is NOT submitted — Staff must separately choose
+     * one draft and submit it via the task submission endpoint.
      */
     @PostMapping("/from-extractions")
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")

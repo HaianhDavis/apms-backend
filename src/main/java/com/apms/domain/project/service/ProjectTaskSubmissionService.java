@@ -66,6 +66,18 @@ public class ProjectTaskSubmissionService {
             throw new IllegalStateException("Cannot submit work for a task that is DONE or CANCELLED");
         }
 
+        List<ProjectTaskSubmission> existingSubmissions = submissionRepository.findByProjectTask_Id(taskId);
+        boolean hasInReviewOrSubmitted = existingSubmissions.stream()
+                .anyMatch(s -> s.getStatus() == SubmissionStatus.IN_REVIEW);
+        if (hasInReviewOrSubmitted) {
+            throw new com.apms.common.exception.BusinessValidationException("This task already has a draft under review.");
+        }
+        boolean hasApproved = existingSubmissions.stream()
+                .anyMatch(s -> s.getStatus() == SubmissionStatus.APPROVED);
+        if (hasApproved || task.getStatus() == TaskStatus.DONE) {
+            throw new com.apms.common.exception.BusinessValidationException("This task already has an approved output.");
+        }
+
         UserDetailsImpl currentUser = getCurrentUser();
         if (currentUser == null) throw new AccessDeniedException("Unauthorized");
 
@@ -252,21 +264,6 @@ public class ProjectTaskSubmissionService {
                 if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
                     proposalRepository.findById(submission.getTargetEntityId()).ifPresent(proposal -> {
                         proposal.setStatus(SubmissionStatus.REJECTED);
-                        proposal.setReviewedBy(reviewer.getId());
-                        proposal.setReviewComment(request.getComment());
-                        proposalRepository.save(proposal);
-                    });
-                }
-                break;
-
-            case REQUEST_REVISION:
-                submission.setStatus(SubmissionStatus.REVISION_REQUESTED);
-                task.setStatus(TaskStatus.IN_PROGRESS);
-                task.setCompletedAt(null);
-                auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_REVISION_REQUESTED, "ProjectTaskSubmission", String.valueOf(submissionId), "Revision requested");
-                if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
-                    proposalRepository.findById(submission.getTargetEntityId()).ifPresent(proposal -> {
-                        proposal.setStatus(SubmissionStatus.REVISION_REQUESTED);
                         proposal.setReviewedBy(reviewer.getId());
                         proposal.setReviewComment(request.getComment());
                         proposalRepository.save(proposal);

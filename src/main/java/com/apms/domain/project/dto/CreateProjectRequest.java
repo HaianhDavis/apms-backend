@@ -1,6 +1,8 @@
 package com.apms.domain.project.dto;
 
+import com.apms.common.enums.RelationshipType;
 import com.apms.common.enums.ProjectType;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -28,6 +30,9 @@ public class CreateProjectRequest {
      */
     @NotBlank(message = "targetCompanyName is required")
     private String targetCompanyName;
+
+    @Schema(description = "Optional for UPDATE_EXISTING_COMPANY. Required for RESEARCH_NEW_COMPANY.")
+    private RelationshipType targetRelationshipType;
 
     private String description;
 }

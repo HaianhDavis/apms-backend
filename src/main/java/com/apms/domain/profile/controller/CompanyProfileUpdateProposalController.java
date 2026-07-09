@@ -34,8 +34,9 @@ public class CompanyProfileUpdateProposalController {
     /**
      * POST /api/v1/projects/{projectId}/tasks/{taskId}/profile-update-proposals/from-extractions
      *
-     * Merges selected AI extraction results against the current approved CompanyProfile
-     * and creates a DRAFT CompanyProfileUpdateProposal with field evidence.
+     * Generates a DRAFT CompanyProfileUpdateProposal from the selected extraction results.
+     * Staff may call this multiple times with different extraction subsets
+     * to create multiple independent drafts as reviewable alternatives.
      * Does NOT update the CompanyProfile — Manager approval via the review endpoint is still required.
      */
     @PostMapping("/projects/{projectId}/tasks/{taskId}/profile-update-proposals/from-extractions")

@@ -27,6 +27,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Optional;
 
 @Slf4j
@@ -39,6 +40,7 @@ public class AiExtractionService {
     private final MockExtractionProvider mockProvider;
     private final GeminiExtractionProvider geminiProvider;
     private final OpenAiExtractionProvider openAiProvider;
+    private final AiExtractionQualityService qualityService;
     private final ObjectMapper objectMapper;
 
     @Value("${app.ai.provider:gemini}")
@@ -62,6 +64,7 @@ public class AiExtractionService {
                                MockExtractionProvider mockProvider,
                                GeminiExtractionProvider geminiProvider,
                                OpenAiExtractionProvider openAiProvider,
+                               AiExtractionQualityService qualityService,
                                ObjectMapper objectMapper) {
         this.importJobRepository = importJobRepository;
         this.rawDocumentRepository = rawDocumentRepository;
@@ -69,6 +72,7 @@ public class AiExtractionService {
         this.mockProvider = mockProvider;
         this.geminiProvider = geminiProvider;
         this.openAiProvider = openAiProvider;
+        this.qualityService = qualityService;
         this.objectMapper = objectMapper;
     }
 
@@ -92,13 +96,13 @@ public class AiExtractionService {
         // Determine if mock or real
         boolean useMock = isMockMode();
 
-        ExtractedCompanyData extractedData;
+        com.apms.domain.ai.dto.RawExtractionOutput rawOutputObj;
         String usedProvider;
         String usedModel;
 
         if (useMock) {
             log.info("Mocking AI extraction (provider='{}', mock-detected) for ImportJob {}", aiProvider, importJobId);
-            extractedData = mockProvider.extract("");
+            rawOutputObj = mockProvider.extract("");
             usedProvider = "mock";
             usedModel = "mock";
         } else {
@@ -106,27 +110,29 @@ public class AiExtractionService {
             log.info("Calling AI provider '{}' for ImportJob {}, text length: {}", aiProvider, importJobId, sourceText.length());
 
             if ("openai".equalsIgnoreCase(aiProvider)) {
-                extractedData = openAiProvider.extract(sourceText);
+                rawOutputObj = openAiProvider.extract(sourceText);
                 usedProvider = "openai";
                 usedModel = "gpt-4";
             } else {
-                extractedData = geminiProvider.extract(sourceText);
+                rawOutputObj = geminiProvider.extract(sourceText);
                 usedProvider = "gemini";
                 usedModel = geminiModel;
             }
         }
 
-        // Serialize for raw output field
-        String rawOutput = serializeToJson(extractedData);
+        // Apply Quality Validation
+        qualityService.validateExtraction(rawOutputObj.getFieldResults());
+        com.apms.domain.ai.dto.ExtractionQualityMetrics metrics = qualityService.computeMetrics(rawOutputObj.getFieldResults());
+        com.apms.domain.ai.dto.ExtractionQualityStatus status = qualityService.determineOverallStatus(metrics);
 
         // Persist to cache (overwrite any prior entry for this importJobId)
-        saveToCache(importJobId, rawDocumentId, usedProvider, usedModel, extractedData, rawOutput);
+        saveToCache(importJobId, rawDocumentId, usedProvider, usedModel, rawOutputObj.getExtractedData(), rawOutputObj.getRawAiOutputString(), rawOutputObj.getFieldResults(), metrics, status);
 
         return AiExtractionResult.builder()
                 .importJobId(importJobId)
                 .rawDocumentId(rawDocumentId)
-                .extractedData(extractedData)
-                .rawAiOutput(rawOutput)
+                .extractedData(rawOutputObj.getExtractedData())
+                .rawAiOutput(rawOutputObj.getRawAiOutputString())
                 .build();
     }
 
@@ -186,6 +192,68 @@ public class AiExtractionService {
         return saved;
     }
 
+    @Transactional
+    public AiExtractionCache reviewField(String extractionId, String fieldName, com.apms.domain.ai.dto.ExtractionReviewRequest request, Long userId) {
+        AiExtractionCache cache = getExtractionById(extractionId);
+
+        if (cache.getFieldResults() == null) {
+            cache.setFieldResults(new java.util.HashMap<>());
+        }
+
+        com.apms.domain.ai.dto.ExtractionFieldResult fieldResult = cache.getFieldResults().get(fieldName);
+        if (fieldResult == null) {
+            fieldResult = com.apms.domain.ai.dto.ExtractionFieldResult.builder().fieldName(fieldName).build();
+            cache.getFieldResults().put(fieldName, fieldResult);
+        }
+
+        fieldResult.setReviewStatus(request.getReviewStatus());
+        if (request.getReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED) {
+            if (request.getReviewedValue() == null) {
+                throw new BusinessValidationException("EDITED review status requires a reviewedValue.");
+            }
+            fieldResult.setReviewedValue(request.getReviewedValue());
+        } else {
+            // ACCEPTED, REJECTED, NEEDS_REVIEW
+            fieldResult.setReviewedValue(request.getReviewedValue()); 
+        }
+
+        fieldResult.setReviewComment(request.getComment());
+        fieldResult.setReviewedByUserId(userId);
+        fieldResult.setReviewedAt(LocalDateTime.now());
+
+        cache.setLastModifiedBy(String.valueOf(userId));
+        cache.setUpdatedAt(LocalDateTime.now());
+        
+        return extractionCacheRepository.save(cache);
+    }
+
+    @Transactional
+    public AiExtractionCache completeReview(String extractionId, Long userId) {
+        AiExtractionCache cache = getExtractionById(extractionId);
+        
+        if (cache.getFieldResults() != null) {
+            // Validate that no critical fields are NEEDS_REVIEW or FAILED and unreviewed
+            for (Map.Entry<String, com.apms.domain.ai.dto.ExtractionFieldResult> entry : cache.getFieldResults().entrySet()) {
+                com.apms.domain.ai.dto.ExtractionFieldResult result = entry.getValue();
+                if ("legalName".equals(entry.getKey()) || "taxCode".equals(entry.getKey())) {
+                    if (result.getReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW ||
+                       (result.getReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING && 
+                        result.getValidationStatus() == com.apms.domain.ai.dto.ExtractionValidationStatus.FAIL)) {
+                        throw new BusinessValidationException("Cannot complete review. Critical field '" + entry.getKey() + "' requires review.");
+                    }
+                }
+            }
+        }
+        
+        cache.setQualityStatus(com.apms.domain.ai.dto.ExtractionQualityStatus.REVIEWED);
+        cache.setReviewedByUserId(userId);
+        cache.setReviewedAt(LocalDateTime.now());
+        cache.setLastModifiedBy(String.valueOf(userId));
+        cache.setUpdatedAt(LocalDateTime.now());
+
+        return extractionCacheRepository.save(cache);
+    }
+
     // ─────────────────────────────────────────────
     // PRIVATE HELPERS
     // ─────────────────────────────────────────────
@@ -203,7 +271,10 @@ public class AiExtractionService {
 
     private void saveToCache(Long importJobId, String rawDocumentId,
                              String provider, String model,
-                             ExtractedCompanyData extractedData, String rawOutput) {
+                             ExtractedCompanyData extractedData, String rawOutput,
+                             java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> fieldResults,
+                             com.apms.domain.ai.dto.ExtractionQualityMetrics qualityMetrics,
+                             com.apms.domain.ai.dto.ExtractionQualityStatus qualityStatus) {
         try {
             AiExtractionCache cache = AiExtractionCache.builder()
                     .importJobId(importJobId)
@@ -212,6 +283,9 @@ public class AiExtractionService {
                     .model(model)
                     .extractedData(extractedData)
                     .rawAiOutput(rawOutput)
+                    .fieldResults(fieldResults)
+                    .qualityMetrics(qualityMetrics)
+                    .qualityStatus(qualityStatus != null ? qualityStatus : com.apms.domain.ai.dto.ExtractionQualityStatus.PENDING_VALIDATION)
                     .createdAt(LocalDateTime.now())
                     .build();
             extractionCacheRepository.save(cache);

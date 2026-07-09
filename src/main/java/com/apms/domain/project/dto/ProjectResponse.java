@@ -1,6 +1,7 @@
 package com.apms.domain.project.dto;
 
 import com.apms.common.enums.ProjectStatus;
+import com.apms.common.enums.RelationshipType;
 import com.apms.common.enums.ProjectType;
 import lombok.Builder;
 import lombok.Data;
@@ -17,6 +18,7 @@ public class ProjectResponse {
     private ProjectType projectType;
     private String targetCompanyProfileId;
     private String targetCompanyName;
+    private RelationshipType targetRelationshipType;
     private String description;
     private ProjectStatus status;
     private Long createdBy;

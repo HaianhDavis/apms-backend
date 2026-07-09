@@ -86,10 +86,10 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
         if (project == null) {
             project = Project.builder()
                     .projectName("AI Assistant Demo Project")
-                    .projectType(ProjectType.RESEARCH_MULTIPLE_COMPANIES)
+                    .projectType(ProjectType.RESEARCH_NEW_COMPANY)
                     .targetCompanyName("Vietnam Tech Industry")
                     .description("Project with approved data for AI assistant testing.")
-                    .status(ProjectStatus.IN_PROGRESS)
+                    .status(ProjectStatus.ACTIVE)
                     .createdByAccount(manager) // Manager creates the project, owner does NOT belong to it
                     .build();
             project = projectRepository.save(project);

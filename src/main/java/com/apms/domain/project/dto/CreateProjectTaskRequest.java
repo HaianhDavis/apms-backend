@@ -1,6 +1,8 @@
 package com.apms.domain.project.dto;
 
 import com.apms.common.enums.TaskPriority;
+import com.apms.common.enums.TaskType;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
@@ -18,4 +20,7 @@ public class CreateProjectTaskRequest {
     private TaskPriority priority;
     
     private LocalDateTime dueDate;
+
+    @Schema(description = "Type of task (DOCUMENT_COLLECTION, COMPANY_DATA_PREPARATION, GENERAL_TASK)")
+    private TaskType taskType;
 }

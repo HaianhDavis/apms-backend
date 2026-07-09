@@ -45,6 +45,14 @@ public class Project {
     @Column(nullable = false)
     private String targetCompanyName;
 
+    /**
+     * The official business relationship type for the target company.
+     * Selected by the Manager at project creation time.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "target_relationship_type", nullable = true, length = 50)
+    private com.apms.common.enums.RelationshipType targetRelationshipType;
+
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String description;
 

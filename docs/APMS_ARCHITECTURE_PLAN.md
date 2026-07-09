@@ -278,9 +278,9 @@ An **Aggregate** is a cluster of domain objects treated as a single unit for dat
 **Aggregate Root:** `Project`
 
 **Key Fields (explicit):**
-- `projectType` — one of: `UPDATE_EXISTING_COMPANY`, `RESEARCH_NEW_COMPANY`, `RESEARCH_MULTIPLE_COMPANIES`
+- `projectType` — one of: `UPDATE_EXISTING_COMPANY`, `RESEARCH_NEW_COMPANY`
 - `targetCompanyProfileId` — String (nullable) — MongoDB `companyId` UUID of the target company when `projectType = UPDATE_EXISTING_COMPANY`
-- `targetCompanyName` — String — company name (for `RESEARCH_NEW_COMPANY`) or research scope (for `RESEARCH_MULTIPLE_COMPANIES`); copied from selected profile when `UPDATE_EXISTING_COMPANY`
+- `targetCompanyName` — String — company name (for `RESEARCH_NEW_COMPANY`) ; copied from selected profile when `UPDATE_EXISTING_COMPANY`
 
 **Business Invariants:**
 - If `projectType == UPDATE_EXISTING_COMPANY` → `targetCompanyProfileId` must not be null; `targetCompanyName` is copied from the selected `CompanyProfile`.

@@ -5,6 +5,7 @@ import com.apms.common.response.ApiResponse;
 import com.apms.common.response.PageResponse;
 import com.apms.domain.project.dto.CreateProjectTaskRequest;
 import com.apms.domain.project.dto.ProjectTaskResponse;
+import com.apms.domain.project.dto.ProjectTaskWorkbenchResponse;
 import com.apms.domain.project.dto.UpdateProjectTaskRequest;
 import com.apms.domain.project.service.ProjectTaskService;
 import jakarta.validation.Valid;
@@ -55,5 +56,14 @@ public class ProjectTaskController {
             @Valid @RequestBody UpdateProjectTaskRequest request) {
 
         return ResponseEntity.ok(ApiResponse.success(projectTaskService.updateTask(projectId, taskId, request), "Task updated"));
+    }
+
+    @GetMapping("/{taskId}/workbench")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId))")
+    public ResponseEntity<ApiResponse<ProjectTaskWorkbenchResponse>> getTaskWorkbench(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId) {
+
+        return ResponseEntity.ok(ApiResponse.success(projectTaskService.getTaskWorkbench(projectId, taskId)));
     }
 }

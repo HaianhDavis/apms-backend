@@ -6,6 +6,5 @@ public enum SubmissionStatus {
     IN_REVIEW,
     APPROVED,
     REJECTED,
-    REVISION_REQUESTED,
     APPLIED
 }

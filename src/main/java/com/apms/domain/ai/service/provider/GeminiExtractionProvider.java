@@ -1,16 +1,19 @@
 package com.apms.domain.ai.service.provider;
 
 import com.apms.common.exception.BusinessValidationException;
-import com.apms.domain.ai.dto.ExtractedCompanyData;
+import com.apms.domain.ai.dto.RawExtractionOutput;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientResponseException;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -20,61 +23,38 @@ public class GeminiExtractionProvider implements ExtractionProvider {
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
+    private final AiExtractionResponseMapper responseMapper;
     private final String geminiApiKey;
     private final String geminiModel;
+    private final String extractionSystemPrompt;
 
     private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={key}";
 
-    private static final String EXTRACTION_SYSTEM_PROMPT = """
-        You are an expert business intelligence data extractor.
-        Your task is to extract structured company information from the provided text.
-        
-        Extract the following fields perfectly into a JSON object matching this schema exactly:
-        - legalName (string)
-        - tradeName (string)
-        - taxCode (string)
-        - industries (array of strings)
-        - businessModel (string)
-        - products (array of objects with "name", "category", "description")
-        - markets (array of strings)
-        - targetCustomers (array of strings)
-        - employeeTier (string)
-        - website (string)
-        - strengths (array of strings)
-        - weaknesses (array of strings)
-        - opportunities (array of strings)
-        - threats (array of strings)
-        - relationshipSuggestion (object with "suggestedType" string, "confidence" number between 0 and 1, "reasoning" array of strings)
-        
-        Relationship "suggestedType" MUST be exactly one of:
-        - PARTNER_WITH
-        - COMPETITOR_OF
-        - SUPPLIER_OF
-        - CUSTOMER_OF
-        - POTENTIAL_PARTNER_OF
-        Infer the relationshipSuggestion only from available business context.
-        
-        RULES:
-        - Return ONLY a raw valid JSON object. 
-        - DO NOT wrap the JSON in markdown code blocks. Start your response with { and end with }.
-        - DO NOT output any conversational text or explanations.
-        - Use null for unknown scalar values.
-        - Use [] for unknown list values.
-        - Do not invent taxCode, email, phone, or website if not present in the text.
-        """;
-
     public GeminiExtractionProvider(ObjectMapper objectMapper,
+                                    AiExtractionResponseMapper responseMapper,
                                     @Value("${app.ai.gemini.api-key:dummy-key}") String geminiApiKey,
                                     @Value("${app.ai.gemini.model:gemini-2.5-flash}") String geminiModel) {
         this.restClient = RestClient.builder().build();
         this.objectMapper = objectMapper;
+        this.responseMapper = responseMapper;
         this.geminiApiKey = geminiApiKey;
         this.geminiModel = geminiModel;
+        this.extractionSystemPrompt = loadPrompt();
+    }
+
+    private String loadPrompt() {
+        try {
+            ClassPathResource resource = new ClassPathResource("ai-prompts/company-extraction.prompt.md");
+            return new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            log.error("Failed to load Gemini extraction prompt", e);
+            throw new RuntimeException("Failed to load prompt", e);
+        }
     }
 
     @Override
-    public ExtractedCompanyData extract(String sourceText) {
-        String fullPrompt = EXTRACTION_SYSTEM_PROMPT + "\n\nText:\n" + sourceText;
+    public RawExtractionOutput extract(String sourceText) {
+        String fullPrompt = extractionSystemPrompt + "\n\nText:\n" + sourceText;
 
         Map<String, Object> requestPayload = Map.of(
                 "contents", List.of(
@@ -110,7 +90,7 @@ public class GeminiExtractionProvider implements ExtractionProvider {
 
                 rawAiOutput = cleanMarkdownFences(rawAiOutput);
 
-                return objectMapper.readValue(rawAiOutput, ExtractedCompanyData.class);
+                return responseMapper.mapResponse(rawAiOutput);
 
             } catch (RestClientResponseException e) {
                 if (e.getStatusCode().value() == 429) {

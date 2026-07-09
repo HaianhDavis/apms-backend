@@ -12,4 +12,6 @@ public interface CompanyCandidateRepository extends MongoRepository<CompanyCandi
     Page<CompanyCandidate> findByProjectIdAndStatus(String projectId, CandidateStatus status, Pageable pageable);
     
     long countByStatus(CandidateStatus status);
+    
+    java.util.List<CompanyCandidate> findByTaskId(Long taskId);
 }

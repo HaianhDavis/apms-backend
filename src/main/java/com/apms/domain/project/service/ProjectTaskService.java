@@ -3,13 +3,33 @@ package com.apms.domain.project.service;
 import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.SystemRole;
 import com.apms.common.enums.TaskStatus;
+import com.apms.common.enums.TaskType;
 import com.apms.common.exception.ResourceNotFoundException;
+import com.apms.domain.ai.AiExtractionCache;
+import com.apms.domain.ai.dto.ExtractionQualityStatus;
+import com.apms.domain.ai.repository.mongo.AiExtractionCacheRepository;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectTask;
 import com.apms.domain.project.dto.CreateProjectTaskRequest;
 import com.apms.domain.project.dto.ProjectTaskResponse;
 import com.apms.domain.project.dto.UpdateProjectTaskRequest;
+import com.apms.domain.project.dto.ProjectTaskWorkbenchResponse;
+import com.apms.domain.project.dto.ProjectTaskSubmissionResponse;
+import com.apms.domain.project.dto.WorkbenchDocumentResponse;
+import com.apms.domain.project.dto.CandidateDraftSummary;
+import com.apms.domain.project.dto.ProposalDraftSummary;
+import com.apms.common.enums.TaskAction;
+import com.apms.domain.document.service.DocumentService;
+import com.apms.domain.document.dto.ImportJobResponse;
+import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
+import com.apms.domain.profile.repository.mongo.CompanyProfileUpdateProposalRepository;
+import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
+import com.apms.domain.project.ProjectTaskSubmission;
+import com.apms.domain.candidate.CompanyCandidate;
+import com.apms.domain.profile.CompanyProfileUpdateProposal;
+import com.apms.common.enums.ProjectType;
+import com.apms.common.enums.SubmissionStatus;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.project.repository.sql.ProjectTaskRepository;
 import com.apms.domain.user.Account;
@@ -40,6 +60,11 @@ public class ProjectTaskService {
     private final ProjectRepository projectRepository;
     private final AccountRepository accountRepository;
     private final AuditLogService auditLogService;
+    private final DocumentService documentService;
+    private final AiExtractionCacheRepository extractionCacheRepository;
+    private final CompanyCandidateRepository candidateRepository;
+    private final CompanyProfileUpdateProposalRepository proposalRepository;
+    private final ProjectTaskSubmissionRepository submissionRepository;
 
     @Transactional
     public ProjectTaskResponse createTask(Long projectId, CreateProjectTaskRequest request) {
@@ -72,6 +97,7 @@ public class ProjectTaskService {
                 .dueDate(request.getDueDate())
                 .createdByAccount(createdBy)
                 .status(TaskStatus.TODO)
+                .taskType(request.getTaskType() != null ? request.getTaskType() : TaskType.GENERAL_TASK)
                 .build();
 
         task = projectTaskRepository.save(task);
@@ -158,6 +184,9 @@ public class ProjectTaskService {
             if (request.getDescription() != null) task.setDescription(request.getDescription());
             if (request.getPriority() != null) task.setPriority(request.getPriority());
             if (request.getDueDate() != null) task.setDueDate(request.getDueDate());
+            if (request.getTaskType() != null && task.getStatus() != TaskStatus.DONE && task.getStatus() != TaskStatus.CANCELLED) {
+                task.setTaskType(request.getTaskType());
+            }
 
             if (request.getAssignedToUserId() != null) {
                 Long currentAssignedId = task.getAssignedToAccount() != null ? task.getAssignedToAccount().getId() : null;
@@ -183,6 +212,234 @@ public class ProjectTaskService {
         return toResponse(task);
     }
 
+    @Transactional(readOnly = true)
+    public ProjectTaskWorkbenchResponse getTaskWorkbench(Long projectId, Long taskId) {
+        ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
+
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new IllegalArgumentException("Task does not belong to the specified project");
+        }
+
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) {
+            throw new AccessDeniedException("Unauthorized");
+        }
+
+        Project project = task.getProject();
+        TaskType tType = task.getTaskType() != null ? task.getTaskType() : TaskType.GENERAL_TASK;
+        
+        // 1. Evaluate actions
+        List<TaskAction> actions = evaluateAvailableActions(currentUser, task, project, tType);
+
+        // 2. Fetch documents (only metadata/import jobs)
+        List<ImportJobResponse> rawDocuments = documentService.getProjectImportJobs(projectId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
+        
+        List<WorkbenchDocumentResponse> documents = new ArrayList<>();
+        for (ImportJobResponse doc : rawDocuments) {
+            AiExtractionCache extraction = extractionCacheRepository.findTopByImportJobIdOrderByCreatedAtDesc(doc.getId()).orElse(null);
+            
+            String latestExtractionId = null;
+            ExtractionQualityStatus status = null;
+            Double evidenceCoverageRate = null;
+            Double completenessRate = null;
+            Integer warningFields = null;
+            Integer failedFields = null;
+            boolean canGenerateDraft = false;
+            
+            if (extraction != null) {
+                latestExtractionId = extraction.getId();
+                status = extraction.getQualityStatus();
+                
+                if (extraction.getQualityMetrics() != null) {
+                    evidenceCoverageRate = extraction.getQualityMetrics().getEvidenceCoverageRate();
+                    completenessRate = extraction.getQualityMetrics().getCompletenessRate();
+                    warningFields = extraction.getQualityMetrics().getWarningFields();
+                    failedFields = extraction.getQualityMetrics().getFailedFields();
+                }
+                
+                canGenerateDraft = status == ExtractionQualityStatus.REVIEWED;
+            }
+            
+            WorkbenchDocumentResponse wDoc = WorkbenchDocumentResponse.workbenchBuilder()
+                    .id(doc.getId())
+                    .projectId(doc.getProjectId())
+                    .rawDocumentId(doc.getRawDocumentId())
+                    .inputType(doc.getInputType())
+                    .sourceType(doc.getSourceType())
+                    .fileName(doc.getFileName())
+                    .status(doc.getStatus())
+                    .uploadedBy(doc.getUploadedBy())
+                    .startedAt(doc.getStartedAt())
+                    .completedAt(doc.getCompletedAt())
+                    .errorMessage(doc.getErrorMessage())
+                    .createdAt(doc.getCreatedAt())
+                    .latestExtractionId(latestExtractionId)
+                    .extractionQualityStatus(status)
+                    .evidenceCoverageRate(evidenceCoverageRate)
+                    .completenessRate(completenessRate)
+                    .warningFields(warningFields)
+                    .failedFields(failedFields)
+                    .canGenerateDraft(canGenerateDraft)
+                    .build();
+            documents.add(wDoc);
+        }
+
+        // 3. Fetch drafts (Candidate / ProfileUpdateProposal) and map to summaries
+        List<CandidateDraftSummary> candidateSummaries = new ArrayList<>();
+        List<ProposalDraftSummary> proposalSummaries = new ArrayList<>();
+        
+        // 4. Fetch submissions (needed for both display and draft-linking)
+        List<ProjectTaskSubmission> submissionsEntities = submissionRepository.findByProjectTask_Id(taskId);
+        
+        if (tType == TaskType.COMPANY_DATA_PREPARATION) {
+            List<CompanyCandidate> candidates = candidateRepository.findByTaskId(taskId);
+            candidateSummaries = candidates.stream().map(c -> {
+                ProjectTaskSubmission linkedSub = submissionsEntities.stream()
+                        .filter(s -> "CompanyCandidate".equals(s.getTargetEntityType()) && c.getId().equals(s.getTargetEntityId()))
+                        .findFirst().orElse(null);
+                return CandidateDraftSummary.builder()
+                        .candidateId(c.getId())
+                        .status(c.getStatus())
+                        .taskId(c.getTaskId())
+                        .extractionIds(c.getExtractionIds())
+                        .sourceDocumentIds(c.getSourceDocumentIds() != null ? c.getSourceDocumentIds() : List.of())
+                        .createdAt(c.getMetadata() != null ? c.getMetadata().getCreatedAt() : null)
+                        .hasConflicts(null) // Not stored on entity; available in MergeCandidateResponse at creation time
+                        .conflictCount(null)
+                        .isUnderReview(linkedSub != null && linkedSub.getStatus() == SubmissionStatus.IN_REVIEW)
+                        .isApproved(linkedSub != null && linkedSub.getStatus() == SubmissionStatus.APPROVED)
+                        .linkedSubmissionId(linkedSub != null ? linkedSub.getId() : null)
+                        .build();
+            }).toList();
+
+            List<CompanyProfileUpdateProposal> proposals = proposalRepository.findByTaskId(taskId);
+            proposalSummaries = proposals.stream().map(p -> {
+                ProjectTaskSubmission linkedSub = submissionsEntities.stream()
+                        .filter(s -> "CompanyProfileUpdateProposal".equals(s.getTargetEntityType()) && p.getId().equals(s.getTargetEntityId()))
+                        .findFirst().orElse(null);
+                return ProposalDraftSummary.builder()
+                        .proposalId(p.getId())
+                        .status(p.getStatus())
+                        .taskId(p.getTaskId())
+                        .companyProfileId(p.getCompanyProfileId())
+                        .extractionIds(p.getExtractionIds())
+                        .sourceDocumentIds(p.getSourceDocumentIds())
+                        .createdAt(p.getCreatedAt())
+                        .hasConflicts(p.getHasConflicts())
+                        .conflictCount(p.getConflictCount())
+                        .changeSummary(p.getChangeSummary())
+                        .isUnderReview(linkedSub != null && linkedSub.getStatus() == SubmissionStatus.IN_REVIEW)
+                        .isApproved(linkedSub != null && linkedSub.getStatus() == SubmissionStatus.APPROVED)
+                        .linkedSubmissionId(linkedSub != null ? linkedSub.getId() : null)
+                        .build();
+            }).toList();
+        }
+
+        // 5. Map submissions to response DTOs
+        List<ProjectTaskSubmissionResponse> submissions = submissionsEntities.stream().map(sub -> 
+                ProjectTaskSubmissionResponse.builder()
+                .id(sub.getId())
+                .projectTaskId(sub.getProjectTask().getId())
+                .projectId(sub.getProject().getId())
+                .submittedByUserId(sub.getSubmittedByAccount().getId())
+                .submissionType(sub.getSubmissionType())
+                .targetEntityType(sub.getTargetEntityType())
+                .targetEntityId(sub.getTargetEntityId())
+                .status(sub.getStatus())
+                .note(sub.getNote())
+                .submittedAt(sub.getSubmittedAt())
+                .reviewedByUserId(sub.getReviewedByAccount() != null ? sub.getReviewedByAccount().getId() : null)
+                .reviewedAt(sub.getReviewedAt())
+                .reviewComment(sub.getReviewComment())
+                .createdAt(sub.getCreatedAt())
+                .updatedAt(sub.getUpdatedAt())
+                .build()
+        ).toList();
+
+        return ProjectTaskWorkbenchResponse.builder()
+                .projectId(projectId)
+                .taskId(taskId)
+                .taskTitle(task.getTitle())
+                .taskType(tType)
+                .taskStatus(task.getStatus())
+                .projectType(project.getProjectType())
+                .projectStatus(project.getStatus())
+                .targetCompanyName(project.getTargetCompanyName())
+                .targetCompanyProfileId(project.getTargetCompanyProfileId())
+                .targetRelationshipType(project.getTargetRelationshipType())
+                .availableActions(actions)
+                .documents(documents)
+                .candidateDrafts(candidateSummaries)
+                .profileUpdateProposalDrafts(proposalSummaries)
+                .submissions(submissions)
+                .build();
+    }
+
+    private List<TaskAction> evaluateAvailableActions(UserDetailsImpl user, ProjectTask task, Project project, TaskType taskType) {
+        List<TaskAction> actions = new ArrayList<>();
+        boolean isStaff = hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        boolean isManager = hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        boolean isAdmin = hasRole(user, SystemRole.SYSTEM_ADMIN);
+
+        boolean isAssignedToMe = task.getAssignedToAccount() != null && task.getAssignedToAccount().getId().equals(user.getId());
+
+        if (isStaff && !isAdmin && !isManager) {
+            if ((task.getStatus() == TaskStatus.TODO || task.getStatus() == TaskStatus.IN_PROGRESS) && isAssignedToMe) {
+                if (taskType == TaskType.DOCUMENT_COLLECTION) {
+                    actions.add(TaskAction.VIEW_DOCUMENTS);
+                    actions.add(TaskAction.UPLOAD_DOCUMENT);
+                    actions.add(TaskAction.ADD_MANUAL_DOCUMENT);
+                    actions.add(TaskAction.SUBMIT_WORK);
+                } else if (taskType == TaskType.COMPANY_DATA_PREPARATION) {
+                    actions.add(TaskAction.VIEW_DOCUMENTS);
+                    actions.add(TaskAction.RUN_AI_EXTRACTION);
+                    actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
+                    actions.add(TaskAction.EDIT_EXTRACTION_RESULT);
+                    actions.add(TaskAction.REVIEW_EXTRACTION_RESULT);
+                    if (project.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY) {
+                        actions.add(TaskAction.GENERATE_CANDIDATE_DRAFT);
+                        actions.add(TaskAction.VIEW_CANDIDATE_DRAFTS);
+                    } else if (project.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY) {
+                        actions.add(TaskAction.GENERATE_PROFILE_UPDATE_PROPOSAL_DRAFT);
+                        actions.add(TaskAction.VIEW_PROFILE_UPDATE_PROPOSAL_DRAFTS);
+                    }
+                    actions.add(TaskAction.SUBMIT_SELECTED_DRAFT);
+                } else {
+                    // GENERAL_TASK
+                    actions.add(TaskAction.SUBMIT_WORK);
+                }
+            }
+            if (task.getStatus() == TaskStatus.IN_REVIEW) {
+                actions.add(TaskAction.VIEW_SUBMISSIONS);
+            }
+        }
+
+        if (isManager || isAdmin) {
+            actions.add(TaskAction.VIEW_DOCUMENTS); // Manager always can view docs
+            if (taskType == TaskType.COMPANY_DATA_PREPARATION) {
+                actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
+                actions.add(TaskAction.REVIEW_EXTRACTION_RESULT);
+                if (project.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY) {
+                    actions.add(TaskAction.VIEW_CANDIDATE_DRAFTS);
+                } else if (project.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY) {
+                    actions.add(TaskAction.VIEW_PROFILE_UPDATE_PROPOSAL_DRAFTS);
+                }
+            }
+            if (task.getStatus() == TaskStatus.IN_REVIEW) {
+                actions.add(TaskAction.VIEW_SUBMISSIONS);
+                actions.add(TaskAction.REVIEW_SUBMISSION);
+                actions.add(TaskAction.APPROVE_SUBMISSION);
+                actions.add(TaskAction.REQUEST_REVISION);
+                actions.add(TaskAction.REJECT_SUBMISSION);
+            } else if (task.getStatus() == TaskStatus.DONE || task.getStatus() == TaskStatus.CANCELLED) {
+                actions.add(TaskAction.VIEW_SUBMISSIONS);
+            }
+        }
+
+        return actions;
+    }
+
     private ProjectTaskResponse toResponse(ProjectTask task) {
         String assignedName = null;
         if (task.getAssignedToAccount() != null) {
@@ -203,6 +460,7 @@ public class ProjectTaskService {
                 .createdAt(task.getCreatedAt())
                 .updatedAt(task.getUpdatedAt())
                 .completedAt(task.getCompletedAt())
+                .taskType(task.getTaskType() != null ? task.getTaskType() : TaskType.GENERAL_TASK)
                 .build();
     }
 
