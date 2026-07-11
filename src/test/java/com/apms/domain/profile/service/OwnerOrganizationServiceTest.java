@@ -4,6 +4,8 @@ import com.apms.common.exception.BusinessValidationException;
 import com.apms.config.OwnerOrganizationProperties;
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
+import com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository;
+import com.apms.domain.profile.dto.OwnerProfileReadinessResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,10 +27,13 @@ class OwnerOrganizationServiceTest {
     @Mock
     private CompanyProfileRepository companyProfileRepository;
 
+    @Mock
+    private CompanyProfileVersionRepository versionRepository;
+
     @InjectMocks
     private OwnerOrganizationService ownerOrganizationService;
 
-    private static final String DEFAULT_OWNER_ID = "6a31a0000000000000000000";
+    private static final String DEFAULT_OWNER_ID = "6a31a0000000000000000001";
 
     @BeforeEach
     void setUp() {
@@ -73,5 +78,13 @@ class OwnerOrganizationServiceTest {
         assertFalse(ownerOrganizationService.isOwnerCompany(""));
         assertFalse(ownerOrganizationService.isOwnerCompany("some-other-id"));
         assertTrue(ownerOrganizationService.isOwnerCompany(DEFAULT_OWNER_ID));
+    }
+
+    @Test
+    void checkReadiness_ReturnsFalse_WhenProfileNotFound() {
+        when(companyProfileRepository.findById(DEFAULT_OWNER_ID)).thenReturn(Optional.empty());
+        OwnerProfileReadinessResponse response = ownerOrganizationService.checkReadiness();
+        assertFalse(response.isReadyForComparison());
+        assertTrue(response.getMissingSections().contains("CompanyProfile"));
     }
 }

@@ -15,5 +15,5 @@ public class OwnerOrganizationProperties {
      * Default is the legacy demo ID to preserve current runtime behavior.
      */
     @NotBlank(message = "apms.owner.company-profile-id must not be blank")
-    private String companyProfileId = "6a31a0000000000000000000";
+    private String companyProfileId = "6a31a0000000000000000001";
 }

@@ -30,11 +30,12 @@ public class ProfileController {
             @RequestParam(required = false) String market,
             @RequestParam(required = false) String reviewStatus,
             @RequestParam(required = false) String relationshipType,
+            @RequestParam(defaultValue = "false") boolean excludeOwner,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
         PageResponse<ProfileResponse> response = PageResponse.of(
-                profileService.searchCompanyProfiles(keyword, industry, market, reviewStatus, relationshipType, PageRequest.of(page, size)));
+                profileService.searchCompanyProfiles(keyword, industry, market, reviewStatus, relationshipType, excludeOwner, PageRequest.of(page, size)));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -58,11 +59,12 @@ public class ProfileController {
     @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<PageResponse<ProfileResponse>>> searchProfiles(
             @RequestParam String name,
+            @RequestParam(defaultValue = "false") boolean excludeOwner,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
         PageResponse<ProfileResponse> response = PageResponse.of(
-                profileService.searchProfilesByName(name, PageRequest.of(page, size)));
+                profileService.searchProfilesByName(name, excludeOwner, PageRequest.of(page, size)));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

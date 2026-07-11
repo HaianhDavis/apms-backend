@@ -39,6 +39,7 @@ public class CandidateService {
     private final ProjectRepository projectRepository;
     private final AiExtractionService aiExtractionService;
     private final ApplicationEventPublisher eventPublisher;
+    private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
 
     // ─────────────────────────────────────────────
     // CREATE (from AI)
@@ -263,6 +264,11 @@ public class CandidateService {
 
         if (candidate.getStatus() != CandidateStatus.PENDING_REVIEW) {
             throw new BusinessValidationException("Only PENDING_REVIEW candidates can be approved");
+        }
+
+        // Prevent owner organization from being evaluated as a target
+        if (candidate.getDeduplication() != null && ownerOrganizationService.isOwnerCompany(candidate.getDeduplication().getExistingProfileIdMatch())) {
+            throw new BusinessValidationException("The Owner Organization cannot be selected as a project target.");
         }
 
         candidate.setStatus(CandidateStatus.APPROVED);

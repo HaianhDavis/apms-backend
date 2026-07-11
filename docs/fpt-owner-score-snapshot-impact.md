@@ -1,17 +1,11 @@
 # FPT Owner Score Snapshot Impact
 
-When evaluating the migration of FPT to become the canonical Owner Organization for APMS, we must carefully handle the transition of historical project score snapshots and relationships.
+## Current Behavior
+The APMS application evaluates Target Companies using AHP scoring resulting in a `ScoreSnapshot`. 
+Previously, FPT was evaluated as a target company.
 
-## Snapshot Preservation Rules
-
-1. **Score Snapshots Are Preserved**
-   - Existing score snapshots must remain intact. Under no circumstances should historical performance or benchmarking snapshots be deleted during the transition.
-   
-2. **No Snapshot Deletion**
-   - The migration logic must not include cascading deletes for snapshots when rewiring relationship data.
-
-3. **No Fabrication of Production Counts**
-   - The actual production count for FPT's metrics must remain grounded in actual project execution. It must not be manually fabricated or reset as part of the migration.
-
-4. **Handling Existing FPT-as-Target Snapshots**
-   - FPT currently exists as a target company (`6a31a0000000000000000001`). Any existing snapshots where FPT was the target of a relationship will be specifically addressed and migrated during the subsequent FPT migration phase (Phase 2), not during the current structural modeling phase.
+## Migration Impact
+1. **Preservation**: Historical score snapshots targeting FPT (`6a31a0000000000000000001`) are intentionally preserved. They serve as legacy evaluation records and must not be mutated or deleted.
+2. **Cessation**: `AssistantDemoDataSeeder` has been modified to stop creating any new score snapshots targeting FPT. FPT is now the active Owner Organization.
+3. **Filtering**: Reporting and AI assistant views querying target company lists naturally filter out the configured `apms.owner.company-profile-id`. FPT will no longer appear in views intended to show "external evaluated companies".
+4. **No Role Scoring**: The Owner Organization is not a "CompanyRole" like "COMPETITOR" or "SUPPLIER". FPT is the baseline from which these roles are viewed. No specific scoring logic is added to the Owner itself in this phase.

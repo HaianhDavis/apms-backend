@@ -52,6 +52,7 @@ public class ProfileService {
     private final MongoTemplate mongoTemplate;
     private final Neo4jClient neo4jClient;
     private final AuditLogService auditLogService;
+    private final OwnerOrganizationService ownerOrganizationService;
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER
@@ -179,8 +180,28 @@ public class ProfileService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ProfileResponse> searchCompanyProfiles(String keyword, String industry, String market, String reviewStatus, String relationshipType, Pageable pageable) {
+    public ProfileResponse getApprovedProfileResponse(String companyProfileId) {
+        CompanyProfile profile = profileRepository.findById(companyProfileId)
+                .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for ID: " + companyProfileId));
+        
+        if (Boolean.TRUE.equals(profile.getIsDeleted())) {
+            throw new ResourceNotFoundException("CompanyProfile not found for ID: " + companyProfileId);
+        }
+        
+        if (!"APPROVED".equals(profile.getReviewStatus())) {
+            throw new com.apms.common.exception.BusinessValidationException("CompanyProfile must be approved.");
+        }
+        
+        return toResponse(profile);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ProfileResponse> searchCompanyProfiles(String keyword, String industry, String market, String reviewStatus, String relationshipType, boolean excludeOwner, Pageable pageable) {
         Criteria criteria = Criteria.where("isDeleted").ne(true);
+
+        if (excludeOwner) {
+            criteria.and("companyId").ne(ownerOrganizationService.getOwnerCompanyId());
+        }
 
         if (StringUtils.hasText(keyword)) {
             criteria.orOperator(
@@ -229,8 +250,13 @@ public class ProfileService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ProfileResponse> searchProfilesByName(String name, Pageable pageable) {
+    public Page<ProfileResponse> searchProfilesByName(String name, boolean excludeOwner, Pageable pageable) {
         Criteria criteria = Criteria.where("isDeleted").ne(true);
+
+        if (excludeOwner) {
+            criteria.and("companyId").ne(ownerOrganizationService.getOwnerCompanyId());
+        }
+
         if (StringUtils.hasText(name)) {
             criteria.orOperator(
                     Criteria.where("identity.legalName").regex(name, "i"),

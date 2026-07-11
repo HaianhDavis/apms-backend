@@ -25,6 +25,11 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.apms.domain.profile.CompanyProfileVersion;
+import com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository;
+import com.apms.domain.profile.service.OwnerOrganizationService;
 
 @Slf4j
 @Component
@@ -37,9 +42,11 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
     private final CompanyProfileRepository companyProfileRepository;
-    private final Neo4jClient neo4jClient;
+    private final org.springframework.data.neo4j.core.Neo4jClient neo4jClient;
     private final ScoreSnapshotRepository scoreSnapshotRepository;
-    private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
+    private final OwnerOrganizationService ownerOrganizationService;
+    private final CompanyProfileVersionRepository versionRepository;
+    private final ObjectMapper objectMapper;
 
     private static final String PROJECT_ID = "1";
     
@@ -408,10 +415,21 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
                 .build();
 
         companyProfileRepository.saveAll(List.of(fpt, cmc, viettel, vng, momo, vnpt, aws, ms, retailplus));
+
+        if (versionRepository.findByCompanyProfileIdAndVersion(fpt.getId(), fpt.getVersion()).isEmpty()) {
+            CompanyProfileVersion version = CompanyProfileVersion.builder()
+                    .companyProfileId(fpt.getId())
+                    .companyId(fpt.getCompanyId())
+                    .version(fpt.getVersion())
+                    .snapshot(objectMapper.convertValue(fpt, new TypeReference<Map<String, Object>>() {}))
+                    .changeSummary("Initial seed")
+                    .createdBy(-1L)
+                    .build();
+            versionRepository.save(version);
+        }
     }
 
     private void seedNeo4jGraph() {
-        mergeCompanyNode(ownerOrganizationService.getOwnerCompanyId(), "APMS Demo Organization", "Unknown");
         mergeCompanyNode(FPT_ID, "FPT Corporation", "Information Technology");
         mergeCompanyNode(CMC_ID, "CMC Corporation", "Information Technology");
         mergeCompanyNode(VIETTEL_ID, "Viettel Group", "Telecommunications");
@@ -422,24 +440,25 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
         mergeCompanyNode(MICROSOFT_ID, "Microsoft Vietnam", "Enterprise Software");
         mergeCompanyNode(RETAILPLUS_ID, "RetailPlus Vietnam", "Retail");
 
-        // Relationships connected to owner organization
-        createRelationship(ownerOrganizationService.getOwnerCompanyId(), FPT_ID, "PARTNER_WITH");
-        createRelationship(ownerOrganizationService.getOwnerCompanyId(), MICROSOFT_ID, "PARTNER_WITH");
-        createRelationship(ownerOrganizationService.getOwnerCompanyId(), CMC_ID, "COMPETITOR_OF");
-        createRelationship(ownerOrganizationService.getOwnerCompanyId(), VNG_ID, "COMPETITOR_OF");
-        createRelationship(ownerOrganizationService.getOwnerCompanyId(), VNPT_ID, "COMPETITOR_OF");
-        createRelationship(ownerOrganizationService.getOwnerCompanyId(), VIETTEL_ID, "POTENTIAL_PARTNER_OF");
-        createRelationship(ownerOrganizationService.getOwnerCompanyId(), MOMO_ID, "POTENTIAL_PARTNER_OF");
-        createRelationship(AWS_ID, ownerOrganizationService.getOwnerCompanyId(), "SUPPLIER_OF");
-        createRelationship(RETAILPLUS_ID, ownerOrganizationService.getOwnerCompanyId(), "CUSTOMER_OF");
-
-        // Inter-company relationships
+        // Relationships connected to owner organization (FPT)
+        createRelationship(FPT_ID, MICROSOFT_ID, "PARTNER_WITH");
         createRelationship(FPT_ID, CMC_ID, "COMPETITOR_OF");
         createRelationship(FPT_ID, VNG_ID, "COMPETITOR_OF");
+        createRelationship(FPT_ID, VNPT_ID, "COMPETITOR_OF");
+        createRelationship(FPT_ID, VIETTEL_ID, "POTENTIAL_PARTNER_OF");
+        createRelationship(FPT_ID, MOMO_ID, "POTENTIAL_PARTNER_OF");
+        createRelationship(FPT_ID, AWS_ID, "SUPPLIER_OF");
+        createRelationship(FPT_ID, RETAILPLUS_ID, "CUSTOMER_OF");
+
+        // Inter-company relationships
         createRelationship(CMC_ID, VNPT_ID, "COMPETITOR_OF");
         createRelationship(VIETTEL_ID, VNPT_ID, "COMPETITOR_OF");
         createRelationship(AWS_ID, MICROSOFT_ID, "PARTNER_WITH");
         createRelationship(MOMO_ID, RETAILPLUS_ID, "POTENTIAL_PARTNER_OF");
+
+        // Clean up legacy APMS Demo Organization node
+        String deleteCypher = "MATCH (c:Company {companyId: '6a31a0000000000000000000'}) DETACH DELETE c";
+        neo4jClient.query(deleteCypher).run();
     }
 
     private void mergeCompanyNode(String companyId, String name, String industry) {
@@ -469,7 +488,7 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
     }
 
     private void seedScoreSnapshots(Project project) {
-        ensureScore(project, FPT_ID, 88, 22, 35, 82);
+        // Do not seed new FPT score snapshots; preserve any historical ones in the DB
         ensureScore(project, CMC_ID, 72, 78, 45, 40);
         ensureScore(project, VIETTEL_ID, 80, 50, 40, 62);
         ensureScore(project, VNG_ID, 68, 82, 48, 38);

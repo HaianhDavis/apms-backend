@@ -317,6 +317,7 @@ public class ProjectService {
                     throw new BusinessValidationException(
                             "targetCompanyProfileId is required when projectType is UPDATE_EXISTING_COMPANY.");
                 }
+                ownerOrganizationService.validateTargetIsNotOwner(targetCompanyProfileId);
             }
             case RESEARCH_NEW_COMPANY -> {
                 if (StringUtils.hasText(targetCompanyProfileId)) {

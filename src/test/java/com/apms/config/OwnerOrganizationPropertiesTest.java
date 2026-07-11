@@ -18,6 +18,6 @@ class OwnerOrganizationPropertiesTest {
     @Test
     void shouldLoadDefaultOwnerOrganizationId() {
         assertNotNull(properties);
-        assertEquals("6a31a0000000000000000000", properties.getCompanyProfileId());
+        assertEquals("6a31a0000000000000000001", properties.getCompanyProfileId());
     }
 }
