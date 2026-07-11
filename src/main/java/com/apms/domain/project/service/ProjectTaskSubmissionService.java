@@ -226,6 +226,21 @@ public class ProjectTaskSubmissionService {
                         if (proposal.getProposedInsights() != null) {
                             profile.setInsights(mergeSection(profile.getInsights(), proposal.getProposedInsights(), com.apms.domain.profile.CompanyProfile.Insights.class));
                         }
+                        if (proposal.getProposedFinancial() != null) {
+                            profile.setFinancial(mergeSection(profile.getFinancial(), proposal.getProposedFinancial(), com.apms.domain.company.model.FinancialInfo.class));
+                        }
+                        if (proposal.getProposedMarket() != null) {
+                            profile.setMarket(mergeSection(profile.getMarket(), proposal.getProposedMarket(), com.apms.domain.company.model.MarketInfo.class));
+                        }
+                        if (proposal.getProposedInnovation() != null) {
+                            profile.setInnovation(mergeSection(profile.getInnovation(), proposal.getProposedInnovation(), com.apms.domain.company.model.InnovationInfo.class));
+                        }
+                        if (proposal.getProposedRisk() != null) {
+                            profile.setRisk(mergeSection(profile.getRisk(), proposal.getProposedRisk(), com.apms.domain.company.model.RiskInfo.class));
+                        }
+                        if (proposal.getProposedCompliance() != null) {
+                            profile.setCompliance(mergeSection(profile.getCompliance(), proposal.getProposedCompliance(), com.apms.domain.company.model.ComplianceInfo.class));
+                        }
 
                         // 3. Append Source Documents
                         if (proposal.getSourceDocumentIds() != null && !proposal.getSourceDocumentIds().isEmpty()) {

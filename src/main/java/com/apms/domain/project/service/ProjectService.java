@@ -25,7 +25,11 @@ import com.apms.domain.audit.service.AuditLogService;
 import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.TaskStatus;
 import com.apms.domain.project.dto.UpdateProjectStatusRequest;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Arrays;
 import java.util.stream.Collectors;
 
@@ -40,8 +44,7 @@ public class ProjectService {
     private final Neo4jClient neo4jClient;
     private final ProjectTaskRepository projectTaskRepository;
     private final AuditLogService auditLogService;
-
-    private static final String OWNER_ORG_COMPANY_ID = "6a31a0000000000000000000";
+    private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
 
     // ─────────────────────────────────────────────
     // CREATE
@@ -58,8 +61,8 @@ public class ProjectService {
                 LIMIT 1
                 """;
             java.util.Collection<String> relTypes = neo4jClient.query(cypher)
-                    .bindAll(java.util.Map.of(
-                            "ownerId", OWNER_ORG_COMPANY_ID,
+                    .bindAll(Map.of(
+                            "ownerId", ownerOrganizationService.getOwnerCompanyId(),
                             "targetId", request.getTargetCompanyProfileId()
                     ))
                     .fetchAs(String.class)

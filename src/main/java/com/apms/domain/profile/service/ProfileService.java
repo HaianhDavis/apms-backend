@@ -91,6 +91,11 @@ public class ProfileService {
                 .companySize(mapCompanySize(candidate.getCompanySize()))
                 .contact(mapContact(candidate.getContact()))
                 .insights(mapInsights(candidate.getInsights()))
+                .financial(candidate.getFinancial())
+                .market(candidate.getMarket())
+                .innovation(candidate.getInnovation())
+                .risk(candidate.getRisk())
+                .compliance(candidate.getCompliance())
                 .reviewStatus("VERIFIED")
                 .metadata(CompanyProfile.Metadata.builder()
                         .createdBy("SYSTEM")
@@ -124,6 +129,11 @@ public class ProfileService {
         if (candidate.getCompanySize() != null) profile.setCompanySize(mapCompanySize(candidate.getCompanySize()));
         if (candidate.getContact() != null) profile.setContact(mapContact(candidate.getContact()));
         if (candidate.getInsights() != null) profile.setInsights(mapInsights(candidate.getInsights()));
+        if (candidate.getFinancial() != null) profile.setFinancial(candidate.getFinancial());
+        if (candidate.getMarket() != null) profile.setMarket(candidate.getMarket());
+        if (candidate.getInnovation() != null) profile.setInnovation(candidate.getInnovation());
+        if (candidate.getRisk() != null) profile.setRisk(candidate.getRisk());
+        if (candidate.getCompliance() != null) profile.setCompliance(candidate.getCompliance());
 
         profile.setVersion(profile.getVersion() + 1);
         profile.getMetadata().setUpdatedAt(LocalDateTime.now());
@@ -339,6 +349,11 @@ public class ProfileService {
                 .companySize(p.getCompanySize())
                 .contact(p.getContact())
                 .insights(p.getInsights())
+                .financial(p.getFinancial())
+                .market(p.getMarket())
+                .innovation(p.getInnovation())
+                .risk(p.getRisk())
+                .compliance(p.getCompliance())
                 .reviewStatus(p.getReviewStatus())
                 .tags(p.getTags())
                 .metadata(p.getMetadata())

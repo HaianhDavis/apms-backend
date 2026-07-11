@@ -38,13 +38,12 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class GraphService {
 
-    private static final String OWNER_ORG_COMPANY_ID = "6a31a0000000000000000000";
-
     private final CompanyNodeRepository companyNodeRepository;
     private final Neo4jClient neo4jClient;
     private final CompanyCandidateRepository candidateRepository;
     private final CompanyProfileRepository profileRepository;
     private final ProjectRepository projectRepository;
+    private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER
@@ -83,7 +82,7 @@ public class GraphService {
         if (finalRelType != null) {
             // Create relationship: OwnerCompany --[rel]-> TargetCompany (which is `profile.getCompanyId()`)
             createRelationship(
-                    OWNER_ORG_COMPANY_ID,
+                    ownerOrganizationService.getOwnerCompanyId(),
                     profile.getCompanyId(),
                     finalRelType.name(),
                     candidate.getReview() != null ? candidate.getReview().getReviewedBy() : "SYSTEM",

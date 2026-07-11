@@ -27,6 +27,11 @@ Required fields:
 - weaknesses (array of strings)
 - opportunities (array of strings)
 - threats (array of strings)
+- financial (object with keys: revenue(number), revenueCurrency(string), revenueGrowth(number), debtRatio(number), profitMargin(number), fundingStage(string), profitability(string))
+- market (object with keys: marketShare(number), brandRank(number), clientCount(number), mainMarkets(array of strings))
+- innovation (object with keys: patents(number), rdInvestmentPercent(number), techStack(array of strings), techMaturityLevel(number), productInnovationRate(number), technologyCapabilities(array of strings))
+- risk (object with keys: legalRisk(string), financialRisk(string), reputationRisk(string), securityRisk(string), conflictOfInterestRisk(string), supplyInterruptionRisk(string), dependencyRisk(string), overallRiskLevel(string))
+- compliance (object with keys: status(string), qualityCertifications(array of strings), securityCertifications(array of strings), antiCorruptionPolicy(string), laborCompliance(string), environmentalPolicy(string))
 
 Format example for a field:
 "legalName": {

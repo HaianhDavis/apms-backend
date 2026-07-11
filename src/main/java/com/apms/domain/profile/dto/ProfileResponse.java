@@ -18,6 +18,12 @@ public class ProfileResponse {
     private CompanyProfile.Contact contact;
     private CompanyProfile.Insights insights;
     
+    private com.apms.domain.company.model.FinancialInfo financial;
+    private com.apms.domain.company.model.MarketInfo market;
+    private com.apms.domain.company.model.InnovationInfo innovation;
+    private com.apms.domain.company.model.RiskInfo risk;
+    private com.apms.domain.company.model.ComplianceInfo compliance;
+    
     private String reviewStatus;
     private List<String> tags;
     private CompanyProfile.Metadata metadata;

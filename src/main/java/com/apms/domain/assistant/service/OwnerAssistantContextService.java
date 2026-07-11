@@ -51,13 +51,7 @@ public class OwnerAssistantContextService {
     private final CompanyProfileRepository companyProfileRepository;
     private final ScoreSnapshotRepository scoreSnapshotRepository;
     private final Neo4jClient neo4jClient;
-
-    /**
-     * Dev-hardcoded: owner@apms.com -> APMS Demo Organization.
-     * Replace with a real owner-company mapping table in production.
-     */
-    static final String OWNER_ORG_COMPANY_ID = "6a31a0000000000000000000";
-    static final String OWNER_ORG_NAME = "APMS Demo Organization";
+    private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
 
     // ── Public entry point ────────────────────────────────────────────────────
 
@@ -70,7 +64,7 @@ public class OwnerAssistantContextService {
         StringBuilder ctx = new StringBuilder();
 
         ctx.append("APMS Executive Business Intelligence Data\n");
-        ctx.append("Owner Organization: ").append(OWNER_ORG_NAME).append("\n\n");
+        ctx.append("Owner Organization: APMS Demo Organization\n\n");
 
         // ── 1. Load Neo4j relationships from owner org ────────────────────────
         OwnerRelationshipResult ownerRels = loadOwnerOrgRelationships(sources, ctx);
@@ -183,7 +177,7 @@ public class OwnerAssistantContextService {
         } else {
             sources.add(AiSourceReference.builder()
                     .type("company_profiles")
-                    .id(OWNER_ORG_COMPANY_ID)
+                    .id(ownerOrganizationService.getOwnerCompanyId())
                     .title("Ecosystem profiles")
                     .build());
             relatedProfiles.forEach(p -> ctx.append(formatProfile(p)));
@@ -204,7 +198,7 @@ public class OwnerAssistantContextService {
         if (hasScores) {
             sources.add(AiSourceReference.builder()
                     .type("score_snapshots")
-                    .id(OWNER_ORG_COMPANY_ID)
+                    .id(ownerOrganizationService.getOwnerCompanyId())
                     .title("Ecosystem score snapshots")
                     .build());
             ctx.append("=== ECOSYSTEM SCORES ===\n");
@@ -237,7 +231,7 @@ public class OwnerAssistantContextService {
                        other.companyId AS otherCompanyId, startNode(r) = owner AS isOutgoing
                 """;
             var records = neo4jClient.query(cypher)
-                    .bindAll(Map.of("ownerCompanyId", OWNER_ORG_COMPANY_ID))
+                    .bindAll(Map.of("ownerCompanyId", ownerOrganizationService.getOwnerCompanyId()))
                     .fetch().all();
 
             for (var record : records) {
@@ -260,7 +254,7 @@ public class OwnerAssistantContextService {
             if (!formattedRelationships.isEmpty()) {
                 sources.add(AiSourceReference.builder()
                         .type("neo4j_relationships")
-                        .id(OWNER_ORG_COMPANY_ID)
+                        .id(ownerOrganizationService.getOwnerCompanyId())
                         .title("Approved relationship graph")
                         .build());
                 ctx.append("=== OWNER ORGANIZATION RELATIONSHIPS (APPROVED NEO4J DATA) ===\n");
@@ -269,7 +263,7 @@ public class OwnerAssistantContextService {
             }
 
         } catch (Exception e) {
-            log.warn("Could not load Neo4j relationships for owner org {}: {}", OWNER_ORG_COMPANY_ID, e.getMessage());
+            log.warn("Could not load Neo4j relationships for owner org {}: {}", ownerOrganizationService.getOwnerCompanyId(), e.getMessage());
         }
 
         return new OwnerRelationshipResult(formattedRelationships, new ArrayList<>(relatedCompanyIds));

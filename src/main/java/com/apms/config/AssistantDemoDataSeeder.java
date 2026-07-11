@@ -39,9 +39,9 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
     private final CompanyProfileRepository companyProfileRepository;
     private final Neo4jClient neo4jClient;
     private final ScoreSnapshotRepository scoreSnapshotRepository;
+    private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
 
     private static final String PROJECT_ID = "1";
-    private static final String DEMO_ORG_ID = "6a31a0000000000000000000";
     
     private static final String FPT_ID = "6a31a0000000000000000001";
     private static final String CMC_ID = "6a31a0000000000000000002";
@@ -66,7 +66,7 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
 
         log.info("");
         log.info("AI Assistant demo data seeded:");
-        log.info("Demo Org: {}", DEMO_ORG_ID);
+        log.info("Demo Org: {}", ownerOrganizationService.getOwnerCompanyId());
         log.info("FPT: {}", FPT_ID);
         log.info("CMC: {}", CMC_ID);
         log.info("Viettel: {}", VIETTEL_ID);
@@ -411,7 +411,7 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
     }
 
     private void seedNeo4jGraph() {
-        mergeCompanyNode(DEMO_ORG_ID, "APMS Demo Organization", "Unknown");
+        mergeCompanyNode(ownerOrganizationService.getOwnerCompanyId(), "APMS Demo Organization", "Unknown");
         mergeCompanyNode(FPT_ID, "FPT Corporation", "Information Technology");
         mergeCompanyNode(CMC_ID, "CMC Corporation", "Information Technology");
         mergeCompanyNode(VIETTEL_ID, "Viettel Group", "Telecommunications");
@@ -423,15 +423,15 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
         mergeCompanyNode(RETAILPLUS_ID, "RetailPlus Vietnam", "Retail");
 
         // Relationships connected to owner organization
-        createRelationship(DEMO_ORG_ID, FPT_ID, "PARTNER_WITH");
-        createRelationship(DEMO_ORG_ID, MICROSOFT_ID, "PARTNER_WITH");
-        createRelationship(DEMO_ORG_ID, CMC_ID, "COMPETITOR_OF");
-        createRelationship(DEMO_ORG_ID, VNG_ID, "COMPETITOR_OF");
-        createRelationship(DEMO_ORG_ID, VNPT_ID, "COMPETITOR_OF");
-        createRelationship(DEMO_ORG_ID, VIETTEL_ID, "POTENTIAL_PARTNER_OF");
-        createRelationship(DEMO_ORG_ID, MOMO_ID, "POTENTIAL_PARTNER_OF");
-        createRelationship(AWS_ID, DEMO_ORG_ID, "SUPPLIER_OF");
-        createRelationship(RETAILPLUS_ID, DEMO_ORG_ID, "CUSTOMER_OF");
+        createRelationship(ownerOrganizationService.getOwnerCompanyId(), FPT_ID, "PARTNER_WITH");
+        createRelationship(ownerOrganizationService.getOwnerCompanyId(), MICROSOFT_ID, "PARTNER_WITH");
+        createRelationship(ownerOrganizationService.getOwnerCompanyId(), CMC_ID, "COMPETITOR_OF");
+        createRelationship(ownerOrganizationService.getOwnerCompanyId(), VNG_ID, "COMPETITOR_OF");
+        createRelationship(ownerOrganizationService.getOwnerCompanyId(), VNPT_ID, "COMPETITOR_OF");
+        createRelationship(ownerOrganizationService.getOwnerCompanyId(), VIETTEL_ID, "POTENTIAL_PARTNER_OF");
+        createRelationship(ownerOrganizationService.getOwnerCompanyId(), MOMO_ID, "POTENTIAL_PARTNER_OF");
+        createRelationship(AWS_ID, ownerOrganizationService.getOwnerCompanyId(), "SUPPLIER_OF");
+        createRelationship(RETAILPLUS_ID, ownerOrganizationService.getOwnerCompanyId(), "CUSTOMER_OF");
 
         // Inter-company relationships
         createRelationship(FPT_ID, CMC_ID, "COMPETITOR_OF");

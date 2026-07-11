@@ -45,22 +45,39 @@ public class AiExtractionResponseMapper {
                 
                 Object val = response != null ? response.getValue() : null;
                 
-                ExtractionFieldResult fieldResult = ExtractionFieldResult.builder()
-                        .fieldName(fieldName)
-                        .value(val)
-                        .confidence(response != null ? response.getConfidence() : null)
-                        .evidenceText(response != null ? response.getEvidenceText() : null)
-                        .pageNumber(response != null ? response.getPageNumber() : null)
-                        .build();
-                        
-                fieldResults.put(fieldName, fieldResult);
+                if (val instanceof Map) {
+                    Map<String, Object> nestedMap = (Map<String, Object>) val;
+                    for (Map.Entry<String, Object> nestedEntry : nestedMap.entrySet()) {
+                        String dottedName = fieldName + "." + nestedEntry.getKey();
+                        ExtractionFieldResult fieldResult = ExtractionFieldResult.builder()
+                                .fieldName(dottedName)
+                                .value(nestedEntry.getValue())
+                                .confidence(response != null ? response.getConfidence() : null)
+                                .evidenceText(response != null ? response.getEvidenceText() : null)
+                                .pageNumber(response != null ? response.getPageNumber() : null)
+                                .build();
+                        fieldResults.put(dottedName, fieldResult);
+                    }
+                } else {
+                    ExtractionFieldResult fieldResult = ExtractionFieldResult.builder()
+                            .fieldName(fieldName)
+                            .value(val)
+                            .confidence(response != null ? response.getConfidence() : null)
+                            .evidenceText(response != null ? response.getEvidenceText() : null)
+                            .pageNumber(response != null ? response.getPageNumber() : null)
+                            .build();
+                            
+                    fieldResults.put(fieldName, fieldResult);
+                }
             }
             
             // Construct the ExtractedCompanyData dynamically using Jackson or manual mapping
-            // An easy way is to build a flat map and then convertValue
+            // An easy way is to build a flat map and then convertValue.
+            // We need to re-assemble the nested maps for ExtractedCompanyData.
             Map<String, Object> flatMap = new HashMap<>();
-            for (Map.Entry<String, ExtractionFieldResult> entry : fieldResults.entrySet()) {
-                flatMap.put(entry.getKey(), entry.getValue().getValue());
+            for (Map.Entry<String, AiFieldResponse> entry : rawMap.entrySet()) {
+                AiFieldResponse response = entry.getValue();
+                flatMap.put(entry.getKey(), response != null ? response.getValue() : null);
             }
             extractedData = objectMapper.convertValue(flatMap, ExtractedCompanyData.class);
             
@@ -79,11 +96,24 @@ public class AiExtractionResponseMapper {
             Map<String, Object> flatMap = objectMapper.convertValue(extractedData, new TypeReference<Map<String, Object>>() {});
             
             for (Map.Entry<String, Object> entry : flatMap.entrySet()) {
-                ExtractionFieldResult fieldResult = ExtractionFieldResult.builder()
-                        .fieldName(entry.getKey())
-                        .value(entry.getValue())
-                        .build();
-                fieldResults.put(entry.getKey(), fieldResult);
+                Object val = entry.getValue();
+                if (val instanceof Map) {
+                    Map<String, Object> nestedMap = (Map<String, Object>) val;
+                    for (Map.Entry<String, Object> nestedEntry : nestedMap.entrySet()) {
+                        String dottedName = entry.getKey() + "." + nestedEntry.getKey();
+                        ExtractionFieldResult fieldResult = ExtractionFieldResult.builder()
+                                .fieldName(dottedName)
+                                .value(nestedEntry.getValue())
+                                .build();
+                        fieldResults.put(dottedName, fieldResult);
+                    }
+                } else {
+                    ExtractionFieldResult fieldResult = ExtractionFieldResult.builder()
+                            .fieldName(entry.getKey())
+                            .value(val)
+                            .build();
+                    fieldResults.put(entry.getKey(), fieldResult);
+                }
             }
             
             return RawExtractionOutput.builder()

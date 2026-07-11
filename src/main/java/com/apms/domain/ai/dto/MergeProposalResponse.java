@@ -15,6 +15,11 @@ public class MergeProposalResponse {
     private Map<String, Object> proposedBusiness;
     private Map<String, Object> proposedContact;
     private Map<String, Object> proposedInsights;
+    private Map<String, Object> proposedFinancial;
+    private Map<String, Object> proposedMarket;
+    private Map<String, Object> proposedInnovation;
+    private Map<String, Object> proposedRisk;
+    private Map<String, Object> proposedCompliance;
     private List<FieldEvidence> fieldEvidence;
     private Boolean hasConflicts;
     private Integer conflictCount;

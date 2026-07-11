@@ -162,10 +162,16 @@ public class ExtractionMergeService {
         Map<String, Object> proposedBusiness = new LinkedHashMap<>();
         Map<String, Object> proposedContact = new LinkedHashMap<>();
         Map<String, Object> proposedInsights = new LinkedHashMap<>();
+        Map<String, Object> proposedFinancial = new LinkedHashMap<>();
+        Map<String, Object> proposedMarket = new LinkedHashMap<>();
+        Map<String, Object> proposedInnovation = new LinkedHashMap<>();
+        Map<String, Object> proposedRisk = new LinkedHashMap<>();
+        Map<String, Object> proposedCompliance = new LinkedHashMap<>();
 
         // Merge extractions against current profile
         mergeProfileFields(extractions, currentProfile, extractionIds, sourceDocIds, importJobIds, fieldEvidence,
-                proposedIdentity, proposedBusiness, proposedContact, proposedInsights);
+                proposedIdentity, proposedBusiness, proposedContact, proposedInsights,
+                proposedFinancial, proposedMarket, proposedInnovation, proposedRisk, proposedCompliance);
 
         long conflictCount = fieldEvidence.stream().filter(fe -> Boolean.TRUE.equals(fe.getConflict())).count();
         boolean hasConflicts = conflictCount > 0;
@@ -183,6 +189,11 @@ public class ExtractionMergeService {
                 .proposedBusiness(proposedBusiness.isEmpty() ? null : proposedBusiness)
                 .proposedContact(proposedContact.isEmpty() ? null : proposedContact)
                 .proposedInsights(proposedInsights.isEmpty() ? null : proposedInsights)
+                .proposedFinancial(proposedFinancial.isEmpty() ? null : proposedFinancial)
+                .proposedMarket(proposedMarket.isEmpty() ? null : proposedMarket)
+                .proposedInnovation(proposedInnovation.isEmpty() ? null : proposedInnovation)
+                .proposedRisk(proposedRisk.isEmpty() ? null : proposedRisk)
+                .proposedCompliance(proposedCompliance.isEmpty() ? null : proposedCompliance)
                 .sourceDocumentIds(sourceDocIds)
                 .extractionIds(extractionIds)
                 .fieldEvidence(fieldEvidence)
@@ -204,6 +215,11 @@ public class ExtractionMergeService {
                 .proposedBusiness(proposedBusiness.isEmpty() ? null : proposedBusiness)
                 .proposedContact(proposedContact.isEmpty() ? null : proposedContact)
                 .proposedInsights(proposedInsights.isEmpty() ? null : proposedInsights)
+                .proposedFinancial(proposedFinancial.isEmpty() ? null : proposedFinancial)
+                .proposedMarket(proposedMarket.isEmpty() ? null : proposedMarket)
+                .proposedInnovation(proposedInnovation.isEmpty() ? null : proposedInnovation)
+                .proposedRisk(proposedRisk.isEmpty() ? null : proposedRisk)
+                .proposedCompliance(proposedCompliance.isEmpty() ? null : proposedCompliance)
                 .fieldEvidence(fieldEvidence)
                 .hasConflicts(hasConflicts)
                 .conflictCount((int) conflictCount)
@@ -405,7 +421,10 @@ public class ExtractionMergeService {
             List<String> extractionIds, List<String> sourceDocIds, List<String> importJobIds,
             List<FieldEvidence> evidence,
             Map<String, Object> proposedIdentity, Map<String, Object> proposedBusiness,
-            Map<String, Object> proposedContact, Map<String, Object> proposedInsights) {
+            Map<String, Object> proposedContact, Map<String, Object> proposedInsights,
+            Map<String, Object> proposedFinancial, Map<String, Object> proposedMarket,
+            Map<String, Object> proposedInnovation, Map<String, Object> proposedRisk,
+            Map<String, Object> proposedCompliance) {
 
         // Merge across all extractions first
         String mergedLegalName = null, mergedTradeName = null, mergedTaxCode = null;

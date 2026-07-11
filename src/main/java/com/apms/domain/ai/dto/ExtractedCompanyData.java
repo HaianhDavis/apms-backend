@@ -38,6 +38,12 @@ public class ExtractedCompanyData {
     private List<String> opportunities;
     private List<String> threats;
 
+    private com.apms.domain.company.model.FinancialInfo financial;
+    private com.apms.domain.company.model.MarketInfo market;
+    private com.apms.domain.company.model.InnovationInfo innovation;
+    private com.apms.domain.company.model.RiskInfo risk;
+    private com.apms.domain.company.model.ComplianceInfo compliance;
+
     @Data
     @Builder
     @NoArgsConstructor
