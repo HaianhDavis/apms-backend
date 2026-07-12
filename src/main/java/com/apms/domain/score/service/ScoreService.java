@@ -73,7 +73,7 @@ public class ScoreService {
 
     @Transactional(readOnly = true)
     public List<ScoreSnapshotDto> getCompanyScores(String companyId) {
-        return scoreSnapshotRepository.findByCompanyIdOrderByCreatedAtDesc(companyId).stream()
+        return scoreSnapshotRepository.findByCompanyIdAndEvaluatedRoleIsNullOrderByCreatedAtDesc(companyId).stream()
                 .map(this::toDto)
                 .toList();
     }

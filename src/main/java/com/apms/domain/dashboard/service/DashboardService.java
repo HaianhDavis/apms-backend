@@ -70,7 +70,7 @@ public class DashboardService {
 
     @Transactional(readOnly = true)
     public List<ScoreSnapshotDto> getRecentScores() {
-        return scoreSnapshotRepository.findTop10ByOrderByCreatedAtDesc().stream()
+        return scoreSnapshotRepository.findTop10ByEvaluatedRoleIsNullOrderByCreatedAtDesc().stream()
                 .map(this::toScoreDto)
                 .toList();
     }

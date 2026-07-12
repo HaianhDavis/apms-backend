@@ -5,5 +5,6 @@ public enum SubmissionType {
     PROFILE_UPDATE_PROPOSAL,
     DOCUMENT_COLLECTION,
     COMPANY_REPORT,
+    ROLE_EVALUATION,
     OTHER
 }

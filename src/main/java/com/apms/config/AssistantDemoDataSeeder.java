@@ -500,7 +500,7 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
     }
     
     private void ensureScore(Project project, String companyId, int fit, int comp, int risk, int rel) {
-        if (!scoreSnapshotRepository.findByCompanyIdOrderByCreatedAtDesc(companyId).isEmpty()) {
+        if (!scoreSnapshotRepository.findByCompanyIdAndEvaluatedRoleIsNullOrderByCreatedAtDesc(companyId).isEmpty()) {
             return;
         }
         scoreSnapshotRepository.save(ScoreSnapshot.builder()

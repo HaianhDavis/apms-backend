@@ -117,7 +117,7 @@ public class AssistantContextService {
 
                     // ── 3. Load latest ScoreSnapshot ─────────────────────────────
                     List<ScoreSnapshot> snapshots = scoreSnapshotRepository
-                            .findByCompanyIdOrderByCreatedAtDesc(profile.getCompanyId());
+                            .findByCompanyIdAndEvaluatedRoleIsNullOrderByCreatedAtDesc(profile.getCompanyId());
 
                     if (!snapshots.isEmpty()) {
                         latestScore = snapshots.get(0);

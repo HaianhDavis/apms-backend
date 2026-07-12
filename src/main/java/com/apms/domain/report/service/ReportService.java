@@ -95,7 +95,7 @@ public class ReportService {
         List<CompanyReportItemResponse> responses = profiles.stream().map(profile -> {
             ScoreSnapshot latestScore = null;
             if (StringUtils.hasText(profile.getCompanyId())) {
-                List<ScoreSnapshot> snapshots = scoreSnapshotRepository.findByCompanyIdOrderByCreatedAtDesc(profile.getCompanyId());
+                List<ScoreSnapshot> snapshots = scoreSnapshotRepository.findByCompanyIdAndEvaluatedRoleIsNullOrderByCreatedAtDesc(profile.getCompanyId());
                 if (!snapshots.isEmpty()) {
                     latestScore = snapshots.get(0);
                 }

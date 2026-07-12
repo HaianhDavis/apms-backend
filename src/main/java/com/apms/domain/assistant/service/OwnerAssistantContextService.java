@@ -293,7 +293,7 @@ public class OwnerAssistantContextService {
     // ── Utilities ─────────────────────────────────────────────────────────────
 
     private ScoreSnapshot getLatestScore(String companyId) {
-        List<ScoreSnapshot> snapshots = scoreSnapshotRepository.findByCompanyIdOrderByCreatedAtDesc(companyId);
+        List<ScoreSnapshot> snapshots = scoreSnapshotRepository.findByCompanyIdAndEvaluatedRoleIsNullOrderByCreatedAtDesc(companyId);
         return snapshots.isEmpty() ? null : snapshots.get(0);
     }
 
