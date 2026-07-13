@@ -167,7 +167,9 @@ Additive only. Scoring services optionally consume metrics when available.
 
 ---
 
-## Phase 2C.5 — Scoring-Specific AI Suggestion Quality Model [x] COMPLETED
+## Phase 2C.5 — Scoring-Specific AI Suggestion Quality Model
+
+### Phase 2C.5A — Scoring-Specific AI Suggestion Quality Foundation [x] COMPLETED
 
 ### Goal
 Design and implement an AI criterion suggestion quality model with evidence, confidence, validation, and review status — separate from the extraction quality system.

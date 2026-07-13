@@ -19,6 +19,14 @@ To ensure at most one active draft per `projectId + taskId + evaluatedRole`, the
 - **Terminal states** (APPROVED, REJECTED): `activeDraftKey` is cleared to `null`; `active = false`.
 - Because the index is **sparse**, multiple documents with `activeDraftKey = null` (terminal states) are all allowed.
 
+## Suggestion Review Workflow
+During the `DRAFT` or `REVISION_REQUIRED` states, staff can request AI criterion suggestions. The suggestions are tracked inside the draft and must be reviewed.
+- **Accept**: Converts the suggestion into a `CriterionInput` (`AUTOMATIC_PROPOSAL`) and sets the review status to `ACCEPTED`.
+- **Edit**: Modifies the suggested score and converts it into a `CriterionInput` (`MANUAL_OVERRIDE`) with an `overrideReason`. Sets review status to `EDITED`.
+- **Reject**: Rejects the suggestion completely, removing any `AUTOMATIC_PROPOSAL` input that was previously accepted. Sets review status to `REJECTED`.
+- **Needs More Data**: Marks the suggestion as `NEEDS_MORE_DATA` with a `missingData` list, preventing acceptance.
+The system enforces strict validation (blocking WARNINGs or FAILs cannot be accepted without being resolved or overridden).
+
 ## Revision Workflow — Submission Status Mapping
 When a manager requests revision, the following state transitions occur:
 

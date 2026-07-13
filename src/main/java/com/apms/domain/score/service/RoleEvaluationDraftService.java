@@ -255,21 +255,23 @@ public class RoleEvaluationDraftService {
             throw new IllegalStateException("Draft cannot be edited in current state");
         }
 
+
         AutomaticSuggestion suggestion = draft.getAutomaticSuggestions().get(criterionKey);
         if (suggestion == null) {
             throw new IllegalArgumentException("No automatic suggestion exists for " + criterionKey);
         }
 
-        suggestionValidator.validate(criterionKey, suggestion, draft);
+        CriterionSuggestionValidator.SuggestionValidationResult validationResult = suggestionValidator.validate(criterionKey, suggestion, draft);
 
-        if (suggestion.getValidationStatus() == CriterionSuggestionValidationStatus.FAIL ||
-            suggestion.getEffectiveReviewStatus() == CriterionSuggestionReviewStatus.NEEDS_MORE_DATA) {
-            throw new IllegalArgumentException("Cannot accept suggestion with status FAIL or NEEDS_MORE_DATA");
+        if (validationResult.getStatus() == CriterionSuggestionValidationStatus.FAIL ||
+            validationResult.isBlocking() ||
+            suggestion.getReviewStatus() == CriterionSuggestionReviewStatus.NEEDS_MORE_DATA) {
+            throw new IllegalArgumentException("Cannot accept suggestion with status FAIL, blocking WARNING, or NEEDS_MORE_DATA");
         }
 
-        if (suggestion.getValidationStatus() == CriterionSuggestionValidationStatus.WARNING) {
+        if (validationResult.getStatus() == CriterionSuggestionValidationStatus.WARNING && !validationResult.isBlocking()) {
             if (request.getExplanation() == null || request.getExplanation().isBlank()) {
-                throw new IllegalArgumentException("Accepting a WARNING suggestion requires a review comment (explanation)");
+                throw new IllegalArgumentException("Accepting a non-blocking WARNING suggestion requires a review comment (explanation)");
             }
         }
 
@@ -330,7 +332,7 @@ public class RoleEvaluationDraftService {
             throw new IllegalArgumentException("No automatic suggestion exists for " + criterionKey);
         }
 
-        suggestionValidator.validate(criterionKey, suggestion, draft);
+        CriterionSuggestionValidator.SuggestionValidationResult validationResult = suggestionValidator.validate(criterionKey, suggestion, draft);
 
         suggestion.setReviewStatus(CriterionSuggestionReviewStatus.EDITED);
         suggestion.setReviewedByAccountId(accountId);
@@ -379,7 +381,7 @@ public class RoleEvaluationDraftService {
             throw new IllegalArgumentException("No automatic suggestion exists for " + criterionKey);
         }
 
-        suggestionValidator.validate(criterionKey, suggestion, draft);
+        CriterionSuggestionValidator.SuggestionValidationResult validationResult = suggestionValidator.validate(criterionKey, suggestion, draft);
 
         suggestion.setReviewStatus(CriterionSuggestionReviewStatus.REJECTED);
         suggestion.setReviewedByAccountId(accountId);
@@ -427,7 +429,7 @@ public class RoleEvaluationDraftService {
         suggestion.setReviewComment(request.getReviewComment());
         suggestion.setMissingData(request.getMissingData());
 
-        suggestionValidator.validate(criterionKey, suggestion, draft);
+        CriterionSuggestionValidator.SuggestionValidationResult validationResult = suggestionValidator.validate(criterionKey, suggestion, draft);
 
         draft.setUpdatedAt(LocalDateTime.now());
 

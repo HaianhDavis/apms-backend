@@ -36,6 +36,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import com.apms.domain.score.enums.CriterionSuggestionValidationStatus;
+import com.apms.domain.score.service.CriterionSuggestionValidator.SuggestionValidationResult;
+import java.util.ArrayList;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
@@ -103,6 +106,9 @@ class RoleEvaluationDraftServiceTest {
 
         lenient().when(ownerProperties.getCompanyProfileId()).thenReturn("fpt-profile-doc-id");
         lenient().when(roleMapper.map(RelationshipType.COMPETITOR_OF)).thenReturn(CompanyRole.COMPETITOR);
+        lenient().when(suggestionValidator.validate(any(), any(), any())).thenReturn(
+                new SuggestionValidationResult(CriterionSuggestionValidationStatus.PASS, false, new ArrayList<>())
+        );
     }
 
     // --- Create Draft ---

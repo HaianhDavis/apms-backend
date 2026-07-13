@@ -16,7 +16,23 @@ public class CriterionSuggestionValidator {
 
     private static final Pattern SOURCE_PATH_PATTERN = Pattern.compile("^(reference|target|relationship|contract|metric|external)(\\.[a-zA-Z0-9_]+)*$");
 
-    public void validate(String criterionKey, AutomaticSuggestion suggestion, RoleEvaluationDraft draft) {
+    public static class SuggestionValidationResult {
+        private final CriterionSuggestionValidationStatus status;
+        private final boolean isBlocking;
+        private final List<String> messages;
+
+        public SuggestionValidationResult(CriterionSuggestionValidationStatus status, boolean isBlocking, List<String> messages) {
+            this.status = status;
+            this.isBlocking = isBlocking;
+            this.messages = messages;
+        }
+
+        public CriterionSuggestionValidationStatus getStatus() { return status; }
+        public boolean isBlocking() { return isBlocking; }
+        public List<String> getMessages() { return messages; }
+    }
+
+    public SuggestionValidationResult validate(String criterionKey, AutomaticSuggestion suggestion, RoleEvaluationDraft draft) {
 
         // 1. Unknown criterion rejection
         if (!CanonicalRoleCriteria.isValidCriterionForRole(draft.getEvaluatedRole(), criterionKey)) {
@@ -46,7 +62,7 @@ public class CriterionSuggestionValidator {
         }
 
         // 4. Evidence coverage range validation
-        BigDecimal coverage = suggestion.getEffectiveEvidenceCoverage();
+        BigDecimal coverage = suggestion.getEvidenceCoverage();
         if (coverage != null) {
             if (coverage.compareTo(BigDecimal.ZERO) < 0 ||
                 coverage.compareTo(BigDecimal.ONE) > 0) {
@@ -93,9 +109,29 @@ public class CriterionSuggestionValidator {
             if (suggestion.getSuggestedRawScore() != null) {
                 throw new IllegalArgumentException("NEEDS_MORE_DATA requires suggestedRawScore to be null");
             }
-            if (suggestion.getEffectiveMissingData().isEmpty()) {
+            if (suggestion.getMissingData() == null || suggestion.getMissingData().isEmpty()) {
                 throw new IllegalArgumentException("missingData must be non-empty when status is NEEDS_MORE_DATA");
             }
         }
+
+        // Derive blocking/non-blocking WARNING
+        CriterionSuggestionValidationStatus persistedStatus = suggestion.getValidationStatus();
+        if (persistedStatus == null) {
+            persistedStatus = CriterionSuggestionValidationStatus.PASS;
+        }
+
+        boolean isBlocking = false;
+        if (persistedStatus == CriterionSuggestionValidationStatus.FAIL) {
+            isBlocking = true;
+        } else if (persistedStatus == CriterionSuggestionValidationStatus.WARNING) {
+            // For now, any warning with empty confidence or coverage < 0.5 is blocking, as an example.
+            // Or if validationWarnings contains specific strings.
+            // If the user didn't specify the exact rule, we can make it blocking if coverage is critically low.
+            if (suggestion.getEvidenceCoverage() != null && suggestion.getEvidenceCoverage().compareTo(new BigDecimal("0.3")) < 0) {
+                isBlocking = true; // example rule
+            }
+        }
+
+        return new SuggestionValidationResult(persistedStatus, isBlocking, suggestion.getValidationWarnings());
     }
 }

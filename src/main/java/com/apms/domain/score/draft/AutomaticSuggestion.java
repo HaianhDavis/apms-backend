@@ -99,16 +99,4 @@ public class AutomaticSuggestion {
         }
         return CriterionSuggestionReviewStatus.PENDING;
     }
-
-    public BigDecimal getEffectiveEvidenceCoverage() {
-        return evidenceCoverage != null ? evidenceCoverage : componentCoverage;
-    }
-
-    public List<String> getEffectiveValidationWarnings() {
-        return (validationWarnings != null && !validationWarnings.isEmpty()) ? validationWarnings : (calculationWarnings != null ? calculationWarnings : new ArrayList<>());
-    }
-
-    public List<String> getEffectiveMissingData() {
-        return (missingData != null && !missingData.isEmpty()) ? missingData : (missingComponents != null ? missingComponents : new ArrayList<>());
-    }
 }

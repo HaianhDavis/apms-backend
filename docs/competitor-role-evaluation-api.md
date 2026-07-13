@@ -27,12 +27,31 @@ This document describes the REST API for managing `RoleEvaluationDraft` resource
 `POST /api/v1/role-evaluations/{evaluationId}/product-market-overlap/suggest`
 - Calculates and returns a proposed score based on Jaccard similarity.
 
+### Suggest Criterion
+`POST /api/v1/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest`
+- Triggers AI suggestion generation for the specified criterion.
+
 ### Accept Suggestion
-`POST /api/v1/role-evaluations/{evaluationId}/product-market-overlap/accept`
-- acceptance converts the suggestion into a CriterionInput
-- inputMethod = AUTOMATIC_PROPOSAL
-- managerConfirmed remains false
-- Manager confirmation is still required before approval
+`POST /api/v1/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/accept`
+- Acceptance converts the suggestion into a CriterionInput.
+- `inputMethod = AUTOMATIC_PROPOSAL`.
+- Manager confirmation is still required before approval.
+- The legacy product-market overlap endpoint `/product-market-overlap/accept` remains supported.
+
+### Edit Suggestion
+`POST /api/v1/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/edit`
+- Modifies the suggested score and saves it as `MANUAL_OVERRIDE`.
+- `overrideReason` is required.
+
+### Reject Suggestion
+`POST /api/v1/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/reject`
+- Rejects the AI suggestion completely and removes any associated `AUTOMATIC_PROPOSAL` input.
+- `reviewComment` is required.
+
+### Request More Data for Suggestion
+`POST /api/v1/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/needs-more-data`
+- Marks the suggestion as needing more data.
+- The `missingData` list allows structured tracking of gaps preventing scoring.
 
 ### Calculate Preview
 `POST /api/v1/role-evaluations/{evaluationId}/calculate-preview`

@@ -144,6 +144,61 @@ class CriterionSuggestionReviewServiceTest {
 
         service.markSuggestionNeedsMoreData("draft1", "productMarketOverlapScore", req, 1L);
         assertThat(draft.getAutomaticSuggestions().get("productMarketOverlapScore").getReviewStatus()).isEqualTo(CriterionSuggestionReviewStatus.NEEDS_MORE_DATA);
+        // Ensure no CriterionInput is created
+        assertThat(draft.getCriterionInputs()).doesNotContainKey("productMarketOverlapScore");
+    }
+
+    @Test
+    void testNeedsMoreDataPreservesManualOverride() {
+        RoleEvaluationDraft draft = createDraftWithSuggestion("productMarketOverlapScore", null);
+
+        CriterionInput existing = new CriterionInput();
+        existing.setInputMethod(CriterionInputMethod.MANUAL_OVERRIDE);
+        draft.getCriterionInputs().put("productMarketOverlapScore", existing);
+
+        NeedsMoreDataCriterionSuggestionRequest req = new NeedsMoreDataCriterionSuggestionRequest();
+        req.setReviewComment("Need data");
+        req.setMissingData(List.of("Missing stuff"));
+
+        service.markSuggestionNeedsMoreData("draft1", "productMarketOverlapScore", req, 1L);
+
+        // Manual override should not be silently deleted
+        assertThat(draft.getCriterionInputs()).containsKey("productMarketOverlapScore");
+        assertThat(draft.getCriterionInputs().get("productMarketOverlapScore").getInputMethod()).isEqualTo(CriterionInputMethod.MANUAL_OVERRIDE);
+    }
+
+    @Test
+    void testNeedsMoreDataCannotBeAccepted() {
+        RoleEvaluationDraft draft = createDraftWithSuggestion("productMarketOverlapScore", null);
+        draft.getAutomaticSuggestions().get("productMarketOverlapScore").setReviewStatus(CriterionSuggestionReviewStatus.NEEDS_MORE_DATA);
+        draft.getAutomaticSuggestions().get("productMarketOverlapScore").setMissingData(List.of("Some missing info"));
+
+        AcceptAutomaticSuggestionRequest req = new AcceptAutomaticSuggestionRequest();
+        req.setExplanation("Trying to accept anyway");
+
+        assertThatThrownBy(() -> service.acceptCriterionSuggestion("draft1", "productMarketOverlapScore", req, 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cannot accept suggestion with status FAIL, blocking WARNING, or NEEDS_MORE_DATA");
+    }
+
+    @Test
+    void testNeedsMoreDataRequiresNullScoreAndMissingData() {
+        // Test non-null score
+        RoleEvaluationDraft draft1 = createDraftWithSuggestion("productMarketOverlapScore", new BigDecimal("75"));
+        NeedsMoreDataCriterionSuggestionRequest req1 = new NeedsMoreDataCriterionSuggestionRequest();
+        req1.setMissingData(List.of("Stuff"));
+
+        assertThatThrownBy(() -> service.markSuggestionNeedsMoreData("draft1", "productMarketOverlapScore", req1, 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cannot mark as NEEDS_MORE_DATA when a score is suggested. Must be null.");
+
+        // Test missingData is empty
+        RoleEvaluationDraft draft2 = createDraftWithSuggestion("productMarketOverlapScore", null);
+        NeedsMoreDataCriterionSuggestionRequest req2 = new NeedsMoreDataCriterionSuggestionRequest();
+
+        assertThatThrownBy(() -> service.markSuggestionNeedsMoreData("draft1", "productMarketOverlapScore", req2, 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("missingData must be non-empty");
     }
 
     @Test
@@ -208,6 +263,59 @@ class CriterionSuggestionReviewServiceTest {
     }
 
     @Test
+    void testStaffAcceptsThenRejectsSuggestion() {
+        RoleEvaluationDraft draft = createDraftWithSuggestion("productMarketOverlapScore", new BigDecimal("75"));
+        draft.getAutomaticSuggestions().get("productMarketOverlapScore").setValidationStatus(CriterionSuggestionValidationStatus.PASS);
+
+        // 1. ACCEPT
+        AcceptAutomaticSuggestionRequest acceptReq = new AcceptAutomaticSuggestionRequest();
+        acceptReq.setExplanation("Looks good initially");
+        service.acceptCriterionSuggestion("draft1", "productMarketOverlapScore", acceptReq, 1L);
+
+        // Verify ACCEPT created AUTOMATIC_PROPOSAL
+        CriterionInput input = draft.getCriterionInputs().get("productMarketOverlapScore");
+        assertThat(input).isNotNull();
+        assertThat(input.getInputMethod()).isEqualTo(CriterionInputMethod.AUTOMATIC_PROPOSAL);
+
+        // 2. REJECT the same suggestion
+        RejectCriterionSuggestionRequest rejectReq = new RejectCriterionSuggestionRequest();
+        rejectReq.setReviewComment("Actually, this is wrong upon second thought");
+        service.rejectCriterionSuggestion("draft1", "productMarketOverlapScore", rejectReq, 1L);
+
+        // Verify AUTOMATIC_PROPOSAL is removed and status is REJECTED
+        assertThat(draft.getCriterionInputs()).doesNotContainKey("productMarketOverlapScore");
+        assertThat(draft.getAutomaticSuggestions().get("productMarketOverlapScore").getReviewStatus()).isEqualTo(CriterionSuggestionReviewStatus.REJECTED);
+    }
+
+    @Test
+    void testRejectWithoutCommentFails() {
+        RoleEvaluationDraft draft = createDraftWithSuggestion("productMarketOverlapScore", new BigDecimal("75"));
+        RejectCriterionSuggestionRequest req = new RejectCriterionSuggestionRequest();
+
+        assertThatThrownBy(() -> service.rejectCriterionSuggestion("draft1", "productMarketOverlapScore", req, 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Rejection requires a review comment");
+    }
+
+    @Test
+    void testRejectDoesNotRemoveManualOverride() {
+        RoleEvaluationDraft draft = createDraftWithSuggestion("productMarketOverlapScore", new BigDecimal("75"));
+
+        CriterionInput existing = new CriterionInput();
+        existing.setInputMethod(CriterionInputMethod.MANUAL_OVERRIDE);
+        draft.getCriterionInputs().put("productMarketOverlapScore", existing);
+
+        RejectCriterionSuggestionRequest req = new RejectCriterionSuggestionRequest();
+        req.setReviewComment("Reject AI, keep my override");
+
+        service.rejectCriterionSuggestion("draft1", "productMarketOverlapScore", req, 1L);
+
+        // MANUAL_OVERRIDE input should remain untouched
+        assertThat(draft.getCriterionInputs()).containsKey("productMarketOverlapScore");
+        assertThat(draft.getCriterionInputs().get("productMarketOverlapScore").getInputMethod()).isEqualTo(CriterionInputMethod.MANUAL_OVERRIDE);
+    }
+
+    @Test
     void testFailSuggestionCannotBeAccepted() {
         RoleEvaluationDraft draft = createDraftWithSuggestion("productMarketOverlapScore", new BigDecimal("75"));
         draft.getAutomaticSuggestions().get("productMarketOverlapScore").setValidationStatus(CriterionSuggestionValidationStatus.FAIL);
@@ -216,7 +324,42 @@ class CriterionSuggestionReviewServiceTest {
 
         assertThatThrownBy(() -> service.acceptCriterionSuggestion("draft1", "productMarketOverlapScore", req, 1L))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Cannot accept suggestion with status FAIL");
+                .hasMessageContaining("Cannot accept suggestion with status FAIL, blocking WARNING, or NEEDS_MORE_DATA");
+    }
+
+    @Test
+    void testBlockingWarningCannotBeAccepted() {
+        RoleEvaluationDraft draft = createDraftWithSuggestion("productMarketOverlapScore", new BigDecimal("75"));
+        draft.getAutomaticSuggestions().get("productMarketOverlapScore").setValidationStatus(CriterionSuggestionValidationStatus.WARNING);
+        // Force a condition that makes it blocking in the validator, e.g. coverage < 0.2 and score > 0
+        draft.getAutomaticSuggestions().get("productMarketOverlapScore").setEvidenceCoverage(new BigDecimal("0.1"));
+
+        AcceptAutomaticSuggestionRequest req = new AcceptAutomaticSuggestionRequest();
+        req.setExplanation("Ignoring warnings");
+
+        assertThatThrownBy(() -> service.acceptCriterionSuggestion("draft1", "productMarketOverlapScore", req, 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Cannot accept suggestion with status FAIL, blocking WARNING, or NEEDS_MORE_DATA");
+    }
+
+    @Test
+    void testNonBlockingWarningRequiresComment() {
+        RoleEvaluationDraft draft = createDraftWithSuggestion("productMarketOverlapScore", new BigDecimal("75"));
+        draft.getAutomaticSuggestions().get("productMarketOverlapScore").setValidationStatus(CriterionSuggestionValidationStatus.WARNING);
+        // Make it non-blocking but warning, e.g. coverage is 0.4
+        draft.getAutomaticSuggestions().get("productMarketOverlapScore").setEvidenceCoverage(new BigDecimal("0.4"));
+        draft.getAutomaticSuggestions().get("productMarketOverlapScore").setConfidence(new BigDecimal("0.5"));
+
+        AcceptAutomaticSuggestionRequest req = new AcceptAutomaticSuggestionRequest();
+        // Null comment
+        assertThatThrownBy(() -> service.acceptCriterionSuggestion("draft1", "productMarketOverlapScore", req, 1L))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Accepting a non-blocking WARNING suggestion requires a review comment (explanation)");
+
+        // Valid comment
+        req.setExplanation("I checked, it's fine");
+        service.acceptCriterionSuggestion("draft1", "productMarketOverlapScore", req, 1L);
+        assertThat(draft.getAutomaticSuggestions().get("productMarketOverlapScore").getReviewStatus()).isEqualTo(CriterionSuggestionReviewStatus.ACCEPTED);
     }
 
     private RoleEvaluationDraft createDraftWithSuggestion(String key, BigDecimal score) {

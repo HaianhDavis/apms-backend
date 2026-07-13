@@ -178,6 +178,90 @@ class RoleEvaluationDraftControllerTest {
                 any(AcceptAutomaticSuggestionRequest.class), eq(123L));
     }
 
+    // ---- acceptCriterionSuggestion ----
+
+    @Test
+    void acceptCriterionSuggestion_returnsOk() throws Exception {
+        currentPrincipal = staffUser;
+
+        AcceptAutomaticSuggestionRequest req = new AcceptAutomaticSuggestionRequest();
+        req.setExplanation("Valid suggestion");
+
+        when(draftService.acceptCriterionSuggestion(eq("eval-1"), eq("testKey"), any(), eq(123L)))
+                .thenReturn(new RoleEvaluationDraftResponse());
+
+        mockMvc.perform(post("/api/v1/role-evaluations/eval-1/criteria/testKey/suggest/accept")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isOk());
+
+        verify(draftService).acceptCriterionSuggestion(eq("eval-1"), eq("testKey"),
+                any(AcceptAutomaticSuggestionRequest.class), eq(123L));
+    }
+
+    // ---- editCriterionSuggestion ----
+
+    @Test
+    void editCriterionSuggestion_returnsOk() throws Exception {
+        currentPrincipal = staffUser;
+
+        EditCriterionSuggestionRequest req = new EditCriterionSuggestionRequest();
+        req.setOverrideReason("Needs adjustment");
+
+        when(draftService.editCriterionSuggestion(eq("eval-1"), eq("testKey"), any(), eq(123L)))
+                .thenReturn(new RoleEvaluationDraftResponse());
+
+        mockMvc.perform(post("/api/v1/role-evaluations/eval-1/criteria/testKey/suggest/edit")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isOk());
+
+        verify(draftService).editCriterionSuggestion(eq("eval-1"), eq("testKey"),
+                any(EditCriterionSuggestionRequest.class), eq(123L));
+    }
+
+    // ---- rejectCriterionSuggestion ----
+
+    @Test
+    void rejectCriterionSuggestion_returnsOk() throws Exception {
+        currentPrincipal = staffUser;
+
+        RejectCriterionSuggestionRequest req = new RejectCriterionSuggestionRequest();
+        req.setReviewComment("Invalid logic");
+
+        when(draftService.rejectCriterionSuggestion(eq("eval-1"), eq("testKey"), any(), eq(123L)))
+                .thenReturn(new RoleEvaluationDraftResponse());
+
+        mockMvc.perform(post("/api/v1/role-evaluations/eval-1/criteria/testKey/suggest/reject")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isOk());
+
+        verify(draftService).rejectCriterionSuggestion(eq("eval-1"), eq("testKey"),
+                any(RejectCriterionSuggestionRequest.class), eq(123L));
+    }
+
+    // ---- markSuggestionNeedsMoreData ----
+
+    @Test
+    void markSuggestionNeedsMoreData_returnsOk() throws Exception {
+        currentPrincipal = staffUser;
+
+        NeedsMoreDataCriterionSuggestionRequest req = new NeedsMoreDataCriterionSuggestionRequest();
+        req.setReviewComment("Missing revenue data");
+
+        when(draftService.markSuggestionNeedsMoreData(eq("eval-1"), eq("testKey"), any(), eq(123L)))
+                .thenReturn(new RoleEvaluationDraftResponse());
+
+        mockMvc.perform(post("/api/v1/role-evaluations/eval-1/criteria/testKey/suggest/needs-more-data")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isOk());
+
+        verify(draftService).markSuggestionNeedsMoreData(eq("eval-1"), eq("testKey"),
+                any(NeedsMoreDataCriterionSuggestionRequest.class), eq(123L));
+    }
+
     // ---- submitDraft ----
 
     @Test
