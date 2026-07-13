@@ -58,7 +58,11 @@ class RoleEvaluationDraftServiceTest {
     @Mock private CompetitorComparisonService comparisonService;
     @Mock private RoleScoringEngine scoringEngine;
     @Mock private RelationshipTypeToCompanyRoleMapper roleMapper;
-    @Mock private AuditLogService auditLogService;
+    @Mock
+    private AuditLogService auditLogService;
+
+    @Mock
+    private CriterionSuggestionValidator suggestionValidator;
 
     @InjectMocks
     private RoleEvaluationDraftService service;
@@ -107,16 +111,16 @@ class RoleEvaluationDraftServiceTest {
     void createDraft_Success() {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(taskRepository.findById(10L)).thenReturn(Optional.of(task));
-        
+
         when(identifierResolver.resolveTargetProfile("target-company-uuid")).thenReturn(targetProfile);
         when(identifierResolver.resolveProfileByDocumentId("fpt-profile-doc-id")).thenReturn(fptProfile);
-        
+
         CompanyProfileVersion targetVersion = CompanyProfileVersion.builder().version(1).build();
         when(identifierResolver.resolveVersion("target-profile-doc-id", 1)).thenReturn(targetVersion);
-        
+
         CompanyProfileVersion fptVersion = CompanyProfileVersion.builder().version(2).build();
         when(identifierResolver.resolveVersion("fpt-profile-doc-id", 2)).thenReturn(fptVersion);
-        
+
         when(ruleSetRepository.findByEvaluatedRoleAndActiveTrue(CompanyRole.COMPETITOR)).thenReturn(Optional.of(ruleSet));
         when(draftRepository.existsByActiveDraftKey("1:10:COMPETITOR")).thenReturn(false);
 
@@ -135,16 +139,16 @@ class RoleEvaluationDraftServiceTest {
     @Test
     void createDraft_OwnerTarget_ThrowsException() {
         project.setTargetCompanyProfileId("fpt-profile-doc-id");
-        
+
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(taskRepository.findById(10L)).thenReturn(Optional.of(task));
-        
+
         CompanyProfile targetAsOwner = new CompanyProfile();
         targetAsOwner.setId("fpt-profile-doc-id");
         targetAsOwner.setCompanyId("fpt-company-uuid");
         when(identifierResolver.resolveTargetProfile("fpt-profile-doc-id")).thenReturn(targetAsOwner);
 
-        assertThrows(IllegalArgumentException.class, () -> 
+        assertThrows(IllegalArgumentException.class, () ->
             service.createDraft(1L, 10L, new CreateRoleEvaluationDraftRequest(), 999L));
     }
 
@@ -169,7 +173,7 @@ class RoleEvaluationDraftServiceTest {
         assertEquals(new BigDecimal("80.0"), input.getRawScore());
         assertEquals(CriterionInputMethod.MANUAL_REVIEWED, input.getInputMethod());
         assertFalse(input.getManagerConfirmed());
-        
+
         verify(auditLogService).log(eq(999L), eq(AuditAction.ROLE_EVALUATION_CRITERION_UPDATED), any(), eq("draft-1"), any());
     }
 
@@ -186,13 +190,13 @@ class RoleEvaluationDraftServiceTest {
 
         when(identifierResolver.resolveProfileByDocumentId("target-doc")).thenReturn(targetProfile);
         when(identifierResolver.resolveProfileByDocumentId("ref-doc")).thenReturn(fptProfile);
-        
+
         AutomaticSuggestion suggestion = new AutomaticSuggestion();
         suggestion.setSuggestedRawScore(new BigDecimal("50.0"));
         when(comparisonService.suggestProductMarketOverlap(targetProfile, fptProfile)).thenReturn(suggestion);
 
         RoleEvaluationDraftResponse res = service.suggestProductMarketOverlap("draft-1");
-        
+
         assertNotNull(res);
         assertNotNull(draft.getAutomaticSuggestions().get("productMarketOverlapScore"));
         verify(draftRepository).save(draft);
@@ -203,26 +207,26 @@ class RoleEvaluationDraftServiceTest {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setId("draft-1");
         draft.setStatus(RoleEvaluationStatus.DRAFT);
-        
+
         AutomaticSuggestion suggestion = new AutomaticSuggestion();
         suggestion.setSuggestedRawScore(new BigDecimal("75.0"));
         suggestion.setSuggestionRationale("Matched well");
         draft.getAutomaticSuggestions().put("productMarketOverlapScore", suggestion);
-        
+
         when(draftRepository.findById("draft-1")).thenReturn(Optional.of(draft));
         when(draftRepository.save(any())).thenReturn(draft);
 
         AcceptAutomaticSuggestionRequest req = new AcceptAutomaticSuggestionRequest();
         req.setExplanation("Extra note");
-        
+
         service.acceptAutomaticSuggestion("draft-1", req, 999L);
-        
+
         CriterionInput input = draft.getCriterionInputs().get("productMarketOverlapScore");
         assertNotNull(input);
         assertEquals(new BigDecimal("75.0"), input.getRawScore());
         assertEquals(CriterionInputMethod.AUTOMATIC_PROPOSAL, input.getInputMethod());
         assertTrue(suggestion.getAccepted());
-        
+
         verify(auditLogService).log(eq(999L), eq(AuditAction.ROLE_EVALUATION_SUGGESTION_ACCEPTED), any(), any(), any());
     }
 
@@ -233,14 +237,14 @@ class RoleEvaluationDraftServiceTest {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setId("draft-1");
         draft.setEvaluatedRole(CompanyRole.COMPETITOR);
-        
+
         CriterionInput input = new CriterionInput();
         input.setRawScore(new BigDecimal("90.0"));
         draft.getCriterionInputs().put("someCriterion", input);
-        
+
         when(draftRepository.findById("draft-1")).thenReturn(Optional.of(draft));
         when(ruleSetRepository.findByEvaluatedRoleAndActiveTrue(CompanyRole.COMPETITOR)).thenReturn(Optional.of(ruleSet));
-        
+
         RoleEvaluationCalculationResult result = RoleEvaluationCalculationResult.builder()
                 .completenessStatus(EvaluationCompletenessStatus.INCOMPLETE)
                 .overallScore(null)
@@ -248,11 +252,11 @@ class RoleEvaluationDraftServiceTest {
         when(scoringEngine.calculate(any())).thenReturn(result);
 
         RoleEvaluationPreviewResponse response = service.calculatePreview("draft-1");
-        
+
         assertNotNull(response);
         assertEquals(EvaluationCompletenessStatus.INCOMPLETE, response.getCompletenessStatus());
         assertNull(response.getPreviewOverallScore());
-        
+
         verify(draftRepository, never()).save(any());
         verify(auditLogService, never()).log(any(), any(), any(), any(), any());
     }

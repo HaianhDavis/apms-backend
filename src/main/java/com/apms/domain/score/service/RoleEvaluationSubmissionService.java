@@ -22,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Map;
 
@@ -51,6 +52,9 @@ public class RoleEvaluationSubmissionService {
             if (input.getRawScore() == null) {
                 throw new IllegalStateException("Criterion " + entry.getKey() + " has no score");
             }
+            if (input.getRawScore().compareTo(BigDecimal.ZERO) < 0 || input.getRawScore().compareTo(new BigDecimal("100")) > 0) {
+                throw new IllegalStateException("Criterion " + entry.getKey() + " score must be 0-100");
+            }
             if (input.getExplanation() == null || input.getExplanation().isBlank()) {
                 throw new IllegalStateException("Criterion " + entry.getKey() + " must have an explanation");
             }
@@ -58,6 +62,9 @@ public class RoleEvaluationSubmissionService {
                 if (input.getEvidenceIds() == null || input.getEvidenceIds().isEmpty()) {
                     throw new IllegalStateException("Manual criterion " + entry.getKey() + " must have evidence");
                 }
+            }
+            if (input.getManagerConfirmed() != null && input.getManagerConfirmed()) {
+                throw new IllegalStateException("Criterion " + entry.getKey() + " cannot be manager-confirmed before approval");
             }
         }
         

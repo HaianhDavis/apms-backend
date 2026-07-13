@@ -76,6 +76,46 @@ public class RoleEvaluationDraftController {
         return draftService.acceptAutomaticSuggestion(evaluationId, request, accountId);
     }
 
+    @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/accept")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    public RoleEvaluationDraftResponse acceptCriterionSuggestion(
+            @PathVariable String evaluationId,
+            @PathVariable String criterionKey,
+            @RequestBody AcceptAutomaticSuggestionRequest request,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
+        return draftService.acceptCriterionSuggestion(evaluationId, criterionKey, request, currentUser.getId());
+    }
+
+    @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/edit")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    public RoleEvaluationDraftResponse editCriterionSuggestion(
+            @PathVariable String evaluationId,
+            @PathVariable String criterionKey,
+            @RequestBody EditCriterionSuggestionRequest request,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
+        return draftService.editCriterionSuggestion(evaluationId, criterionKey, request, currentUser.getId());
+    }
+
+    @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/reject")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    public RoleEvaluationDraftResponse rejectCriterionSuggestion(
+            @PathVariable String evaluationId,
+            @PathVariable String criterionKey,
+            @RequestBody RejectCriterionSuggestionRequest request,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
+        return draftService.rejectCriterionSuggestion(evaluationId, criterionKey, request, currentUser.getId());
+    }
+
+    @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/needs-more-data")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    public RoleEvaluationDraftResponse markSuggestionNeedsMoreData(
+            @PathVariable String evaluationId,
+            @PathVariable String criterionKey,
+            @RequestBody NeedsMoreDataCriterionSuggestionRequest request,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
+        return draftService.markSuggestionNeedsMoreData(evaluationId, criterionKey, request, currentUser.getId());
+    }
+
     @PostMapping("/role-evaluations/{evaluationId}/calculate-preview")
     @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
     public RoleEvaluationPreviewResponse calculatePreview(

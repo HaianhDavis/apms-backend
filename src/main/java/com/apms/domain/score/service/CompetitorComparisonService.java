@@ -2,6 +2,9 @@ package com.apms.domain.score.service;
 
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.score.draft.AutomaticSuggestion;
+import com.apms.domain.score.enums.CriterionSuggestionMethod;
+import com.apms.domain.score.enums.CriterionSuggestionReviewStatus;
+import com.apms.domain.score.enums.CriterionSuggestionValidationStatus;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -27,6 +30,8 @@ public class CompetitorComparisonService {
         suggestion.setCriterionKey("productMarketOverlapScore");
         suggestion.setRubricVersion(RUBRIC_VERSION);
         suggestion.setGeneratedAt(LocalDateTime.now());
+        suggestion.setMethod(CriterionSuggestionMethod.DETERMINISTIC);
+        suggestion.setReviewStatus(CriterionSuggestionReviewStatus.PENDING);
         
         List<String> missingComponents = new ArrayList<>();
         List<String> calculationWarnings = new ArrayList<>();
@@ -70,7 +75,9 @@ public class CompetitorComparisonService {
         suggestion.setComponentScores(componentScores);
         suggestion.setComponentWeights(componentWeights);
         suggestion.setMissingComponents(missingComponents);
+        suggestion.setMissingData(missingComponents); // Duplicate for new field
         suggestion.setCalculationWarnings(calculationWarnings);
+        suggestion.setValidationWarnings(calculationWarnings); // Duplicate for new field
 
         // Check coverage
         boolean hasProductName = componentScores.containsKey("productNameOverlap");
@@ -81,11 +88,14 @@ public class CompetitorComparisonService {
             totalCoverage = totalCoverage.add(weight);
         }
         suggestion.setComponentCoverage(totalCoverage);
+        suggestion.setEvidenceCoverage(totalCoverage);
 
         if (!hasProductName || additionalComponents < 2) {
             suggestion.setSuggestedRawScore(null);
             suggestion.setSuggestionRationale("Insufficient data for automatic proposal. Product name overlap and at least two other components are required.");
+            suggestion.setExplanation("Insufficient data for automatic proposal. Product name overlap and at least two other components are required.");
             calculationWarnings.add("Minimum proposal coverage not met.");
+            suggestion.setValidationStatus(CriterionSuggestionValidationStatus.WARNING);
         } else {
             // Calculate final score
             BigDecimal totalScore = BigDecimal.ZERO;
@@ -104,9 +114,13 @@ public class CompetitorComparisonService {
             
             if (missingComponents.isEmpty()) {
                 suggestion.setSuggestionRationale("Automatic suggestion based on full product-market overlap components.");
+                suggestion.setExplanation("Automatic suggestion based on full product-market overlap components.");
+                suggestion.setValidationStatus(CriterionSuggestionValidationStatus.PASS);
             } else {
                 suggestion.setSuggestionRationale("Automatic suggestion based on partial product-market overlap. Missing components: " + String.join(", ", missingComponents));
+                suggestion.setExplanation("Automatic suggestion based on partial product-market overlap. Missing components: " + String.join(", ", missingComponents));
                 calculationWarnings.add("Coverage warning: partial data available.");
+                suggestion.setValidationStatus(CriterionSuggestionValidationStatus.WARNING);
             }
         }
         
