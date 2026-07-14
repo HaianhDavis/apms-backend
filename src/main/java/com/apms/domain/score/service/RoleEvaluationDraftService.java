@@ -145,6 +145,11 @@ public class RoleEvaluationDraftService {
         return mapToResponse(draft);
     }
 
+    public RoleEvaluationDraft getRawDraft(String draftId) {
+        return draftRepository.findById(draftId)
+                .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+    }
+
     public RoleEvaluationDraftResponse updateCriterionInput(String draftId, String criterionKey, UpdateCriterionInputRequest request, Long accountId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
@@ -232,7 +237,7 @@ public class RoleEvaluationDraftService {
         CompanyProfile target = identifierResolver.resolveProfileByDocumentId(draft.getTargetProfileDocumentId());
         CompanyProfile reference = identifierResolver.resolveProfileByDocumentId(draft.getReferenceProfileDocumentId());
 
-        AutomaticSuggestion suggestion = comparisonService.suggestProductMarketOverlap(target, reference);
+        AutomaticSuggestion suggestion = comparisonService.suggestProductMarketOverlap(target, reference, com.apms.domain.score.enums.OverlapSuggestionMode.LEGACY_PARTIAL);
 
         draft.getAutomaticSuggestions().put("productMarketOverlapScore", suggestion);
         draft.setUpdatedAt(LocalDateTime.now());

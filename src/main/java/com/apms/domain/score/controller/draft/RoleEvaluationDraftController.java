@@ -19,6 +19,7 @@ public class RoleEvaluationDraftController {
     private final RoleEvaluationDraftService draftService;
     private final RoleEvaluationSubmissionService submissionService;
     private final RoleEvaluationApprovalService approvalService;
+    private final com.apms.domain.score.service.CompetitorSuggestionGenerationService suggestionGenerationService;
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/role-evaluations")
     @ResponseStatus(HttpStatus.CREATED)
@@ -57,6 +58,33 @@ public class RoleEvaluationDraftController {
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         Long accountId = currentUser.getId();
         return draftService.addEvidence(evaluationId, request, accountId);
+    }
+
+    @PostMapping("/role-evaluations/{evaluationId}/suggestions/generate")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    public BatchGenerationResponse generateSuggestions(
+            @PathVariable String evaluationId,
+            @RequestBody(required = false) GenerateSuggestionRequest request) {
+        com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
+        java.util.Map<String, String> outcomes = suggestionGenerationService.generateAll(draft, request);
+        return BatchGenerationResponse.builder()
+                .draft(draftService.getDraft(evaluationId))
+                .outcomes(outcomes)
+                .build();
+    }
+
+    @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest")
+    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    public SingleGenerationResponse generateCriterionSuggestion(
+            @PathVariable String evaluationId,
+            @PathVariable String criterionKey,
+            @RequestBody(required = false) GenerateSuggestionRequest request) {
+        com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
+        String outcome = suggestionGenerationService.generateSingleAndSave(draft, criterionKey, request);
+        return SingleGenerationResponse.builder()
+                .draft(draftService.getDraft(evaluationId))
+                .outcome(outcome)
+                .build();
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/product-market-overlap/suggest")

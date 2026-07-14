@@ -15,7 +15,8 @@ import org.springframework.context.annotation.FilterType;
         "com.apms.domain.project.repository.sql",
         "com.apms.domain.score.repository.sql",
         "com.apms.domain.document.repository.sql",
-        "com.apms.domain.notification.repository.sql"
+        "com.apms.domain.notification.repository.sql",
+        "com.apms.domain.contract.repository.sql"
     },
     includeFilters = @Filter(type = FilterType.ASSIGNABLE_TYPE, classes = JpaRepository.class)
 )

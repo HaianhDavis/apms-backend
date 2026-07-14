@@ -199,7 +199,7 @@ class RoleEvaluationDraftServiceTest {
 
         AutomaticSuggestion suggestion = new AutomaticSuggestion();
         suggestion.setSuggestedRawScore(new BigDecimal("50.0"));
-        when(comparisonService.suggestProductMarketOverlap(targetProfile, fptProfile)).thenReturn(suggestion);
+        when(comparisonService.suggestProductMarketOverlap(targetProfile, fptProfile, com.apms.domain.score.enums.OverlapSuggestionMode.LEGACY_PARTIAL)).thenReturn(suggestion);
 
         RoleEvaluationDraftResponse res = service.suggestProductMarketOverlap("draft-1");
 

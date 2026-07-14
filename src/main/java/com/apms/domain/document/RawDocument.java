@@ -30,6 +30,12 @@ public class RawDocument {
     private String projectId;
 
     /**
+     * SQL Server project_tasks.id — cross-DB soft reference (stored as String).
+     */
+    @Indexed
+    private String taskId;
+
+    /**
      * SQL Server import_jobs.id — cross-DB soft reference (stored as String).
      */
     @Indexed

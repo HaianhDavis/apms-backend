@@ -66,7 +66,7 @@ class CompetitorComparisonServiceTest {
         // Other components null to focus test
         CompanyProfile target = profileWith(null, markets1, null, null);
         CompanyProfile reference = profileWith(null, markets2, null, null);
-        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference);
+        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference, com.apms.domain.score.enums.OverlapSuggestionMode.LEGACY_PARTIAL);
         // productNameOverlap will be null → insufficient coverage
         assertNull(result.getSuggestedRawScore(), "Insufficient coverage — productName is null");
     }
@@ -88,7 +88,7 @@ class CompetitorComparisonServiceTest {
         CompanyProfile target = profileWith(List.of(p1), List.of("Cloud"), List.of("IT"), List.of("Enterprise"));
         CompanyProfile reference = profileWith(List.of(p2), List.of("Cloud"), List.of("IT"), List.of("Enterprise"));
 
-        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference);
+        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference, com.apms.domain.score.enums.OverlapSuggestionMode.LEGACY_PARTIAL);
 
         // productNameOverlap = 100.00 (CloudStorage matches)
         BigDecimal nameScore = result.getComponentScores().get("productNameOverlap");
@@ -115,7 +115,7 @@ class CompetitorComparisonServiceTest {
         CompanyProfile target = profileWith(products, m1, List.of("Tech"), List.of("SME"));
         CompanyProfile reference = profileWith(products, m2, List.of("Tech"), List.of("SME"));
 
-        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference);
+        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference, com.apms.domain.score.enums.OverlapSuggestionMode.LEGACY_PARTIAL);
         assertNotNull(result.getSuggestedRawScore(), "Should normalize and match");
         // market overlap should be 100%
         BigDecimal marketScore = result.getComponentScores().get("marketOverlap");
@@ -130,7 +130,7 @@ class CompetitorComparisonServiceTest {
     void nullSide_ReturnsNullComponent() {
         CompanyProfile target = profileWith(null, null, null, null);
         CompanyProfile reference = profileWith(null, null, null, null);
-        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference);
+        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference, com.apms.domain.score.enums.OverlapSuggestionMode.LEGACY_PARTIAL);
         assertNull(result.getSuggestedRawScore(), "Null data → insufficient coverage → null score");
         assertFalse(result.getMissingComponents().isEmpty());
     }
@@ -144,7 +144,7 @@ class CompetitorComparisonServiceTest {
         CompanyProfile target = profileWith(emptyProducts, List.of(), List.of(), List.of());
         CompanyProfile reference = profileWith(emptyProducts, List.of(), List.of(), List.of());
         // Should not throw
-        assertDoesNotThrow(() -> service.suggestProductMarketOverlap(target, reference));
+        assertDoesNotThrow(() -> service.suggestProductMarketOverlap(target, reference, com.apms.domain.score.enums.OverlapSuggestionMode.LEGACY_PARTIAL));
     }
 
     /**
@@ -160,7 +160,7 @@ class CompetitorComparisonServiceTest {
         CompanyProfile target = profileWith(products, markets, industries, null);
         CompanyProfile reference = profileWith(products, markets, industries, null);
 
-        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference);
+        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference, com.apms.domain.score.enums.OverlapSuggestionMode.LEGACY_PARTIAL);
         // targetCustomer is missing → should not appear in weights
         assertFalse(result.getComponentWeights().containsKey("targetCustomerOverlap"));
         // Total coverage should be 0.30 + 0.10 + 0.25 + 0.20 = 0.85 (not 1.00)
@@ -181,7 +181,7 @@ class CompetitorComparisonServiceTest {
         CompanyProfile target = profileWith(products, markets, industries, null);  // customers null
         CompanyProfile reference = profileWith(products, markets, industries, null);
 
-        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference);
+        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference, com.apms.domain.score.enums.OverlapSuggestionMode.LEGACY_PARTIAL);
         assertNotNull(result.getSuggestedRawScore(),
                 "productName + market + industry meets minimum coverage");
     }
@@ -195,9 +195,12 @@ class CompetitorComparisonServiceTest {
         CompanyProfile target = profileWith(null, List.of("Cloud"), null, null);
         CompanyProfile reference = profileWith(null, List.of("Cloud"), null, null);
 
-        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference);
+        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference, com.apms.domain.score.enums.OverlapSuggestionMode.LEGACY_PARTIAL);
         assertNull(result.getSuggestedRawScore(), "No productName → insufficient coverage");
         assertNotNull(result.getSuggestionRationale());
+        assertEquals(com.apms.domain.score.enums.CriterionSuggestionValidationStatus.WARNING, result.getValidationStatus());
+        assertEquals(com.apms.domain.score.enums.CriterionSuggestionReviewStatus.NEEDS_MORE_DATA, result.getReviewStatus());
+        assertFalse(result.getMissingData().isEmpty());
     }
 
     /**
@@ -212,7 +215,7 @@ class CompetitorComparisonServiceTest {
         CompanyProfile target = profileWith(targetProducts, List.of("Global"), List.of("IT"), List.of("Enterprise"));
         CompanyProfile reference = profileWith(refProducts, List.of("Global"), List.of("IT"), List.of("Enterprise"));
 
-        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference);
+        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference, com.apms.domain.score.enums.OverlapSuggestionMode.LEGACY_PARTIAL);
         // Deduplication: target = {ai, cloud}, reference = {ai, cloud} → Jaccard = 100
         BigDecimal nameScore = result.getComponentScores().get("productNameOverlap");
         assertEquals(0, nameScore.compareTo(new BigDecimal("100.00")));
@@ -225,7 +228,7 @@ class CompetitorComparisonServiceTest {
     void rubricVersion_CorrectValue() {
         CompanyProfile target = profileWith(null, null, null, null);
         CompanyProfile reference = profileWith(null, null, null, null);
-        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference);
+        AutomaticSuggestion result = service.suggestProductMarketOverlap(target, reference, com.apms.domain.score.enums.OverlapSuggestionMode.LEGACY_PARTIAL);
         assertEquals("COMPETITOR_OVERLAP_RUBRIC_V1", result.getRubricVersion());
     }
 }

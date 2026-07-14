@@ -25,7 +25,7 @@ public class CompetitorComparisonService {
     private static final BigDecimal WEIGHT_INDUSTRY = new BigDecimal("0.20");
     private static final BigDecimal WEIGHT_TARGET_CUSTOMER = new BigDecimal("0.15");
 
-    public AutomaticSuggestion suggestProductMarketOverlap(CompanyProfile target, CompanyProfile reference) {
+    public AutomaticSuggestion suggestProductMarketOverlap(CompanyProfile target, CompanyProfile reference, com.apms.domain.score.enums.OverlapSuggestionMode mode) {
         AutomaticSuggestion suggestion = new AutomaticSuggestion();
         suggestion.setCriterionKey("productMarketOverlapScore");
         suggestion.setRubricVersion(RUBRIC_VERSION);
@@ -90,12 +90,20 @@ public class CompetitorComparisonService {
         suggestion.setComponentCoverage(totalCoverage);
         suggestion.setEvidenceCoverage(totalCoverage);
 
-        if (!hasProductName || additionalComponents < 2) {
+        if (mode == com.apms.domain.score.enums.OverlapSuggestionMode.CANONICAL_STRICT && !missingComponents.isEmpty()) {
+            suggestion.setSuggestedRawScore(null);
+            suggestion.setSuggestionRationale("Canonical strict mode requires all dimensions. Missing: " + String.join(", ", missingComponents));
+            suggestion.setExplanation("Canonical strict mode requires all dimensions. Missing: " + String.join(", ", missingComponents));
+            calculationWarnings.add("Canonical strict mode coverage failure.");
+            suggestion.setValidationStatus(CriterionSuggestionValidationStatus.WARNING);
+            suggestion.setReviewStatus(CriterionSuggestionReviewStatus.NEEDS_MORE_DATA);
+        } else if (!hasProductName || additionalComponents < 2) {
             suggestion.setSuggestedRawScore(null);
             suggestion.setSuggestionRationale("Insufficient data for automatic proposal. Product name overlap and at least two other components are required.");
             suggestion.setExplanation("Insufficient data for automatic proposal. Product name overlap and at least two other components are required.");
             calculationWarnings.add("Minimum proposal coverage not met.");
             suggestion.setValidationStatus(CriterionSuggestionValidationStatus.WARNING);
+            suggestion.setReviewStatus(CriterionSuggestionReviewStatus.NEEDS_MORE_DATA);
         } else {
             // Calculate final score
             BigDecimal totalScore = BigDecimal.ZERO;

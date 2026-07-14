@@ -83,36 +83,42 @@ All new fields are optional. Existing API consumers receive additional fields bu
 
 ## Phase 2C.3 — PartnerContract Design and Persistence
 
+### Phase 2C.3A: IN_PROGRESS — FINAL VERIFICATION
+
+
 ### Goal
-Create a `PartnerContract` SQL Server entity to govern contract lifecycle authority. Enable contract document upload and metadata extraction.
+Create a `PartnerContract` SQL Server entity to govern contract lifecycle authority. Create `PartnerContractVersion` SQL Server entity for immutable history. Enable contract document upload and metadata extraction.
 
 **Linkage Rules:**
-`PartnerContract` does NOT require Neo4j to be the sole source of truth. It links by:
-- `referenceCompanyId`
-- `partnerCompanyId`
-- `relationshipType`
-- optional `projectId`
-- optional Neo4j relationship reference if needed
+`PartnerContract` official metadata in SQL Server.
+`PartnerContractVersion` immutable history in SQL Server.
+`RawDocument` original file in MongoDB.
+Application-level cross-database reference by `rawDocumentId`.
+No contract scores or KPI actuals in this phase.
 
 ### Files likely affected
 - New: `PartnerContract.java` (SQL Server entity)
+- New: `PartnerContractVersion.java` (SQL Server entity)
 - New: `PartnerContractRepository.java` (Spring Data JPA)
+- New: `PartnerContractVersionRepository.java` (Spring Data JPA)
 - New: `PartnerContractService.java`
 - New: `PartnerContractController.java`
 - New: Contract DTOs (request/response)
-- `RawDocument.java` — May need a `documentType` or `contractId` link field
-- `MongoConfig.java` — Add new repository package if needed
+- `SqlServerConfig.java` — Add new repository package
+- `AuditAction.java` — Add new contract actions
 
 ### Database changes
 - SQL Server: New `partner_contracts` table with constraints and project/company relations.
-- MongoDB: Only if needed for flexible extraction data.
+- SQL Server: New `partner_contract_versions` table with unique constraint on contract_id + version_number.
+- Database migration strategy: Uses standard Spring Data JPA `spring.jpa.hibernate.ddl-auto` (update in dev, validate in prod).
 
 ### API changes
-- New CRUD endpoints under `/api/v1/contracts`
-- New document-contract linking endpoint
+- New CRUD endpoints under `/api/v1/projects/{projectId}/partner-contracts` and `/api/v1/partner-contracts`
+- New approval, revision, and lifecycle workflows
+- New version history endpoints
 
 ### Migration risks
-Low — new entity with no dependency on existing data.
+Low — new entities with no dependency on existing data.
 
 ### Backward-compatibility strategy
 Additive only. No existing entities modified.
@@ -205,7 +211,16 @@ All new fields default to null. Existing suggestions remain valid. Migration scr
 
 ---
 
-## Phase 2C.6 — COMPETITOR Six-Criterion Suggestions
+### Phase 2C.6: COMPETITOR Six-Criterion Automatic Suggestions
+**Status**: COMPLETED
+
+#### Semantic Checklist
+- [x] Growth Momentum preconditions
+- [x] Structured Competitive Threat evidence
+- [x] External Category Mapping
+- [x] Legacy vs Canonical Overlap routes
+- [x] Success Path tests
+- [x] Repository Documentation
 
 ### Goal
 Implement AI-assisted suggestion generation for the five remaining COMPETITOR criteria (marketPositionScore, competitiveCapabilityScore, strategicIntentScore, growthMomentumScore, competitiveThreatScore).
@@ -303,3 +318,14 @@ Phase 2C.7 (PARTNER scoring) ─── depends on 2C.3, 2C.4, 2C.5
 **Phase 2C.2** — Relationship source of truth. This is low-risk and resolves the fundamental question of where relationship metadata lives before any contract or metric work begins.
 
 These two phases can be executed in parallel.
+
+### Legacy Overlap Behavior Documentation
+
+The legacy overlap behavior for `productMarketOverlapScore` has been documented:
+Both `/api/v1/role-evaluations/{evaluationId}/product-market-overlap/suggest` and the unified route `/api/v1/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest` (when `criterionKey` is `productMarketOverlapScore`) call the same underlying method: `CompetitorComparisonService.suggestProductMarketOverlap`.
+
+**Behavior:**
+- Complete-data deterministic result remains backward-compatible.
+- Missing components are not treated as 0 and not treated as 50. Missing components are NOT silently renormalized. They simply contribute 0 to the un-normalized sum, maintaining the natural score penalty.
+- The unified canonical route returns `NEEDS_MORE_DATA` when required dimensions (productNameOverlap and at least two other dimensions) are incomplete.
+- Tests proving this behavior have been added in `CompetitorComparisonLegacyBehaviorTest`.

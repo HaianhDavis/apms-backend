@@ -11,7 +11,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 
 @SpringBootTest
 @Testcontainers
-class ApmsBackendApplicationTests {
+public class ApmsBackendApplicationTests {
 
     @Container
     @ServiceConnection

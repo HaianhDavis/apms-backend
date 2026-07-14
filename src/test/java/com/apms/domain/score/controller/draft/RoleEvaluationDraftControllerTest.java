@@ -48,6 +48,7 @@ class RoleEvaluationDraftControllerTest {
     @Mock private RoleEvaluationDraftService draftService;
     @Mock private RoleEvaluationSubmissionService submissionService;
     @Mock private RoleEvaluationApprovalService approvalService;
+    @Mock private com.apms.domain.score.service.CompetitorSuggestionGenerationService suggestionGenerationService;
 
     @InjectMocks
     private RoleEvaluationDraftController controller;
@@ -155,6 +156,95 @@ class RoleEvaluationDraftControllerTest {
                 .andExpect(status().isOk());
 
         verify(draftService).suggestProductMarketOverlap("eval-1");
+    }
+
+    // ---- generateSuggestions (batch) ----
+
+    @Test
+    void generateSuggestions_validBatchRequest_returnsOk() throws Exception {
+        currentPrincipal = staffUser;
+
+        com.apms.domain.score.draft.RoleEvaluationDraft draft = new com.apms.domain.score.draft.RoleEvaluationDraft();
+        when(draftService.getRawDraft("eval-1")).thenReturn(draft);
+        when(draftService.getDraft("eval-1")).thenReturn(new RoleEvaluationDraftResponse());
+
+        java.util.Map<String, String> outcomes = java.util.Map.of("marketPositionScore", "GENERATED");
+        when(suggestionGenerationService.generateAll(eq(draft), any())).thenReturn(outcomes);
+
+        mockMvc.perform(post("/api/v1/role-evaluations/eval-1/suggestions/generate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+                .andExpect(status().isOk());
+
+        verify(suggestionGenerationService).generateAll(eq(draft), any());
+    }
+
+    @Test
+    void generateSuggestions_malformedRequest_returnsBadRequest() throws Exception {
+        currentPrincipal = staffUser;
+
+        mockMvc.perform(post("/api/v1/role-evaluations/eval-1/suggestions/generate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{ invalid json"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // ---- generateCriterionSuggestion (single) ----
+
+    @Test
+    void generateCriterionSuggestion_validSingleRequest_returnsOk() throws Exception {
+        currentPrincipal = staffUser;
+
+        com.apms.domain.score.draft.RoleEvaluationDraft draft = new com.apms.domain.score.draft.RoleEvaluationDraft();
+        when(draftService.getRawDraft("eval-1")).thenReturn(draft);
+        when(draftService.getDraft("eval-1")).thenReturn(new RoleEvaluationDraftResponse());
+
+        when(suggestionGenerationService.generateSingleAndSave(eq(draft), eq("marketPositionScore"), any())).thenReturn("GENERATED");
+
+        mockMvc.perform(post("/api/v1/role-evaluations/eval-1/criteria/marketPositionScore/suggest")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+                .andExpect(status().isOk());
+
+        verify(suggestionGenerationService).generateSingleAndSave(eq(draft), eq("marketPositionScore"), any());
+    }
+
+    @Test
+    void generateCriterionSuggestion_unknownCriterion_returnsNotFoundOrBadRequest() throws Exception {
+        currentPrincipal = staffUser;
+
+        com.apms.domain.score.draft.RoleEvaluationDraft draft = new com.apms.domain.score.draft.RoleEvaluationDraft();
+        when(draftService.getRawDraft("eval-1")).thenReturn(draft);
+
+        when(suggestionGenerationService.generateSingleAndSave(eq(draft), eq("unknownScore"), any()))
+            .thenThrow(new com.apms.common.exception.BusinessValidationException("Unknown criterion"));
+
+        org.junit.jupiter.api.Assertions.assertThrows(jakarta.servlet.ServletException.class, () -> {
+            mockMvc.perform(post("/api/v1/role-evaluations/eval-1/criteria/unknownScore/suggest")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{}"));
+        });
+    }
+
+    @Test
+    void generateCriterionSuggestion_invalidForceWithoutReviewComment_returnsBadRequest() throws Exception {
+        currentPrincipal = staffUser;
+
+        com.apms.domain.score.draft.RoleEvaluationDraft draft = new com.apms.domain.score.draft.RoleEvaluationDraft();
+        when(draftService.getRawDraft("eval-1")).thenReturn(draft);
+
+        when(suggestionGenerationService.generateSingleAndSave(eq(draft), eq("marketPositionScore"), any()))
+            .thenReturn("PROTECTED_FROM_OVERWRITE");
+
+        when(draftService.getDraft("eval-1")).thenReturn(new RoleEvaluationDraftResponse());
+
+        String response = mockMvc.perform(post("/api/v1/role-evaluations/eval-1/criteria/marketPositionScore/suggest")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"force\": true}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        org.junit.jupiter.api.Assertions.assertTrue(response.contains("PROTECTED_FROM_OVERWRITE"));
     }
 
     // ---- acceptAutomaticSuggestion ----

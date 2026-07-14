@@ -1,39 +1,36 @@
 # Scoring Suggestion Quality Model
 
 ## Overview
-This document outlines the quality evaluation model for AI-generated criterion suggestions within the Role Evaluation system (APMS Phase 2C).
+The Scoring Suggestion Quality Model governs how AI-assisted evaluation outputs are validated, tracked, and protected during generation to ensure absolute data integrity.
 
-Unlike the factual AI extraction quality framework, which applies to `CompanyProfile` and verifies absolute truth against raw text, the **scoring suggestion quality model** evaluates subjective assessments, AI reasoning, and logical derivations against predefined rubrics.
+## Strict AI Output Allowlist
+To prevent AI hallucinations, prompt injection, and data poisoning, the `GeminiCriterionSuggestionProvider` enforces a rigid JSON allowlist upon the received response.
+The parsed JSON must exclusively map to:
+- `criterionKey` (String)
+- `suggestedRawScore` (BigDecimal)
+- `explanation` (String)
+- `missingData` (List<String>)
 
-## Core Quality Entity
-Each `AutomaticSuggestion` embedded in a `RoleEvaluationDraft` tracks its own quality metadata.
+Any presence of the following forbidden fields results in an immediate parsing exception and categorizes the outcome as a `TECHNICAL_FAILURE`:
+- `overallScore`
+- `weights`
+- `ahpWeights`
+- `normalizedScores`
+- `evaluatedRole`
+- `ruleSetVersion`
+- `weightVersion`
+- `managerConfirmed`
+- *Any arbitrary unknown field*
 
-### Quality Fields
-- `evidenceCoverage`: The percentage of required rubric sub-components satisfied by the evidence.
-- `missingData`: A list of business metrics or facts required by the rubric that the AI explicitly identified as missing.
-- `validationWarnings`: A list of warnings produced by the validation engine (e.g. low coverage, suspicious score jumps).
-- `validationStatus`: The strict programmatic validation outcome (PASS, WARNING, FAIL).
-- `confidence`: The AI's self-reported confidence score (0.0 - 1.0).
-- `reviewStatus`: The human review decision (ACCEPTED, EDITED, REJECTED, NEEDS_MORE_DATA).
+## Business vs. Technical Failures
+- **Technical Failure (`TECHNICAL_FAILURE`)**: Denotes structural API errors, timeout failures, missing explanations, out-of-bounds scores (not between 0-100), or allowlist violations. Requires engineering intervention or a manual retry.
+- **Business Evidence Failure (`NEEDS_MORE_DATA`)**: Denotes that the AI processed the request but found the context insufficient to confidently score, or that `CompetitorCriterionEvidenceService.preconditionsMet()` actively rejected the context payload prior to reaching the AI.
 
-## Validation Engine
-The `CriterionSuggestionValidator` processes suggestions and returns a `SuggestionValidationResult`.
+## Regeneration Protection
+AI suggestions are inherently mutable while `PENDING`. However, once a Staff member reviews them:
+- An `ACCEPTED` or `EDITED` suggestion is protected.
+- Subsequent calls to `/suggestions/generate` or `/criteria/{key}/suggest` will skip the criterion, returning `PROTECTED_FROM_OVERWRITE`.
+- A Staff member can override this by supplying a `GenerateSuggestionRequest` with `force = true` **and** a non-blank `reviewComment` explaining the regeneration rationale. Invalid `force` attempts (missing the comment) will be rejected.
 
-### Validation Outcomes
-1. **PASS**: Score is between 0-100, confidence > 0.4, coverage > 0.5.
-2. **WARNING (Non-blocking)**: Suggestion has minor quality issues (e.g. coverage < 0.5 but score is generated, or confidence < 0.4). Can be accepted, but requires a human explanation.
-3. **WARNING (Blocking)**: Score is radically misaligned with coverage, or the AI hallucinated a score despite missing critical data. Cannot be accepted as-is; must be edited or rejected.
-4. **FAIL**: The suggestion violates invariants (e.g. score out of bounds, missing required keys). Cannot be accepted.
-
-## Human Review Workflow
-The API exposes four explicit actions for human reviewers:
-1. **Accept**: Converts the suggestion into a `CriterionInput` via `AUTOMATIC_PROPOSAL`. Fails if validation is FAIL, blocking WARNING, or NEEDS_MORE_DATA.
-2. **Edit**: Modifies the score via `MANUAL_OVERRIDE` with an explicit reason.
-3. **Reject**: Completely removes the suggestion's input impact. Removes any existing `AUTOMATIC_PROPOSAL`.
-4. **Needs More Data**: Formalizes the lack of data. Nullifies the raw score and tracks `missingData` while awaiting more evidence. Cannot be accepted.
-
-## Backward Compatibility
-Legacy fields (`componentCoverage`, `missingComponents`, `calculationWarnings`, `accepted`) are retained for backwards compatibility with earlier frontend implementations.
-- `effectiveExplanation` acts as a fallback for `suggestionRationale`.
-- `effectiveReviewStatus` interprets `accepted=true` as `ACCEPTED`.
-- Persistence via `MappingMongoConverter` ensures that nulls in the new canonical fields do not break deserialization of old active drafts.
+## Legacy Deterministic Engine
+The `productMarketOverlapScore` is shielded from this quality model because it bypasses the AI provider entirely. It is handled as `DETERMINISTIC` by the `CompetitorComparisonService`, yielding absolute mathematical guarantees.
