@@ -75,6 +75,12 @@ public class PartnerContract {
     @Builder.Default
     private Integer currentVersion = 0;
 
+    @Column(nullable = true, length = 50)
+    private String pendingExtractionId;
+
+    @Column(nullable = true, length = 128)
+    private String pendingClauseSetHash;
+
     @Column(nullable = false, updatable = false)
     private Long createdByAccountId;
 

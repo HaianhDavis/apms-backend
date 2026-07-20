@@ -1,6 +1,6 @@
 package com.apms.domain.contract.service;
 
-import com.apms.ApmsBackendApplicationTests;
+import com.apms.ApmsIntegrationTestBase;
 import com.apms.domain.contract.dto.ReviewPartnerContractRequest;
 import com.apms.domain.contract.enums.ContractReviewStatus;
 import com.apms.domain.contract.entity.PartnerContract;
@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 
-class PartnerContractServiceIntegrationTest extends ApmsBackendApplicationTests {
+class PartnerContractServiceIntegrationTest extends ApmsIntegrationTestBase {
 
     @Autowired
     private PartnerContractService contractService;

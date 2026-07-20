@@ -6,9 +6,13 @@ import com.apms.common.exception.BusinessValidationException;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.contract.dto.*;
 import com.apms.domain.contract.entity.PartnerContract;
+import com.apms.domain.contract.entity.PartnerContractClauseVersion;
 import com.apms.domain.contract.entity.PartnerContractVersion;
 import com.apms.domain.contract.enums.ContractLifecycleStatus;
 import com.apms.domain.contract.enums.ContractReviewStatus;
+import com.apms.domain.contract.enums.ContractExtractionApplicationStatus;
+import com.apms.domain.contract.enums.ContractExtractionReviewDecision;
+import com.apms.domain.contract.entity.PartnerContractApprovalSyncRecord;
 import com.apms.domain.contract.repository.sql.PartnerContractRepository;
 import com.apms.domain.contract.repository.sql.PartnerContractVersionRepository;
 import com.apms.domain.document.RawDocument;
@@ -30,6 +34,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class PartnerContractService {
 
     private final PartnerContractRepository contractRepository;
@@ -39,6 +44,9 @@ public class PartnerContractService {
     private final RawDocumentRepository documentRepository;
     private final OwnerOrganizationService ownerOrganizationService;
     private final AuditLogService auditService;
+    private final com.apms.domain.contract.repository.mongo.PartnerContractExtractionDraftRepository draftRepository;
+    private final com.apms.domain.contract.repository.sql.PartnerContractClauseVersionRepository clauseVersionRepository;
+    private final com.apms.domain.contract.repository.sql.PartnerContractApprovalSyncRepository syncRepository;
 
     @Transactional
     public PartnerContractResponse createDraft(Long projectId, CreatePartnerContractRequest request, Long accountId) {
@@ -201,7 +209,6 @@ public class PartnerContractService {
         validateProjectAccess(contract.getSourceProjectId(), accountId, true);
 
         if (contract.getReviewStatus() == ContractReviewStatus.APPROVED) {
-            // Idempotency: if already approved, ignore
             return;
         }
 
@@ -210,6 +217,19 @@ public class PartnerContractService {
         }
 
         if ("APPROVE".equalsIgnoreCase(request.getDecision())) {
+
+            // Check for pending AI Extraction
+            com.apms.domain.contract.entity.PartnerContractExtractionDraft draft = null;
+            if (StringUtils.hasText(contract.getPendingExtractionId())) {
+                draft = draftRepository.findById(contract.getPendingExtractionId()).orElse(null);
+                if (draft == null || draft.getApplicationStatus() != ContractExtractionApplicationStatus.APPLIED_FROZEN) {
+                     throw new BusinessValidationException("Pending extraction is not in APPLIED_FROZEN state.");
+                }
+                if (!contract.getPendingClauseSetHash().equals(draft.getClauseSetHash())) {
+                     throw new BusinessValidationException("Clause set hash mismatch. Extraction may have been tampered with.");
+                }
+            }
+
             contract.setReviewStatus(ContractReviewStatus.APPROVED);
             contract.setApprovedByAccountId(accountId);
             contract.setApprovedAt(LocalDateTime.now());
@@ -242,7 +262,57 @@ public class PartnerContractService {
                     .version(contract.getCurrentVersion())
                     .build();
 
-            versionRepository.save(version);
+            version = versionRepository.save(version);
+
+            // Insert Clause Versions if Draft exists
+            if (draft != null) {
+                Long finalVersionId = version.getId();
+                for (com.apms.domain.contract.entity.PartnerContractExtractionDraft.ClauseCandidate clause : draft.getClauseCandidates()) {
+                    if (clause.getReviewDecision() == ContractExtractionReviewDecision.ACCEPT ||
+                        clause.getReviewDecision() == ContractExtractionReviewDecision.EDIT) {
+
+                        com.apms.domain.contract.entity.PartnerContractClauseVersion cv = com.apms.domain.contract.entity.PartnerContractClauseVersion.builder()
+                                .partnerContractVersionId(finalVersionId)
+                                .clauseIdentity(clause.getClauseCandidateId())
+                                .clauseType(clause.getClauseType())
+                                .clauseTitle(clause.getClauseTitle())
+                                .effectiveDate(clause.getEffectiveDate())
+                                .expiryDate(clause.getExpiryDate())
+                                .noticePeriodDays(clause.getNoticePeriodDays())
+                                .targetMetricKey(clause.getTargetMetricKey())
+                                .targetValue(clause.getTargetValue())
+                                .targetUnit(clause.getTargetUnit())
+                                .comparator(clause.getComparator())
+                                .measurementPeriod(clause.getMeasurementPeriod())
+                                .penaltyValue(clause.getPenaltyValue())
+                                .penaltyCurrency(clause.getPenaltyCurrency())
+                                .penaltyDescription(clause.getPenaltyDescription())
+                                .sourceRawDocumentId(draft.getRawDocumentId())
+                                .evidenceReference(clause.getEvidenceReferences() != null && !clause.getEvidenceReferences().isEmpty() ? clause.getEvidenceReferences().get(0) : null)
+                                .sourceExcerpt(clause.getSourceExcerpt())
+                                .clauseHash(draft.getClauseSetHash())
+                                .approvedByAccountId(accountId)
+                                .approvedAt(LocalDateTime.now())
+                                .build();
+                        clauseVersionRepository.save(cv);
+                    }
+                }
+
+                auditService.log(accountId, AuditAction.PARTNER_CONTRACT_CLAUSES_APPROVED, "PartnerContract", contract.getId().toString(), "Contract clauses approved via extraction");
+
+                PartnerContractApprovalSyncRecord syncRecord = PartnerContractApprovalSyncRecord.builder()
+                        .extractionDraftId(draft.getId())
+                        .contractId(contract.getId())
+                        .contractVersionId(finalVersionId)
+                        .contractVersionNumber(contract.getCurrentVersion())
+                        .clauseSetHash(draft.getClauseSetHash())
+                        .status("PENDING")
+                        .retryCount(0)
+                        .createdAt(LocalDateTime.now())
+                        .build();
+                syncRepository.save(syncRecord);
+            }
+
             auditService.log(accountId, AuditAction.PARTNER_CONTRACT_APPROVED, "PartnerContract", contract.getId().toString(), "Contract approved, version " + contract.getCurrentVersion() + " created");
 
         } else if ("REQUEST_CHANGES".equalsIgnoreCase(request.getDecision())) {
@@ -316,6 +386,20 @@ public class PartnerContractService {
                 .orElseThrow(() -> new BusinessValidationException("Version not found."));
     }
 
+    @Transactional(readOnly = true)
+    public List<com.apms.domain.contract.entity.PartnerContractClauseVersion> getApprovedClauses(Long contractId, Integer versionNum, Long accountId) {
+        PartnerContract contract = getContractEntity(contractId);
+        validateProjectAccess(contract.getSourceProjectId(), accountId, false);
+
+        PartnerContractVersion version = versionRepository.findByContractIdOrderByVersionDesc(contractId)
+                .stream()
+                .filter(v -> v.getVersion().equals(versionNum))
+                .findFirst()
+                .orElseThrow(() -> new BusinessValidationException("Version not found."));
+
+        return clauseVersionRepository.findByPartnerContractVersionId(version.getId());
+    }
+
     private PartnerContract getContractEntity(Long contractId) {
         return contractRepository.findById(contractId)
                 .orElseThrow(() -> new BusinessValidationException("PartnerContract not found."));
@@ -382,6 +466,25 @@ public class PartnerContractService {
                 throw new BusinessValidationException("EXPIRED contract cannot change lifecycle status.");
             case TERMINATED:
                 throw new BusinessValidationException("TERMINATED contract cannot change lifecycle status.");
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public PartnerContractClauseVersion getApprovedClause(Long contractId, Integer versionNumber, String clauseId, Long accountId) {
+        PartnerContract contract = contractRepository.findById(contractId)
+                .orElseThrow(() -> new BusinessValidationException("Contract not found: " + contractId));
+
+        validateProjectAccess(contract.getSourceProjectId(), accountId, false);
+
+        PartnerContractVersion version = versionRepository.findByContractIdAndVersion(contractId, versionNumber)
+                .orElseThrow(() -> new BusinessValidationException("Contract version not found: " + versionNumber));
+
+        try {
+            Long parsedClauseId = Long.parseLong(clauseId);
+            return clauseVersionRepository.findByIdAndPartnerContractVersionId(parsedClauseId, version.getId())
+                    .orElseThrow(() -> new BusinessValidationException("Clause version not found: " + clauseId));
+        } catch (NumberFormatException e) {
+            throw new BusinessValidationException("Invalid clause ID format: " + clauseId);
         }
     }
 }
