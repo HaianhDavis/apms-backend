@@ -62,6 +62,34 @@ public class ProjectSecurityEvaluator {
         return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
     }
 
+    /**
+     * True if project member AND Staff
+     */
+    public boolean isStaff(Long projectId) {
+        UserDetailsImpl user = currentUser();
+        if (user == null || !hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_STAFF)) return false;
+        return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
+    }
+
+    /**
+     * True if project member AND Manager
+     */
+    public boolean isManager(Long projectId) {
+        UserDetailsImpl user = currentUser();
+        if (user == null || !hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) return false;
+        return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
+    }
+
+    /**
+     * True if project member AND (Staff or Manager)
+     */
+    public boolean isStaffOrManager(Long projectId) {
+        UserDetailsImpl user = currentUser();
+        if (user == null) return false;
+        if (!hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_STAFF) && !hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) return false;
+        return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
+    }
+
     // ─────────────────────────────────────────────
     // Candidate-level guards
     // ─────────────────────────────────────────────

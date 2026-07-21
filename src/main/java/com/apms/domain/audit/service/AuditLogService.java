@@ -18,7 +18,7 @@ public class AuditLogService {
     @Transactional
     public void log(Long userId, AuditAction action, String entityType, String entityId, String detail) {
         AuditLog auditLog = AuditLog.builder()
-                .actorAccount(accountRepository.getReferenceById(userId))
+                .actorAccount(accountRepository.findById(userId).orElseThrow(() -> new IllegalArgumentException("Account not found: " + userId)))
                 .action(action)
                 .entityType(entityType)
                 .entityId(entityId)

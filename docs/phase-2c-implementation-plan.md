@@ -107,18 +107,28 @@ No contract scores or KPI actuals in this phase.
 - `SqlServerConfig.java` — Add new repository package
 - `AuditAction.java` — Add new contract actions
 
+---
+
+## Phase 2C.4 — RoleMetricRecord Foundation
+
+### Phase 2C.4: PLANNING — RoleMetricRecord Foundation
+
+### Goal
+Design the factual metric-record layer required for later PARTNER evaluation. `RoleMetricRecord` must store approved business measurements (targets, actuals, measurement periods) as factual input without calculating score properties.
+
 ### Database changes
-- SQL Server: New `partner_contracts` table with constraints and project/company relations.
-- SQL Server: New `partner_contract_versions` table with unique constraint on contract_id + version_number.
-- Database migration strategy: Uses standard Spring Data JPA `spring.jpa.hibernate.ddl-auto` (update in dev, validate in prod).
+- SQL Server: New `role_metric_records` and `role_metric_record_versions` tables.
+- SQL Server: New `role_metric_evidences` and `role_metric_evidence_versions` tables.
+- Foreign keys handling circular references (working copy vs approved version).
 
 ### API changes
-- New CRUD endpoints under `/api/v1/projects/{projectId}/partner-contracts` and `/api/v1/partner-contracts`
-- New approval, revision, and lifecycle workflows
-- New version history endpoints
+- New CRUD endpoints under `/api/v1/projects/{projectId}/role-metrics`
+- PATCH endpoints for draft modifications.
+- Approval, revision, and evidence attachment workflows.
+- Immutable version history endpoints.
 
 ### Migration risks
-Low — new entities with no dependency on existing data.
+Low — new entities with no dependency on existing scoring tables.
 
 ### Backward-compatibility strategy
 Additive only. No existing entities modified.
