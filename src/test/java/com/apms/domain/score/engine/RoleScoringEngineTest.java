@@ -59,9 +59,9 @@ class RoleScoringEngineTest {
             RoleCriterionRule.builder().criterionKey("businessValueContributionScore").weight(new BigDecimal("0.20")).direction(ScoreDirection.BENEFIT).required(true).build(),
             RoleCriterionRule.builder().criterionKey("strategicAlignmentScore").weight(new BigDecimal("0.20")).direction(ScoreDirection.BENEFIT).required(true).build(),
             RoleCriterionRule.builder().criterionKey("operationalPerformanceScore").weight(new BigDecimal("0.15")).direction(ScoreDirection.BENEFIT).required(true).build(),
-            RoleCriterionRule.builder().criterionKey("capabilityComplementarityScore").weight(new BigDecimal("0.15")).direction(ScoreDirection.BENEFIT).required(true).build(),
+            RoleCriterionRule.builder().criterionKey("capabilityAndComplementarityScore").weight(new BigDecimal("0.15")).direction(ScoreDirection.BENEFIT).required(true).build(),
             RoleCriterionRule.builder().criterionKey("relationshipQualityScore").weight(new BigDecimal("0.15")).direction(ScoreDirection.BENEFIT).required(true).build(),
-            RoleCriterionRule.builder().criterionKey("governanceComplianceScore").weight(new BigDecimal("0.15")).direction(ScoreDirection.BENEFIT).required(true).build()
+            RoleCriterionRule.builder().criterionKey("governanceAndRiskScore").weight(new BigDecimal("0.15")).direction(ScoreDirection.BENEFIT).required(true).build()
         );
         
         potentialPartnerRuleSet = RoleScoreRuleSet.builder().id(2L).evaluatedRole(CompanyRole.POTENTIAL_PARTNER).ruleSetVersion("v1").build();
@@ -85,9 +85,9 @@ class RoleScoringEngineTest {
         scores.put("businessValueContributionScore", new BigDecimal("80"));
         scores.put("strategicAlignmentScore", new BigDecimal("90"));
         scores.put("operationalPerformanceScore", new BigDecimal("100"));
-        scores.put("capabilityComplementarityScore", new BigDecimal("100"));
+        scores.put("capabilityAndComplementarityScore", new BigDecimal("100"));
         scores.put("relationshipQualityScore", new BigDecimal("100"));
-        scores.put("governanceComplianceScore", new BigDecimal("100"));
+        scores.put("governanceAndRiskScore", new BigDecimal("100"));
 
         RoleEvaluationCalculationRequest req = RoleEvaluationCalculationRequest.builder()
                 .evaluatedRole(CompanyRole.PARTNER)
@@ -177,9 +177,9 @@ class RoleScoringEngineTest {
         assertThat(res.getMissingCriteria()).containsExactly(
             "strategicAlignmentScore", 
             "operationalPerformanceScore", 
-            "capabilityComplementarityScore", 
+            "capabilityAndComplementarityScore", 
             "relationshipQualityScore", 
-            "governanceComplianceScore"
+            "governanceAndRiskScore"
         );
         assertThat(res.getNormalizedCriterionScores().get("strategicAlignmentScore")).isNull();
     }
@@ -192,9 +192,9 @@ class RoleScoringEngineTest {
         LinkedHashMap<String, BigDecimal> scores = new LinkedHashMap<>();
         scores.put("strategicAlignmentScore", new BigDecimal("80"));
         scores.put("operationalPerformanceScore", new BigDecimal("80"));
-        scores.put("capabilityComplementarityScore", new BigDecimal("80"));
+        scores.put("capabilityAndComplementarityScore", new BigDecimal("80"));
         scores.put("relationshipQualityScore", new BigDecimal("80"));
-        scores.put("governanceComplianceScore", new BigDecimal("80"));
+        scores.put("governanceAndRiskScore", new BigDecimal("80"));
         scores.put("unknownScore", new BigDecimal("50"));
 
         RoleEvaluationCalculationRequest req = RoleEvaluationCalculationRequest.builder()
@@ -217,9 +217,9 @@ class RoleScoringEngineTest {
         scores.put("businessValueContributionScore", new BigDecimal("-1"));
         scores.put("strategicAlignmentScore", new BigDecimal("80"));
         scores.put("operationalPerformanceScore", new BigDecimal("80"));
-        scores.put("capabilityComplementarityScore", new BigDecimal("80"));
+        scores.put("capabilityAndComplementarityScore", new BigDecimal("80"));
         scores.put("relationshipQualityScore", new BigDecimal("80"));
-        scores.put("governanceComplianceScore", new BigDecimal("80"));
+        scores.put("governanceAndRiskScore", new BigDecimal("80"));
 
         RoleEvaluationCalculationRequest req = RoleEvaluationCalculationRequest.builder()
                 .evaluatedRole(CompanyRole.PARTNER)
@@ -254,9 +254,9 @@ class RoleScoringEngineTest {
             RoleCriterionRule.builder().criterionKey("businessValueContributionScore").weight(new BigDecimal("0.50")).direction(ScoreDirection.BENEFIT).build(),
             RoleCriterionRule.builder().criterionKey("strategicAlignmentScore").weight(new BigDecimal("0.50")).direction(ScoreDirection.BENEFIT).build(),
             RoleCriterionRule.builder().criterionKey("operationalPerformanceScore").weight(new BigDecimal("0.50")).direction(ScoreDirection.BENEFIT).build(),
-            RoleCriterionRule.builder().criterionKey("capabilityComplementarityScore").weight(new BigDecimal("0.50")).direction(ScoreDirection.BENEFIT).build(),
+            RoleCriterionRule.builder().criterionKey("capabilityAndComplementarityScore").weight(new BigDecimal("0.50")).direction(ScoreDirection.BENEFIT).build(),
             RoleCriterionRule.builder().criterionKey("relationshipQualityScore").weight(new BigDecimal("0.50")).direction(ScoreDirection.BENEFIT).build(),
-            RoleCriterionRule.builder().criterionKey("governanceComplianceScore").weight(new BigDecimal("0.50")).direction(ScoreDirection.BENEFIT).build()
+            RoleCriterionRule.builder().criterionKey("governanceAndRiskScore").weight(new BigDecimal("0.50")).direction(ScoreDirection.BENEFIT).build()
         );
         when(criterionRuleRepository.findByRuleSetIdAndActiveTrueOrderByDisplayOrderAsc(1L)).thenReturn(invalidRules);
 

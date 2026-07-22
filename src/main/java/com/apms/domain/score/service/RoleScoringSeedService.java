@@ -42,9 +42,9 @@ public class RoleScoringSeedService {
                 "businessValueContributionScore", new BigDecimal("0.25"),
                 "strategicAlignmentScore", new BigDecimal("0.21"),
                 "operationalPerformanceScore", new BigDecimal("0.20"),
-                "capabilityComplementarityScore", new BigDecimal("0.16"),
+                "capabilityAndComplementarityScore", new BigDecimal("0.16"),
                 "relationshipQualityScore", new BigDecimal("0.09"),
-                "governanceComplianceScore", new BigDecimal("0.09")
+                "governanceAndRiskScore", new BigDecimal("0.09")
         ));
 
         seedRole(CompanyRole.POTENTIAL_PARTNER, CanonicalRoleCriteria.POTENTIAL_PARTNER_CRITERIA, CanonicalRoleCriteria.POTENTIAL_PARTNER_DIRECTIONS, Map.of(

@@ -25,9 +25,9 @@ class CanonicalRoleCriteriaTest {
                 "businessValueContributionScore",
                 "strategicAlignmentScore",
                 "operationalPerformanceScore",
-                "capabilityComplementarityScore",
+                "capabilityAndComplementarityScore",
                 "relationshipQualityScore",
-                "governanceComplianceScore"
+                "governanceAndRiskScore"
         );
 
         for (String key : criteria) {

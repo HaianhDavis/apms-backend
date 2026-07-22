@@ -16,19 +16,28 @@ public final class CanonicalRoleCriteria {
             "businessValueContributionScore",
             "strategicAlignmentScore",
             "operationalPerformanceScore",
-            "capabilityComplementarityScore",
+            "capabilityAndComplementarityScore",
             "relationshipQualityScore",
-            "governanceComplianceScore"
+            "governanceAndRiskScore"
     );
 
     public static final Map<String, ScoreDirection> PARTNER_DIRECTIONS = Map.of(
             "businessValueContributionScore", ScoreDirection.BENEFIT,
             "strategicAlignmentScore", ScoreDirection.BENEFIT,
             "operationalPerformanceScore", ScoreDirection.BENEFIT,
-            "capabilityComplementarityScore", ScoreDirection.BENEFIT,
+            "capabilityAndComplementarityScore", ScoreDirection.BENEFIT,
             "relationshipQualityScore", ScoreDirection.BENEFIT,
-            "governanceComplianceScore", ScoreDirection.BENEFIT
+            "governanceAndRiskScore", ScoreDirection.BENEFIT
     );
+
+    public static final Map<String, String> LEGACY_CRITERIA_MAPPING = Map.of(
+            "capabilityComplementarityScore", "capabilityAndComplementarityScore",
+            "governanceComplianceScore", "governanceAndRiskScore"
+    );
+
+    public static String normalizeCriterionKey(String key) {
+        return LEGACY_CRITERIA_MAPPING.getOrDefault(key, key);
+    }
 
     // POTENTIAL_PARTNER
     public static final List<String> POTENTIAL_PARTNER_CRITERIA = List.of(

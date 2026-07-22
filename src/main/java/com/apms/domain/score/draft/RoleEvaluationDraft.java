@@ -82,7 +82,18 @@ public class RoleEvaluationDraft {
     @Indexed(unique = true, sparse = true)
     private String activeDraftKey;
 
-    private Long approvedSnapshotId;
+    private Long approvedSnapshotId; // Used for COMPETITOR
+    
+    // PARTNER specific fields
+    private EvaluationPeriod evaluationPeriod;
+    private String currentApprovedVersionId;
+    private Integer currentApprovedVersionNumber;
+    
+    @Builder.Default
+    private Integer workingRevisionNumber = 1;
+    
+    @org.springframework.data.annotation.Version
+    private Long optimisticVersion;
     
     @Indexed
     private String approvalIdempotencyKey;

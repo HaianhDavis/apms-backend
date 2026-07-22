@@ -185,7 +185,8 @@ Additive only. Scoring services optionally consume metrics when available.
 
 ## Phase 2C.5 — Scoring-Specific AI Suggestion Quality Model
 
-### Phase 2C.5A — Scoring-Specific AI Suggestion Quality Foundation [x] COMPLETED
+### Phase 2C.5A — Scoring-Specific AI Suggestion Quality Foundation
+**Status**: COMPLETED
 
 ### Goal
 Design and implement an AI criterion suggestion quality model with evidence, confidence, validation, and review status — separate from the extraction quality system.
@@ -339,3 +340,59 @@ Both `/api/v1/role-evaluations/{evaluationId}/product-market-overlap/suggest` an
 - Missing components are not treated as 0 and not treated as 50. Missing components are NOT silently renormalized. They simply contribute 0 to the un-normalized sum, maintaining the natural score penalty.
 - The unified canonical route returns `NEEDS_MORE_DATA` when required dimensions (productNameOverlap and at least two other dimensions) are incomplete.
 - Tests proving this behavior have been added in `CompetitorComparisonLegacyBehaviorTest`.
+
+---
+
+## Phase 2C.5 — PARTNER Role Evaluation Drafts & Feedback
+
+### Goal
+Design the criterion-level evaluation layer for PARTNER companies to consume approved factual and documentary data and produce reviewable criterion evaluation drafts without calculating weights, numerical scores, or creating ScoreSnapshots.
+
+### Architecture & Persistence
+- Reuse existing MongoDB `RoleEvaluationDraft` for working draft state.
+- Create a new immutable `RoleEvaluationVersion` in MongoDB to represent the approved state, bypassing `ScoreSnapshot` which is tightly coupled to `RoleScoringEngine` numeric outputs. No update or delete APIs for approved versions.
+- Pointers (`currentApprovedVersionId`) are stored on the Draft, not the Version. `isCurrentApproved` is completely removed from the immutable schema.
+- Data sources are pinned to their explicit *Approved Version* using typed `ApprovedSourceReference` objects (`sqlSourceId` vs `mongoSourceId` exclusivity enforced). Immutable `CompanyProfileVersion` replaces mutable profile usage.
+- Use explicit `EvaluationPeriod` (type, asOfDate, start, end). PERIOD metrics must be *fully contained*; POINT_IN_TIME must be exact. Highest-approved deduplication is enforced.
+
+### AI Suggestions Constraints
+- Output must be purely qualitative (`criterionKey`, `rationale`, `missingDataNotes`, `confidence`, `evidenceReferenceIds`).
+- Explicitly forbidden from outputting `overallScore`, `weights`, or numeric criterion scores (`criterionScore`, `suggestedRawScore`, etc.) for hybrid/ai-assisted criteria. Recursive nested AI tree validation rejects ANY numerical scores or unknown fields.
+- Unrestricted maps like `calculationDetails` are forbidden for PARTNER evaluations; use typed provider metadata instead.
+- `evidenceReferenceIds` must strictly be a subset of the server-pinned `sourceReferences`.
+
+### Compatibility-First Criterion Key Fix
+- `CanonicalRoleCriteria` currently has a mismatch (`capabilityComplementarityScore` vs `capabilityAndComplementarityScore`, and `governanceComplianceScore` vs `governanceAndRiskScore`). 
+- Implement read-time alias normalization, strict writes for new canonical keys, and idempotent SQL/Mongo migrations. Add typed collision detection (`BusinessValidationException`) for conflicting keys.
+
+### Data Sufficiency & Workflow
+- Implements strict typed evaluation completeness (SUFFICIENT, PARTIAL, INSUFFICIENT) per criterion matching exact `PartnerMetricDefinition` possibilities.
+- Missing data remains `null`, with no 0 or 50 substitution.
+- Manager approval allows PARTIAL data if a `partialApprovalJustification` is supplied; INSUFFICIENT blocks submission.
+
+### Cross-Database Consistency & Strategies
+- Implement `RoleEvaluationApprovalStrategy` pattern to separate Competitor (SQL Snapshot) and Partner (Mongo Immutable Version) flows.
+- Partner approval uses an Outbox pattern (`RoleEvaluationApprovalOutbox` in Mongo) for idempotent SQL task sync to prevent cross-database partial failures.
+- Uses `MongoTransactionManager` to atomically commit the Version, Pointer, and Outbox. Outbox worker processes `PENDING` states with atomic lease claiming (`lockedBy`, `leaseUntil`) and crash recovery logic.
+
+### Permissions & APIs
+- Strict path parameter validation: `record.projectId == path projectId` and strict task validation on every route.
+- Assigned Staff: create draft, generate AI, edit criterion, attach evidence, submit, revisions.
+- Manager: read working draft, approve, reject, request changes.
+- Owner: read approved versions only via `/api/v1/projects/{projectId}/role-evaluations/{evaluationId}/current-approved` and exact version lists. No global `/approved/current`.
+
+For detailed breakdown, refer to the active [Implementation Plan](file:///Users/davisiukem/.gemini/antigravity-ide/brain/0976f325-782b-44bd-808c-4a2af3cd4894/implementation_plan.md).
+
+### Phase 2C.5A: Canonical Keys & Evaluation Foundation
+**Status**: COMPLETED
+- Implemented `CanonicalRoleCriteria` keys and Legacy Mapping normalization.
+- Implemented `EvaluationPeriodType` & `EvaluationPeriod` with strict validation.
+- Implemented `ApprovedSourceType` & `ApprovedSourceReference` with type-specific cross-source exclusions and missing fields checking.
+- Implemented `RoleEvaluationVersion` immutable MongoDB foundation with `evaluationId` + `versionNumber` unique indexing.
+- Established Migration Artifacts mapping `capabilityComplementarityScore` and `governanceComplianceScore` to canonical forms.
+- Added extensive focused unit tests and ensured full regression suite backward compatibility (Competitor logic unchanged).
+
+### Phase 2C.5B: Next Steps (Pending)
+- Restrict AI and Calculation Details (Ensure purely qualitative schema).
+- Data Sufficiency Definitions (Sufficient, Partial, Insufficient data states).
+- Hybrid Generation Strategy (Mongo transactions, Outbox synchronization).
