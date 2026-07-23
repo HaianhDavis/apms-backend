@@ -1,24 +1,18 @@
 # Partner Evaluation Source Pinning
 
-## Philosophy
-To maintain rigorous auditability and historical accuracy, evaluations must explicitly reference the exact state of a source artifact at the time the evaluation was approved. They cannot depend on mutable objects that can change post-approval.
+## Immutability Guarantee
+The fundamental principle of Partner Evaluation drafts is that they operate against a fixed point in time. This is achieved through strict source pinning. 
 
-## ApprovedSourceReference
-`ApprovedSourceReference` objects act as the strict linkage mechanism between the evaluation and its underlying data sources.
+### Pinned Source References
+- The `RoleEvaluationDraft` explicitly stores `pinnedSourceReferences` containing `ApprovedSourceReference` records.
+- These references form an immutable snapshot boundary for the evaluation logic.
 
-### Validation Rules
-1. **Mutually Exclusive Identifiers**: `sqlSourceId` and `mongoSourceId` are mutually exclusive. Exactly one must be populated based on the `sourceType`.
-2. **Missing Metadata Rejection**: Source-specific metadata fields are strictly validated based on `sourceType`. 
-    - E.g., `RAW_DOCUMENT_SEGMENT` requires `documentId` and `segmentId`.
-    - E.g., `ROLE_METRIC_VERSION` rejects any `documentId` or `externalSourceUrl`.
+### Context Provider Validation
+The `PartnerEvaluationContextProvider` guarantees the integrity of this boundary during context generation:
+1. **Source Loading via Pinning**: It reads strictly from `RoleEvaluationDraft.pinnedSourceReferences` and dynamically fetches the immutable approved source versions (e.g. from `CompanyProfileVersionRepository`).
+2. **Re-Hashing Strategy**: During source loading, the context provider delegates to `SourcePinningValidator` to calculate deterministic hashes and references. This ensures the underlying data hasn't drifted.
+3. **Period Relevance**: Sources are filtered contextually against evaluation boundaries.
 
-## CompanyProfileVersion Pinning
-Mutable `CompanyProfile` documents are strictly forbidden from being used as official pinned sources. 
-When an evaluation requires company profile data:
-- It must reference a `CompanyProfileVersion` using its `mongoSourceId`.
-- The `ApprovedSourceReferenceFactory` loads the immutable profile version.
-- The factory generates a `sourceHash` over the immutable `snapshot` content (MD5).
-- It validates the target company alignment (rejects mismatched company records).
-
-## Excluded Functionality
-*Note*: Phase 2C.5A implements this pinning validation foundation. It does not implement outbox task synchronization or automated generation capabilities.
+### Idempotency
+- Multiple generations for the same criterion and the same `sourceSnapshotHash` are inherently idempotent.
+- If the underlying `sourceSnapshotHash` diverges (due to content changes in underlying versions or modification in the draft's pinned list), generation detects a conflict or returns a stale status.

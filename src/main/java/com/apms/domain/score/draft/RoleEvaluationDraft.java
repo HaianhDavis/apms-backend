@@ -66,6 +66,9 @@ public class RoleEvaluationDraft {
     private LinkedHashMap<String, List<EvidenceRecord>> criterionEvidence = new LinkedHashMap<>();
 
     @Builder.Default
+    private LinkedHashMap<String, List<PartnerSuggestionGenerationMetadata>> generationIdempotency = new LinkedHashMap<>();
+
+    @Builder.Default
     private Boolean staleTargetProfile = false;
     
     @Builder.Default
@@ -88,6 +91,11 @@ public class RoleEvaluationDraft {
     private EvaluationPeriod evaluationPeriod;
     private String currentApprovedVersionId;
     private Integer currentApprovedVersionNumber;
+    
+    @Builder.Default
+    private List<ApprovedSourceReference> pinnedSourceReferences = new java.util.ArrayList<>();
+    
+    private String sourceSnapshotHash;
     
     @Builder.Default
     private Integer workingRevisionNumber = 1;

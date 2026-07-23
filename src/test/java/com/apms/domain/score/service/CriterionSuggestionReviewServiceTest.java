@@ -55,7 +55,7 @@ class CriterionSuggestionReviewServiceTest {
     void setup() {
         validator = new CriterionSuggestionValidator();
         service = new RoleEvaluationDraftService(
-                draftRepository, null, null, null, null, null, null, null, null, auditLogService, validator
+                draftRepository, null, null, null, null, null, null, null, null, null, auditLogService, validator, null
         );
         lenient().when(draftRepository.save(any())).thenAnswer(i -> i.getArgument(0));
     }

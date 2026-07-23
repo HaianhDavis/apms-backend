@@ -80,6 +80,10 @@ public class AutomaticSuggestion {
     private String modelProvider;
     private String modelVersion;
 
+    private String generationId;
+    private String sourceSnapshotHash;
+    private Integer draftRevisionNumber;
+
     private Long reviewedByAccountId;
     private LocalDateTime reviewedAt;
     private String reviewComment;

@@ -29,6 +29,9 @@ public class ApprovedSourceReference {
     private String sourceHash;
     private LocalDateTime pinnedAt;
     
+    @Builder.Default
+    private boolean sharedAcrossCriteria = false;
+    
     // Metadata for source-specific fields
     private String documentId;
     private String segmentId;

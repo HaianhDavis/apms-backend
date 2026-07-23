@@ -383,15 +383,24 @@ Design the criterion-level evaluation layer for PARTNER companies to consume app
 
 For detailed breakdown, refer to the active [Implementation Plan](file:///Users/davisiukem/.gemini/antigravity-ide/brain/0976f325-782b-44bd-808c-4a2af3cd4894/implementation_plan.md).
 
-### Phase 2C.5A: Canonical Keys & Evaluation Foundation
-**Status**: COMPLETED
+### Phase 2C.5: Evaluation Approval Data Isolation (Mongo outbox)
+
+**Status:** PLANNING — CONDITIONAL APPROVAL PENDING FINAL PLAN VERIFICATION
+- Replaced by Phase 2C.5A and 2C.5B breakdown.
+
+### Phase 2C.5A: Canonical Keys, Evaluation Period, Approved Sources and Immutable Version Foundation
+
+**Status:** COMPLETED
+
+### Phase 2C.5B: PARTNER Context, Strict AI Suggestions and Data Sufficiency
+
+**Status:** IMPLEMENTATION IN PROGRESS — PARTNER Context, AI and Sufficiency
+
 - Implemented `CanonicalRoleCriteria` keys and Legacy Mapping normalization.
 - Implemented `EvaluationPeriodType` & `EvaluationPeriod` with strict validation.
 - Implemented `ApprovedSourceType` & `ApprovedSourceReference` with type-specific cross-source exclusions and missing fields checking.
 - Implemented `RoleEvaluationVersion` immutable MongoDB foundation with `evaluationId` + `versionNumber` unique indexing.
 - Established Migration Artifacts mapping `capabilityComplementarityScore` and `governanceComplianceScore` to canonical forms.
-- Added extensive focused unit tests and ensured full regression suite backward compatibility (Competitor logic unchanged).
-
 ### Phase 2C.5B: Next Steps (Pending)
 - Restrict AI and Calculation Details (Ensure purely qualitative schema).
 - Data Sufficiency Definitions (Sufficient, Partial, Insufficient data states).

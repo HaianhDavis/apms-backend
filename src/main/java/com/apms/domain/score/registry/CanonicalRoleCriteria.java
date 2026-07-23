@@ -29,6 +29,15 @@ public final class CanonicalRoleCriteria {
             "relationshipQualityScore", ScoreDirection.BENEFIT,
             "governanceAndRiskScore", ScoreDirection.BENEFIT
     );
+    
+    public static final Map<String, com.apms.domain.score.enums.PartnerEvaluationMode> PARTNER_MODES = Map.of(
+            "businessValueContributionScore", com.apms.domain.score.enums.PartnerEvaluationMode.HYBRID,
+            "strategicAlignmentScore", com.apms.domain.score.enums.PartnerEvaluationMode.AI_ASSISTED,
+            "operationalPerformanceScore", com.apms.domain.score.enums.PartnerEvaluationMode.DETERMINISTIC_CORE,
+            "capabilityAndComplementarityScore", com.apms.domain.score.enums.PartnerEvaluationMode.AI_ASSISTED,
+            "relationshipQualityScore", com.apms.domain.score.enums.PartnerEvaluationMode.HYBRID,
+            "governanceAndRiskScore", com.apms.domain.score.enums.PartnerEvaluationMode.HYBRID
+    );
 
     public static final Map<String, String> LEGACY_CRITERIA_MAPPING = Map.of(
             "capabilityComplementarityScore", "capabilityAndComplementarityScore",
