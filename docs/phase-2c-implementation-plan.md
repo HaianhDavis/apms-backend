@@ -362,7 +362,7 @@ Design the criterion-level evaluation layer for PARTNER companies to consume app
 - `evidenceReferenceIds` must strictly be a subset of the server-pinned `sourceReferences`.
 
 ### Compatibility-First Criterion Key Fix
-- `CanonicalRoleCriteria` currently has a mismatch (`capabilityComplementarityScore` vs `capabilityAndComplementarityScore`, and `governanceComplianceScore` vs `governanceAndRiskScore`). 
+- `CanonicalRoleCriteria` currently has a mismatch (`capabilityComplementarityScore` vs `capabilityAndComplementarityScore`, and `governanceComplianceScore` vs `governanceAndRiskScore`).
 - Implement read-time alias normalization, strict writes for new canonical keys, and idempotent SQL/Mongo migrations. Add typed collision detection (`BusinessValidationException`) for conflicting keys.
 
 ### Data Sufficiency & Workflow
@@ -393,15 +393,23 @@ For detailed breakdown, refer to the active [Implementation Plan](file:///Users/
 **Status:** COMPLETED
 
 ### Phase 2C.5B: PARTNER Context, Strict AI Suggestions and Data Sufficiency
-
-**Status:** IMPLEMENTATION IN PROGRESS — PARTNER Context, AI and Sufficiency
-
+**Status:** COMPLETED
 - Implemented `CanonicalRoleCriteria` keys and Legacy Mapping normalization.
 - Implemented `EvaluationPeriodType` & `EvaluationPeriod` with strict validation.
 - Implemented `ApprovedSourceType` & `ApprovedSourceReference` with type-specific cross-source exclusions and missing fields checking.
 - Implemented `RoleEvaluationVersion` immutable MongoDB foundation with `evaluationId` + `versionNumber` unique indexing.
 - Established Migration Artifacts mapping `capabilityComplementarityScore` and `governanceComplianceScore` to canonical forms.
-### Phase 2C.5B: Next Steps (Pending)
-- Restrict AI and Calculation Details (Ensure purely qualitative schema).
+- Restricted AI and Calculation Details (Ensure purely qualitative schema).
 - Data Sufficiency Definitions (Sufficient, Partial, Insufficient data states).
-- Hybrid Generation Strategy (Mongo transactions, Outbox synchronization).
+
+### Phase 2C.5C: PARTNER Submission, Manager Approval, Immutable Evaluation Version and Outbox Synchronization
+**Status:** COMPLETED
+- PARTNER submit/approve/request-revision workflow
+- Immutable `RoleEvaluationVersion`
+- Mongo transactional outbox
+- SQL durable receipt and idempotent processing
+- Retry/dead-letter/batch/ownership behavior
+- COMPETITOR behavior unchanged
+- PARTNER approval performs no scoring/AHP/ScoreSnapshot
+- Mongo and SQL are not a distributed/XA transaction
+- PAYLOAD HASH DURABLE PROVENANCE PENDING
