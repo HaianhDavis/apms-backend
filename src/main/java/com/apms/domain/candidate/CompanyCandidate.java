@@ -16,6 +16,16 @@ import java.time.LocalDateTime;
  * MongoDB document representing a draft or in-review company profile candidate.
  * Contains flexible AI-extracted data and embedded review workflow.
  *
+ * <h3>Semantic Boundary: AI-Extracted vs Factual Data</h3>
+ * <p>All data in this document originates from AI extraction and is considered
+ * <b>draft/provisional</b> until the candidate is approved. Upon approval, factual
+ * fields (identity, business, companySize, contact, etc.) are promoted into the
+ * authoritative {@code CompanyProfile}. AI-advisory fields ({@code insights},
+ * {@code scorePreview}) assist human review but are not authoritative facts.</p>
+ * <p>AI output must not silently overwrite factual fields in the approved
+ * {@code CompanyProfile}. Official profile changes require the established
+ * review/approval workflow.</p>
+ *
  * Collection: company_candidates
  */
 @Document(collection = "company_candidates")
@@ -80,6 +90,11 @@ public class CompanyCandidate {
     private Business business;
     private CompanySize companySize;
     private Contact contact;
+    /**
+     * AI-generated SWOT analysis (advisory, not authoritative business data).
+     * Populated during AI extraction. See {@code CompanyProfile.Insights} for
+     * the semantic boundary documentation.
+     */
     private Insights insights;
 
     private com.apms.domain.company.model.FinancialInfo financial;
@@ -97,6 +112,13 @@ public class CompanyCandidate {
     private Deduplication deduplication;
     private ExtractionSource extractionSource;
     private Review review;
+    /**
+     * AI-generated score preview (advisory). This is a rough estimate produced
+     * during extraction to assist the reviewer. It is not an official score and
+     * must not be used as authoritative scoring input. Official scores are
+     * produced through the established {@code RoleScoringEngine} and
+     * {@code ScoreSnapshot} workflow.
+     */
     private ScorePreview scorePreview;
     private AiMetadata aiMetadata;
     private Metadata metadata;
@@ -257,6 +279,12 @@ public class CompanyCandidate {
         private LocalDateTime reviewedAt;
     }
 
+    /**
+     * AI-generated score preview for the candidate. This is an advisory estimate
+     * produced during extraction and is not an official score. It should not be
+     * persisted into the approved {@code CompanyProfile} or used as input to the
+     * official scoring pipeline.
+     */
     @Data
     @Builder
     @NoArgsConstructor
