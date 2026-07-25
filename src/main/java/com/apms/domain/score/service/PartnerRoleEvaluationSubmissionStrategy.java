@@ -11,6 +11,7 @@ import com.apms.domain.score.enums.RoleEvaluationStatus;
 import com.apms.domain.score.outbox.RoleEvaluationOutboxEvent;
 import com.apms.domain.score.enums.EvaluationCompletenessStatus;
 import com.apms.domain.score.outbox.RoleEvaluationOutboxPayload;
+import com.apms.domain.score.outbox.RoleEvaluationOutboxPayloadHasher;
 import com.apms.domain.user.repository.sql.AccountRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -57,6 +58,21 @@ public class PartnerRoleEvaluationSubmissionStrategy implements RoleEvaluationSu
         String eventId = draft.getId() + "_" + draft.getWorkingRevisionNumber() + "_SUBMITTED";
 
         // 2. Outbox Event
+        RoleEvaluationOutboxPayload outboxPayload = RoleEvaluationOutboxPayload.builder()
+                .eventId(eventId)
+                .eventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED.name())
+                .evaluationId(draft.getId())
+                .projectId(task.getProject().getId())
+                .taskId(task.getId())
+                .targetCompanyProfileId(draft.getTargetProfileDocumentId())
+                .actorAccountId(accountId)
+                .submittedRevisionNumber(draft.getWorkingRevisionNumber())
+                .submittedSourceSnapshotHash(draft.getSourceSnapshotHash())
+                .aggregateCompletenessStatus(readiness.getAggregateCompletenessStatus())
+                .occurredAt(LocalDateTime.now())
+                .payloadVersion(1)
+                .build();
+
         RoleEvaluationOutboxEvent outboxEvent = RoleEvaluationOutboxEvent.builder()
                 .eventId(eventId)
                 .evaluationId(draft.getId())
@@ -64,20 +80,8 @@ public class PartnerRoleEvaluationSubmissionStrategy implements RoleEvaluationSu
                 .taskId(task.getId())
                 .eventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED)
                 .status(OutboxEventStatus.PENDING)
-                .payload(RoleEvaluationOutboxPayload.builder()
-                        .eventId(eventId)
-                        .eventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED.name())
-                        .evaluationId(draft.getId())
-                        .projectId(task.getProject().getId())
-                        .taskId(task.getId())
-                        .targetCompanyProfileId(draft.getTargetProfileDocumentId())
-                        .actorAccountId(accountId)
-                        .submittedRevisionNumber(draft.getWorkingRevisionNumber())
-                        .submittedSourceSnapshotHash(draft.getSourceSnapshotHash())
-                        .aggregateCompletenessStatus(readiness.getAggregateCompletenessStatus())
-                        .occurredAt(LocalDateTime.now())
-                        .payloadVersion(1)
-                        .build())
+                .payload(outboxPayload)
+                .payloadHash(RoleEvaluationOutboxPayloadHasher.hash(outboxPayload))
                 .createdAt(LocalDateTime.now())
                 .build();
 

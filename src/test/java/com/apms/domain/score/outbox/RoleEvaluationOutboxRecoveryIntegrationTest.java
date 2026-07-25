@@ -270,7 +270,10 @@ public class RoleEvaluationOutboxRecoveryIntegrationTest {
         Long submissionId = submission.getId();
         Long actorAccountId = account.getId();
         RoleEvaluationOutboxEventType eventType = RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED;
-        String payloadHash = null;
+        RoleEvaluationOutboxPayload payload = new RoleEvaluationOutboxPayload();
+        payload.setActorAccountId(actorAccountId);
+        payload.setSubmissionId(submissionId);
+        String payloadHash = RoleEvaluationOutboxPayloadHasher.hash(payload);
 
         // A. Worker A claims
         RoleEvaluationOutboxEvent event = new RoleEvaluationOutboxEvent();
@@ -282,10 +285,8 @@ public class RoleEvaluationOutboxRecoveryIntegrationTest {
         event.setCreatedAt(LocalDateTime.now().minusDays(1));
         event.setAttemptCount(0);
 
-        RoleEvaluationOutboxPayload payload = new RoleEvaluationOutboxPayload();
-        payload.setActorAccountId(actorAccountId);
-        payload.setSubmissionId(submissionId);
         event.setPayload(payload);
+        event.setPayloadHash(payloadHash);
         event.setTaskId(taskId);
 
         outboxEventRepository.save(event);
@@ -310,7 +311,7 @@ public class RoleEvaluationOutboxRecoveryIntegrationTest {
         assertEquals(taskId, workerAEvent.getTaskId());
         assertEquals(submissionId, workerAEvent.getPayload().getSubmissionId());
         assertEquals(actorAccountId, workerAEvent.getPayload().getActorAccountId());
-        // payloadHash is null, no getter on payload
+        assertEquals(payloadHash, workerAEvent.getPayloadHash());
         assertTrue(org.springframework.aop.support.AopUtils.isAopProxy(delegator));
 
         // B. SQL processing commits

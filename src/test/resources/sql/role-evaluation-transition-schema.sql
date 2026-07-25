@@ -1,3 +1,4 @@
+IF OBJECT_ID('accounts', 'U') IS NULL
 CREATE TABLE accounts (
     id BIGINT IDENTITY(1,1) PRIMARY KEY,
     email VARCHAR(255) NOT NULL UNIQUE,
@@ -7,6 +8,7 @@ CREATE TABLE accounts (
     updated_at DATETIME2
 );
 
+IF OBJECT_ID('projects', 'U') IS NULL
 CREATE TABLE projects (
     id BIGINT IDENTITY(1,1) PRIMARY KEY,
     project_name VARCHAR(255) NOT NULL,
@@ -22,6 +24,7 @@ CREATE TABLE projects (
     CONSTRAINT fk_projects_created_by FOREIGN KEY (created_by) REFERENCES accounts(id)
 );
 
+IF OBJECT_ID('project_tasks', 'U') IS NULL
 CREATE TABLE project_tasks (
     id BIGINT IDENTITY(1,1) PRIMARY KEY,
     project_id BIGINT NOT NULL,
@@ -41,6 +44,7 @@ CREATE TABLE project_tasks (
     CONSTRAINT fk_tasks_created_by FOREIGN KEY (created_by_account_id) REFERENCES accounts(id)
 );
 
+IF OBJECT_ID('project_task_submissions', 'U') IS NULL
 CREATE TABLE project_task_submissions (
     id BIGINT IDENTITY(1,1) PRIMARY KEY,
     project_task_id BIGINT NOT NULL,
@@ -63,6 +67,7 @@ CREATE TABLE project_task_submissions (
     CONSTRAINT fk_submissions_reviewed_by FOREIGN KEY (reviewed_by_account_id) REFERENCES accounts(id)
 );
 
+IF OBJECT_ID('audit_logs', 'U') IS NULL
 CREATE TABLE audit_logs (
     id BIGINT IDENTITY(1,1) PRIMARY KEY,
     actor_account_id BIGINT NOT NULL,
@@ -76,12 +81,14 @@ CREATE TABLE audit_logs (
     CONSTRAINT fk_audit_project FOREIGN KEY (project_id) REFERENCES projects(id)
 );
 
+IF OBJECT_ID('account_roles', 'U') IS NULL
 CREATE TABLE account_roles (
     account_id BIGINT NOT NULL,
     role VARCHAR(255) NOT NULL,
     CONSTRAINT fk_account_roles_account FOREIGN KEY (account_id) REFERENCES accounts(id)
 );
 
+IF OBJECT_ID('project_members', 'U') IS NULL
 CREATE TABLE project_members (
     id BIGINT IDENTITY(1,1) PRIMARY KEY,
     project_id BIGINT NOT NULL,
@@ -93,6 +100,7 @@ CREATE TABLE project_members (
     CONSTRAINT uk_members_project_account UNIQUE (project_id, account_id)
 );
 
+IF OBJECT_ID('users', 'U') IS NULL
 CREATE TABLE users (
     id BIGINT IDENTITY(1,1) PRIMARY KEY,
     account_id BIGINT NOT NULL UNIQUE,

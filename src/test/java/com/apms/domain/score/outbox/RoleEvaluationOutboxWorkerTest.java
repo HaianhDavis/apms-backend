@@ -59,6 +59,8 @@ public class RoleEvaluationOutboxWorkerTest {
         RoleEvaluationOutboxEvent event1 = new RoleEvaluationOutboxEvent();
         event1.setId("event-1");
         event1.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
+        event1.setPayload(RoleEvaluationOutboxPayload.builder().eventId("event-1").build());
+        event1.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(event1.getPayload()));
 
         properties.setBatchSize(1);
 
@@ -76,10 +78,10 @@ public class RoleEvaluationOutboxWorkerTest {
 
     @Test
     void batchSizeThreeProcessesAtMostThreeEvents() {
-        RoleEvaluationOutboxEvent e1 = new RoleEvaluationOutboxEvent(); e1.setId("1"); e1.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
-        RoleEvaluationOutboxEvent e2 = new RoleEvaluationOutboxEvent(); e2.setId("2"); e2.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
-        RoleEvaluationOutboxEvent e3 = new RoleEvaluationOutboxEvent(); e3.setId("3"); e3.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
-        RoleEvaluationOutboxEvent e4 = new RoleEvaluationOutboxEvent(); e4.setId("4"); e4.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
+        RoleEvaluationOutboxEvent e1 = new RoleEvaluationOutboxEvent(); e1.setId("1"); e1.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); e1.setPayload(RoleEvaluationOutboxPayload.builder().eventId("1").build()); e1.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(e1.getPayload()));
+        RoleEvaluationOutboxEvent e2 = new RoleEvaluationOutboxEvent(); e2.setId("2"); e2.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); e2.setPayload(RoleEvaluationOutboxPayload.builder().eventId("2").build()); e2.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(e2.getPayload()));
+        RoleEvaluationOutboxEvent e3 = new RoleEvaluationOutboxEvent(); e3.setId("3"); e3.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); e3.setPayload(RoleEvaluationOutboxPayload.builder().eventId("3").build()); e3.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(e3.getPayload()));
+        RoleEvaluationOutboxEvent e4 = new RoleEvaluationOutboxEvent(); e4.setId("4"); e4.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); e4.setPayload(RoleEvaluationOutboxPayload.builder().eventId("4").build()); e4.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(e4.getPayload()));
 
         properties.setBatchSize(3);
 
@@ -102,7 +104,7 @@ public class RoleEvaluationOutboxWorkerTest {
 
     @Test
     void batchStopsWhenNoMoreEvents() {
-        RoleEvaluationOutboxEvent e1 = new RoleEvaluationOutboxEvent(); e1.setId("1"); e1.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
+        RoleEvaluationOutboxEvent e1 = new RoleEvaluationOutboxEvent(); e1.setId("1"); e1.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); e1.setPayload(RoleEvaluationOutboxPayload.builder().eventId("1").build()); e1.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(e1.getPayload()));
 
         properties.setBatchSize(5);
 
@@ -136,7 +138,9 @@ public class RoleEvaluationOutboxWorkerTest {
     void workerIdIsStableAcrossClaimAndFinalization() {
         RoleEvaluationOutboxEvent event = new RoleEvaluationOutboxEvent();
         event.setId("event-1");
-        event.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
+        event.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); event.setPayload(RoleEvaluationOutboxPayload.builder().eventId("event-1").build()); event.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(event.getPayload()));
+        event.setPayload(RoleEvaluationOutboxPayload.builder().eventId("event-1").build());
+        event.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(event.getPayload()));
 
         when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(RoleEvaluationOutboxEvent.class)))
                 .thenReturn(event)
@@ -165,8 +169,8 @@ public class RoleEvaluationOutboxWorkerTest {
 
     @Test
     void workerIdIsStableAcrossMultipleEvents() {
-        RoleEvaluationOutboxEvent e1 = new RoleEvaluationOutboxEvent(); e1.setId("1"); e1.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
-        RoleEvaluationOutboxEvent e2 = new RoleEvaluationOutboxEvent(); e2.setId("2"); e2.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
+        RoleEvaluationOutboxEvent e1 = new RoleEvaluationOutboxEvent(); e1.setId("1"); e1.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); e1.setPayload(RoleEvaluationOutboxPayload.builder().eventId("1").build()); e1.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(e1.getPayload()));
+        RoleEvaluationOutboxEvent e2 = new RoleEvaluationOutboxEvent(); e2.setId("2"); e2.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); e2.setPayload(RoleEvaluationOutboxPayload.builder().eventId("2").build()); e2.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(e2.getPayload()));
 
         properties.setBatchSize(2);
         when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(RoleEvaluationOutboxEvent.class)))
@@ -199,7 +203,7 @@ public class RoleEvaluationOutboxWorkerTest {
     void successfulProcessingFinalizesAsProcessed() {
         RoleEvaluationOutboxEvent event = new RoleEvaluationOutboxEvent();
         event.setId("event-1");
-        event.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
+        event.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); event.setPayload(RoleEvaluationOutboxPayload.builder().eventId("event-1").build()); event.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(event.getPayload()));
 
         when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(RoleEvaluationOutboxEvent.class)))
                 .thenReturn(event)
@@ -218,7 +222,7 @@ public class RoleEvaluationOutboxWorkerTest {
     void retryableFailureBelowMaxAttemptsSchedulesRetry() {
         RoleEvaluationOutboxEvent event = new RoleEvaluationOutboxEvent();
         event.setId("event-1");
-        event.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
+        event.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); event.setPayload(RoleEvaluationOutboxPayload.builder().eventId("event-1").build()); event.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(event.getPayload()));
         event.setAttemptCount(1);
 
         when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(RoleEvaluationOutboxEvent.class)))
@@ -248,7 +252,9 @@ public class RoleEvaluationOutboxWorkerTest {
     void failureAtMaxAttemptsMovesToDeadLetter() {
         RoleEvaluationOutboxEvent event = new RoleEvaluationOutboxEvent();
         event.setId("event-1");
-        event.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
+        event.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); event.setPayload(RoleEvaluationOutboxPayload.builder().eventId("event-1").build()); event.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(event.getPayload()));
+        event.setPayload(RoleEvaluationOutboxPayload.builder().eventId("event-1").build());
+        event.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(event.getPayload()));
         event.setAttemptCount(5);
 
         when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(RoleEvaluationOutboxEvent.class)))
@@ -268,7 +274,7 @@ public class RoleEvaluationOutboxWorkerTest {
     void lostOwnershipAfterSuccessfulProcessingDoesNotRetry() {
         RoleEvaluationOutboxEvent event = new RoleEvaluationOutboxEvent();
         event.setId("event-1");
-        event.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
+        event.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); event.setPayload(RoleEvaluationOutboxPayload.builder().eventId("event-1").build()); event.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(event.getPayload()));
 
         when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(RoleEvaluationOutboxEvent.class)))
                 .thenReturn(event)
@@ -288,7 +294,7 @@ public class RoleEvaluationOutboxWorkerTest {
     void lostOwnershipDuringRetryFinalizationDoesNotDeadLetter() {
         RoleEvaluationOutboxEvent event = new RoleEvaluationOutboxEvent();
         event.setId("event-1");
-        event.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED);
+        event.setEventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_SUBMITTED); event.setPayload(RoleEvaluationOutboxPayload.builder().eventId("event-1").build()); event.setPayloadHash(RoleEvaluationOutboxPayloadHasher.hash(event.getPayload()));
         event.setAttemptCount(1);
 
         when(mongoTemplate.findAndModify(any(Query.class), any(Update.class), any(FindAndModifyOptions.class), eq(RoleEvaluationOutboxEvent.class)))

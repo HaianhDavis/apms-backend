@@ -412,4 +412,11 @@ For detailed breakdown, refer to the active [Implementation Plan](file:///Users/
 - COMPETITOR behavior unchanged
 - PARTNER approval performs no scoring/AHP/ScoreSnapshot
 - Mongo and SQL are not a distributed/XA transaction
-- PAYLOAD HASH DURABLE PROVENANCE PENDING
+
+### Phase 2C.5D: PARTNER Outbox Payload Integrity and Durable Hash Provenance
+**Status:** COMPLETED
+- Deterministic canonical SHA-256 hashing for `RoleEvaluationOutboxPayload`.
+- `payloadHash` added to `RoleEvaluationOutboxEvent` (format `v1:sha256:<lowercase-hex>`).
+- Hash verified post-claim before SQL processing.
+- Missing/mismatched hash routed to DEAD_LETTER (no retry, safe ownership loss).
+- SQL receipt includes `payload_hash` in `processed_outbox_events`.

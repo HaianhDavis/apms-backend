@@ -38,6 +38,8 @@ public class RoleEvaluationOutboxEvent {
 
     private OutboxEventStatus status;
 
+    private String payloadHash;
+
     private RoleEvaluationOutboxPayload payload;
 
     private LocalDateTime lockedAt;

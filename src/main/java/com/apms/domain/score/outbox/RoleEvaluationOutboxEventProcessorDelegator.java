@@ -16,7 +16,7 @@ public class RoleEvaluationOutboxEventProcessorDelegator {
     public void processEventWithIdempotency(RoleEvaluationOutboxEvent event, RoleEvaluationOutboxEventProcessorStrategy strategy) {
 
         String aggregateId = event.getEvaluationId();
-        String payloadHash = null; // Can be added later if needed for advanced idempotency matching
+        String payloadHash = event.getPayloadHash();
 
         SqlIdempotencyService.ClaimResult result = idempotencyService.acquireReceipt(
                 event.getEventId(),

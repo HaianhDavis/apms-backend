@@ -20,6 +20,7 @@ import java.util.concurrent.Callable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class ProcessedOutboxEventConcurrencyTest extends RoleEvaluationSqlIntegrationTestBase {
 
@@ -90,5 +91,37 @@ public class ProcessedOutboxEventConcurrencyTest extends RoleEvaluationSqlIntegr
         } finally {
             executorService.shutdown();
         }
+    }
+
+    @Test
+    void testDuplicateSameHashIsIdempotent() {
+        String eventId = "evt-same-hash";
+        String eventType = "TEST_EVENT";
+        String aggregateId = "agg-1";
+        String payloadHash = "hash1";
+
+        SqlIdempotencyService.ClaimResult firstClaim = sqlIdempotencyService.acquireReceipt(eventId, eventType, aggregateId, payloadHash);
+        assertEquals(SqlIdempotencyService.ClaimResult.ACQUIRED, firstClaim);
+
+        SqlIdempotencyService.ClaimResult secondClaim = sqlIdempotencyService.acquireReceipt(eventId, eventType, aggregateId, payloadHash);
+        assertEquals(SqlIdempotencyService.ClaimResult.ALREADY_PROCESSED, secondClaim);
+    }
+
+    @Test
+    void testDuplicateDifferentHashIsRejected() {
+        String eventId = "evt-diff-hash";
+        String eventType = "TEST_EVENT";
+        String aggregateId = "agg-1";
+        String payloadHash1 = "hash1";
+        String payloadHash2 = "hash2";
+
+        SqlIdempotencyService.ClaimResult firstClaim = sqlIdempotencyService.acquireReceipt(eventId, eventType, aggregateId, payloadHash1);
+        assertEquals(SqlIdempotencyService.ClaimResult.ACQUIRED, firstClaim);
+
+        PayloadIntegrityException exception = assertThrows(PayloadIntegrityException.class, () -> {
+            sqlIdempotencyService.acquireReceipt(eventId, eventType, aggregateId, payloadHash2);
+        });
+
+        assertTrue(exception.getMessage().contains("mismatched hash"));
     }
 }

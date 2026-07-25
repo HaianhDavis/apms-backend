@@ -13,6 +13,7 @@ import com.apms.domain.score.enums.RoleEvaluationStatus;
 import com.apms.domain.score.enums.EvaluationCompletenessStatus;
 import com.apms.domain.score.outbox.RoleEvaluationOutboxEvent;
 import com.apms.domain.score.outbox.RoleEvaluationOutboxPayload;
+import com.apms.domain.score.outbox.RoleEvaluationOutboxPayloadHasher;
 import com.apms.domain.score.repository.mongo.RoleEvaluationDraftRepository;
 import com.apms.common.security.ProjectSecurityEvaluator;
 import lombok.RequiredArgsConstructor;
@@ -141,14 +142,7 @@ public class PartnerRoleEvaluationApprovalStrategy implements RoleEvaluationAppr
 
         String eventId = draft.getId() + "_" + nextVersion + "_APPROVED";
 
-        RoleEvaluationOutboxEvent outboxEvent = RoleEvaluationOutboxEvent.builder()
-                .eventId(eventId)
-                .evaluationId(draft.getId())
-                .projectId(task.getProject().getId())
-                .taskId(task.getId())
-                .eventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_APPROVED)
-                .status(OutboxEventStatus.PENDING)
-                .payload(RoleEvaluationOutboxPayload.builder()
+        RoleEvaluationOutboxPayload outboxPayload = RoleEvaluationOutboxPayload.builder()
                         .eventId(eventId)
                         .eventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_APPROVED.name())
                         .evaluationId(draft.getId())
@@ -165,7 +159,17 @@ public class PartnerRoleEvaluationApprovalStrategy implements RoleEvaluationAppr
                         .managerJustification(readiness.getAggregateCompletenessStatus() == EvaluationCompletenessStatus.PARTIAL ? request.getComment() : null)
                         .occurredAt(LocalDateTime.now())
                         .payloadVersion(1)
-                        .build())
+                        .build();
+
+        RoleEvaluationOutboxEvent outboxEvent = RoleEvaluationOutboxEvent.builder()
+                .eventId(eventId)
+                .evaluationId(draft.getId())
+                .projectId(task.getProject().getId())
+                .taskId(task.getId())
+                .eventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_APPROVED)
+                .status(OutboxEventStatus.PENDING)
+                .payload(outboxPayload)
+                .payloadHash(RoleEvaluationOutboxPayloadHasher.hash(outboxPayload))
                 .createdAt(LocalDateTime.now())
                 .build();
         mongoTemplate.insert(outboxEvent);
@@ -203,14 +207,7 @@ public class PartnerRoleEvaluationApprovalStrategy implements RoleEvaluationAppr
         Integer nextRevision = draft.getWorkingRevisionNumber() + 1;
         String eventId = draft.getId() + "_" + draft.getWorkingRevisionNumber() + "_" + nextRevision + "_REVISION_REQUESTED";
 
-        RoleEvaluationOutboxEvent outboxEvent = RoleEvaluationOutboxEvent.builder()
-                .eventId(eventId)
-                .evaluationId(draft.getId())
-                .projectId(task.getProject().getId())
-                .taskId(task.getId())
-                .eventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_REVISION_REQUESTED)
-                .status(OutboxEventStatus.PENDING)
-                .payload(RoleEvaluationOutboxPayload.builder()
+        RoleEvaluationOutboxPayload outboxPayload = RoleEvaluationOutboxPayload.builder()
                         .eventId(eventId)
                         .eventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_REVISION_REQUESTED.name())
                         .evaluationId(draft.getId())
@@ -223,7 +220,17 @@ public class PartnerRoleEvaluationApprovalStrategy implements RoleEvaluationAppr
                         .managerFeedback(request.getComment())
                         .occurredAt(LocalDateTime.now())
                         .payloadVersion(1)
-                        .build())
+                        .build();
+
+        RoleEvaluationOutboxEvent outboxEvent = RoleEvaluationOutboxEvent.builder()
+                .eventId(eventId)
+                .evaluationId(draft.getId())
+                .projectId(task.getProject().getId())
+                .taskId(task.getId())
+                .eventType(RoleEvaluationOutboxEventType.PARTNER_EVALUATION_REVISION_REQUESTED)
+                .status(OutboxEventStatus.PENDING)
+                .payload(outboxPayload)
+                .payloadHash(RoleEvaluationOutboxPayloadHasher.hash(outboxPayload))
                 .createdAt(LocalDateTime.now())
                 .build();
         mongoTemplate.insert(outboxEvent);

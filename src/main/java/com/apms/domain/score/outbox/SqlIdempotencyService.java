@@ -37,6 +37,23 @@ public class SqlIdempotencyService {
                 eventId, eventType, aggregateId, payloadHash, LocalDateTime.now(),
                 eventId);
 
-        return rowsAffected > 0 ? ClaimResult.ACQUIRED : ClaimResult.ALREADY_PROCESSED;
+        if (rowsAffected > 0) {
+            return ClaimResult.ACQUIRED;
+        }
+
+        String existingHash = jdbcTemplate.queryForObject(
+                "SELECT payload_hash FROM processed_outbox_events WHERE event_id = ?",
+                String.class,
+                eventId
+        );
+
+        if (existingHash != null && !existingHash.equals(payloadHash)) {
+            throw new PayloadIntegrityException(
+                    String.format("Duplicate SQL receipt for %s has mismatched hash. Expected: %s, Found: %s",
+                            eventId, payloadHash, existingHash)
+            );
+        }
+
+        return ClaimResult.ALREADY_PROCESSED;
     }
 }

@@ -65,6 +65,15 @@ public class RoleEvaluationOutboxEventWorker {
             }
 
             try {
+                if (event.getPayloadHash() == null || event.getPayloadHash().isBlank()) {
+                    throw new PayloadIntegrityException("Missing payload hash on outbox event. Legacy unhashed PENDING events are not supported by the strict integrity policy.");
+                }
+
+                String expectedHash = RoleEvaluationOutboxPayloadHasher.hash(event.getPayload());
+                if (!event.getPayloadHash().equals(expectedHash)) {
+                    throw new PayloadIntegrityException(String.format("Payload integrity failure. Expected: %s, Recomputed: %s", event.getPayloadHash(), expectedHash));
+                }
+
                 RoleEvaluationOutboxEventProcessorStrategy strategy = strategies.stream()
                         .filter(s -> s.supports(event.getEventType()))
                         .findFirst()
@@ -75,6 +84,13 @@ public class RoleEvaluationOutboxEventWorker {
                 // Mark as processed safely using CAS
                 outboxEventRepository.finalizeAsProcessed(event.getId(), workerId);
 
+            } catch (PayloadIntegrityException e) {
+                log.error("Integrity failure for event {}", event.getEventId(), e);
+                try {
+                    outboxEventRepository.finalizeAsDeadLetter(event.getId(), workerId, e.getMessage());
+                } catch (org.springframework.dao.OptimisticLockingFailureException casEx) {
+                    log.warn("Lost ownership of event {} during integrity DEAD_LETTER transition", event.getEventId());
+                }
             } catch (org.springframework.dao.OptimisticLockingFailureException e) {
                 log.warn("Lost ownership of event {}", event.getEventId());
                 // Do not attempt to retry or dead-letter, as we no longer own the event
