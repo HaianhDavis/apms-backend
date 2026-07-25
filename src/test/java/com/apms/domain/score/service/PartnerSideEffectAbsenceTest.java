@@ -46,7 +46,7 @@ class PartnerSideEffectAbsenceTest {
         roleScoringEngine = mock(RoleScoringEngine.class);
         scoreSnapshotRepository = mock(ScoreSnapshotRepository.class);
         companyProfileRepository = mock(CompanyProfileRepository.class);
-        
+
         ahpInvocationMock = mock(Runnable.class);
         outboxInsertMock = mock(Runnable.class);
         sqlTaskMutationMock = mock(Runnable.class);
@@ -54,7 +54,28 @@ class PartnerSideEffectAbsenceTest {
         org.springframework.data.mongodb.core.MongoTemplate mongoTemplate = mock(org.springframework.data.mongodb.core.MongoTemplate.class);
         when(mongoTemplate.updateFirst(any(), any(), eq(RoleEvaluationDraft.class)))
                 .thenReturn(com.mongodb.client.result.UpdateResult.acknowledged(1, 1L, null));
-        generationService = new PartnerSuggestionGenerationService(draftRepository, contextProvider, validator, mongoTemplate);
+        com.apms.domain.ai.service.provider.PartnerAiPromptProvider promptProvider = mock(com.apms.domain.ai.service.provider.PartnerAiPromptProvider.class);
+        com.apms.domain.ai.service.provider.PartnerCriterionSuggestionProvider aiProvider = mock(com.apms.domain.ai.service.provider.PartnerCriterionSuggestionProvider.class);
+        com.apms.domain.score.service.PartnerDataSufficiencyEvaluator sufficiencyEvaluator = mock(com.apms.domain.score.service.PartnerDataSufficiencyEvaluator.class);
+
+        com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse readiness = com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse.builder()
+            .criterionResults(java.util.Map.of(
+                "businessValueContributionScore", com.apms.domain.score.dto.draft.CriterionReadinessResult.builder()
+                    .sufficiencyStatus(PartnerDataSufficiencyEvaluator.SufficiencyStatus.COMPLETE)
+                    .build()
+            ))
+            .build();
+        when(sufficiencyEvaluator.evaluate(any())).thenReturn(readiness);
+
+        when(promptProvider.getPromptTemplate(anyString())).thenReturn("prompt");
+        when(aiProvider.generateSuggestionJson(any(), anyString())).thenReturn("{}");
+
+        generationService = new PartnerSuggestionGenerationService(
+            draftRepository, contextProvider, validator, mongoTemplate,
+            promptProvider,
+            aiProvider,
+            sufficiencyEvaluator
+        );
     }
 
     @Test
@@ -67,16 +88,16 @@ class PartnerSideEffectAbsenceTest {
         draft.setPinnedSourceReferences(List.of(new ApprovedSourceReference()));
 
         when(draftRepository.findById("draft1")).thenReturn(Optional.of(draft));
-        
+
         com.apms.domain.score.dto.draft.PartnerCriterionContext context = com.apms.domain.score.dto.draft.PartnerCriterionContext.builder().criterionKey("crit1").build();
         when(contextProvider.buildContext(any(), any())).thenReturn(context);
-        
+
         com.apms.domain.ai.dto.PartnerCriterionSuggestionResponse suggestionResp = new com.apms.domain.ai.dto.PartnerCriterionSuggestionResponse();
         suggestionResp.setRationale("test");
         when(validator.validateAndMap(any(), any(), any())).thenReturn(suggestionResp);
-        
+
         generationService.generateSuggestion("draft1", "crit1", "gen1");
-        
+
         verifyNoInteractions(roleScoringEngine);
         verifyNoInteractions(scoreSnapshotRepository);
         verifyNoInteractions(versionRepository);

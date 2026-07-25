@@ -34,14 +34,23 @@ public class PartnerSuggestionGenerationService {
     private final PartnerEvaluationContextProvider contextProvider;
     private final PartnerAiSuggestionValidator validator;
     private final MongoTemplate mongoTemplate;
+    private final com.apms.domain.ai.service.provider.PartnerAiPromptProvider promptProvider;
+    private final com.apms.domain.ai.service.provider.PartnerCriterionSuggestionProvider aiProvider;
+    private final PartnerDataSufficiencyEvaluator sufficiencyEvaluator;
 
     public String generateSuggestion(String draftId, String criterionKey, String generationId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new BusinessValidationException("Draft not found"));
 
         if (draft.getPinnedSourceReferences() == null || draft.getPinnedSourceReferences().isEmpty()) {
-            // Block AI provider entirely if empty list
             return "NO_SOURCES_PINNED";
+        }
+
+        com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse readiness = sufficiencyEvaluator.evaluate(draft);
+        com.apms.domain.score.dto.draft.CriterionReadinessResult criterionReadiness = readiness.getCriterionResults().get(criterionKey);
+
+        if (criterionReadiness != null && criterionReadiness.getSufficiencyStatus() == PartnerDataSufficiencyEvaluator.SufficiencyStatus.INCOMPLETE) {
+            return "NEEDS_MORE_DATA";
         }
 
         String currentHash = draft.getSourceSnapshotHash();
@@ -86,7 +95,7 @@ public class PartnerSuggestionGenerationService {
 
         metadataList.removeIf(m -> m.getGenerationId().equals(generationId));
         metadataList.add(newMeta);
-        
+
         // Bounded retention policy: max 10 entries per criterion
         if (metadataList.size() > 10) {
             metadataList = metadataList.subList(metadataList.size() - 10, metadataList.size());
@@ -109,7 +118,8 @@ public class PartnerSuggestionGenerationService {
 
         // Build context and call AI
         PartnerCriterionContext context = contextProvider.buildContext(draft, criterionKey);
-        String aiResponseJson = callAiProvider(context);
+        String promptTemplate = promptProvider.getPromptTemplate(criterionKey);
+        String aiResponseJson = aiProvider.generateSuggestionJson(context, promptTemplate);
         PartnerCriterionSuggestionResponse validatedResponse = validator.validateAndMap(aiResponseJson, criterionKey, draft.getPinnedSourceReferences());
 
         // Reload draft to apply results
@@ -121,7 +131,7 @@ public class PartnerSuggestionGenerationService {
 
         List<PartnerSuggestionGenerationMetadata> reloadedMetadata = reloadedDraft.getGenerationIdempotency()
                 .getOrDefault(criterionKey, new ArrayList<>());
-        
+
         PartnerSuggestionGenerationMetadata targetMeta = reloadedMetadata.stream()
                 .filter(m -> generationId.equals(m.getGenerationId()))
                 .findFirst()
@@ -136,7 +146,7 @@ public class PartnerSuggestionGenerationService {
             targetMeta.setValidationStatus(GenerationStatus.STALE);
         } else {
             targetMeta.setValidationStatus(GenerationStatus.APPLIED);
-            
+
             AutomaticSuggestion suggestion = new AutomaticSuggestion();
             suggestion.setGenerationId(generationId);
             suggestion.setCriterionKey(criterionKey);
@@ -151,7 +161,7 @@ public class PartnerSuggestionGenerationService {
             suggestion.setEvidenceIds(validatedResponse.getEvidenceReferenceIds());
             suggestion.setMissingData(validatedResponse.getMissingDataNotes() != null ? validatedResponse.getMissingDataNotes() : new ArrayList<>());
             suggestion.setReviewStatus(CriterionSuggestionReviewStatus.PENDING);
-            
+
             reloadedDraft.getAutomaticSuggestions().put(criterionKey, suggestion);
         }
 
@@ -173,12 +183,4 @@ public class PartnerSuggestionGenerationService {
         return isStale ? "STALE_GENERATION" : "GENERATED";
     }
 
-    private String callAiProvider(PartnerCriterionContext context) {
-        return "{\n" +
-               "  \"criterionKey\": \"" + context.getCriterionKey() + "\",\n" +
-               "  \"rationale\": \"AI rationale generated.\",\n" +
-               "  \"confidence\": 0.8,\n" +
-               "  \"evidenceReferenceIds\": []\n" +
-               "}";
-    }
 }

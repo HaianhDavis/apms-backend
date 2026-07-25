@@ -19,9 +19,9 @@ public class PartnerDataSufficiencyEvaluator {
     private final PartnerEvaluationContextProvider contextProvider;
 
     public enum SufficiencyStatus {
-        SUFFICIENT,
+        COMPLETE,
         PARTIAL,
-        INSUFFICIENT
+        INCOMPLETE
     }
 
     @Data
@@ -65,7 +65,7 @@ public class PartnerDataSufficiencyEvaluator {
                     
             readinessMap.put(criterionKey, result);
             
-            if (readiness.getStatus() == SufficiencyStatus.INSUFFICIENT) {
+            if (readiness.getStatus() == SufficiencyStatus.INCOMPLETE) {
                 hasInsufficient = true;
             } else if (readiness.getStatus() == SufficiencyStatus.PARTIAL) {
                 hasPartial = true;
@@ -106,7 +106,7 @@ public class PartnerDataSufficiencyEvaluator {
         com.apms.domain.score.dto.draft.PartnerCriterionContext context = contextProvider.buildContext(draft, criterionKey);
         List<Map<String, Object>> sources = context.getPinnedSources();
         
-        SufficiencyStatus status = SufficiencyStatus.INSUFFICIENT;
+        SufficiencyStatus status = SufficiencyStatus.INCOMPLETE;
         List<String> missingCategories = new java.util.ArrayList<>();
         
         boolean hasCompanyProfile = sources.stream().anyMatch(s -> "COMPANY_PROFILE_VERSION".equals(s.get("sourceType")));
@@ -123,7 +123,7 @@ public class PartnerDataSufficiencyEvaluator {
         switch (criterionKey) {
             case "businessValueContributionScore":
                 if (hasMetric.test("revenue_generated") || hasMetric.test("cost_savings")) {
-                    status = SufficiencyStatus.SUFFICIENT;
+                    status = SufficiencyStatus.COMPLETE;
                 } else if (hasAnyEvidence) {
                     status = SufficiencyStatus.PARTIAL;
                 } else {
@@ -134,7 +134,7 @@ public class PartnerDataSufficiencyEvaluator {
                 
             case "strategicAlignmentScore":
                 if (hasAnyMetric || hasContractClause) { // Treat metric/clause as approved objective/initiative evidence
-                    status = SufficiencyStatus.SUFFICIENT;
+                    status = SufficiencyStatus.COMPLETE;
                 } else if (hasCompanyProfile) {
                     status = SufficiencyStatus.PARTIAL;
                 } else {
@@ -144,7 +144,7 @@ public class PartnerDataSufficiencyEvaluator {
                 
             case "operationalPerformanceScore":
                 if (hasMetric.test("sla_uptime_percentage") || hasMetric.test("delivery_on_time_rate")) {
-                    status = SufficiencyStatus.SUFFICIENT;
+                    status = SufficiencyStatus.COMPLETE;
                 } else if (hasAnyMetric || hasAnyEvidence) {
                     status = SufficiencyStatus.PARTIAL;
                 } else {
@@ -154,7 +154,7 @@ public class PartnerDataSufficiencyEvaluator {
                 
             case "capabilityAndComplementarityScore":
                 if (hasCompanyProfile && hasContractClause) {
-                    status = SufficiencyStatus.SUFFICIENT;
+                    status = SufficiencyStatus.COMPLETE;
                 } else if (hasCompanyProfile || hasContractClause || hasAnyEvidence) {
                     status = SufficiencyStatus.PARTIAL;
                 } else {
@@ -165,7 +165,7 @@ public class PartnerDataSufficiencyEvaluator {
                 
             case "relationshipQualityScore":
                 if (hasMetric.test("nps_score") || hasMetric.test("joint_initiatives_completed")) {
-                    status = SufficiencyStatus.SUFFICIENT;
+                    status = SufficiencyStatus.COMPLETE;
                 } else if (hasAnyEvidence) {
                     status = SufficiencyStatus.PARTIAL;
                 } else {
@@ -175,7 +175,7 @@ public class PartnerDataSufficiencyEvaluator {
                 
             case "governanceAndRiskScore":
                 if (hasMetric.test("compliance_audit_passed") || hasMetric.test("security_incidents") || hasContractClause) {
-                    status = SufficiencyStatus.SUFFICIENT;
+                    status = SufficiencyStatus.COMPLETE;
                 } else if (hasAnyEvidence) {
                     status = SufficiencyStatus.PARTIAL;
                 } else {
