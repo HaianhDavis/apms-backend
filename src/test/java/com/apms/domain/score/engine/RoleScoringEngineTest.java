@@ -67,12 +67,12 @@ class RoleScoringEngineTest {
         potentialPartnerRuleSet = RoleScoreRuleSet.builder().id(2L).evaluatedRole(CompanyRole.POTENTIAL_PARTNER).ruleSetVersion("v1").build();
         
         potentialPartnerRules = List.of(
-            RoleCriterionRule.builder().criterionKey("strategicFitScore").weight(new BigDecimal("0.20")).direction(ScoreDirection.BENEFIT).required(true).build(),
+            RoleCriterionRule.builder().criterionKey("strategicFitScore").weight(new BigDecimal("0.25")).direction(ScoreDirection.BENEFIT).required(true).build(),
             RoleCriterionRule.builder().criterionKey("capabilityComplementarityScore").weight(new BigDecimal("0.20")).direction(ScoreDirection.BENEFIT).required(true).build(),
-            RoleCriterionRule.builder().criterionKey("trustReputationScore").weight(new BigDecimal("0.15")).direction(ScoreDirection.BENEFIT).required(true).build(),
-            RoleCriterionRule.builder().criterionKey("financialAttractivenessScore").weight(new BigDecimal("0.15")).direction(ScoreDirection.BENEFIT).required(true).build(),
-            RoleCriterionRule.builder().criterionKey("collaborationPotentialScore").weight(new BigDecimal("0.15")).direction(ScoreDirection.BENEFIT).required(true).build(),
-            RoleCriterionRule.builder().criterionKey("partnershipRiskScore").weight(new BigDecimal("0.15")).direction(ScoreDirection.COST).required(true).build()
+            RoleCriterionRule.builder().criterionKey("trustReputationScore").weight(new BigDecimal("0.13")).direction(ScoreDirection.BENEFIT).required(true).build(),
+            RoleCriterionRule.builder().criterionKey("financialAttractivenessScore").weight(new BigDecimal("0.16")).direction(ScoreDirection.BENEFIT).required(true).build(),
+            RoleCriterionRule.builder().criterionKey("collaborationPotentialScore").weight(new BigDecimal("0.16")).direction(ScoreDirection.BENEFIT).required(true).build(),
+            RoleCriterionRule.builder().criterionKey("partnershipRiskScore").weight(new BigDecimal("0.10")).direction(ScoreDirection.BENEFIT).required(true).build()
         );
     }
 
@@ -104,17 +104,17 @@ class RoleScoringEngineTest {
     }
 
     @Test
-    void shouldInvertCostScores() {
+    void shouldCalculateAllBenefitScoresForPotentialPartner() {
         when(ruleSetRepository.findByEvaluatedRoleAndRuleSetVersion(CompanyRole.POTENTIAL_PARTNER, "v1")).thenReturn(Optional.of(potentialPartnerRuleSet));
         when(criterionRuleRepository.findByRuleSetIdAndActiveTrueOrderByDisplayOrderAsc(2L)).thenReturn(potentialPartnerRules);
         
         LinkedHashMap<String, BigDecimal> scores = new LinkedHashMap<>();
-        scores.put("strategicFitScore", new BigDecimal("100")); // Benefit: 100 * 0.20 = 20
+        scores.put("strategicFitScore", new BigDecimal("100")); // Benefit: 100 * 0.25 = 25
         scores.put("capabilityComplementarityScore", new BigDecimal("100")); // Benefit: 100 * 0.20 = 20
-        scores.put("trustReputationScore", new BigDecimal("100")); // Benefit: 100 * 0.15 = 15
-        scores.put("financialAttractivenessScore", new BigDecimal("100")); // Benefit: 100 * 0.15 = 15
-        scores.put("collaborationPotentialScore", new BigDecimal("100")); // Benefit: 100 * 0.15 = 15
-        scores.put("partnershipRiskScore", new BigDecimal("100")); // Cost: (100 - 100) * 0.15 = 0
+        scores.put("trustReputationScore", new BigDecimal("100")); // Benefit: 100 * 0.13 = 13
+        scores.put("financialAttractivenessScore", new BigDecimal("100")); // Benefit: 100 * 0.16 = 16
+        scores.put("collaborationPotentialScore", new BigDecimal("100")); // Benefit: 100 * 0.16 = 16
+        scores.put("partnershipRiskScore", new BigDecimal("100")); // Benefit: 100 * 0.10 = 10
 
         RoleEvaluationCalculationRequest req = RoleEvaluationCalculationRequest.builder()
                 .evaluatedRole(CompanyRole.POTENTIAL_PARTNER)
@@ -125,22 +125,22 @@ class RoleScoringEngineTest {
         RoleEvaluationCalculationResult res = engine.calculate(req);
 
         assertThat(res.getCompletenessStatus()).isEqualTo(EvaluationCompletenessStatus.COMPLETE);
-        assertThat(res.getOverallScore().compareTo(new BigDecimal("85.00"))).isEqualTo(0);
-        assertThat(res.getNormalizedCriterionScores().get("partnershipRiskScore").compareTo(BigDecimal.ZERO)).isEqualTo(0);
+        assertThat(res.getOverallScore().compareTo(new BigDecimal("100.00"))).isEqualTo(0);
+        assertThat(res.getNormalizedCriterionScores().get("partnershipRiskScore").compareTo(new BigDecimal("100"))).isEqualTo(0);
     }
     
     @Test
-    void shouldInvertCostScoresZeroBecomesHundred() {
+    void shouldNotInvertBenefitRiskScore() {
         when(ruleSetRepository.findByEvaluatedRoleAndRuleSetVersion(CompanyRole.POTENTIAL_PARTNER, "v1")).thenReturn(Optional.of(potentialPartnerRuleSet));
         when(criterionRuleRepository.findByRuleSetIdAndActiveTrueOrderByDisplayOrderAsc(2L)).thenReturn(potentialPartnerRules);
         
         LinkedHashMap<String, BigDecimal> scores = new LinkedHashMap<>();
-        scores.put("strategicFitScore", new BigDecimal("0")); // Benefit: 0 * 0.2 = 0
-        scores.put("capabilityComplementarityScore", new BigDecimal("0")); // Benefit: 0 * 0.2 = 0
-        scores.put("trustReputationScore", new BigDecimal("0")); // Benefit: 0 * 0.15 = 0
-        scores.put("financialAttractivenessScore", new BigDecimal("0")); // Benefit: 0 * 0.15 = 0
-        scores.put("collaborationPotentialScore", new BigDecimal("0")); // Benefit: 0 * 0.15 = 0
-        scores.put("partnershipRiskScore", new BigDecimal("0")); // Cost: (100 - 0) * 0.15 = 15
+        scores.put("strategicFitScore", new BigDecimal("0")); // Benefit: 0 * 0.25 = 0
+        scores.put("capabilityComplementarityScore", new BigDecimal("0")); // Benefit: 0 * 0.20 = 0
+        scores.put("trustReputationScore", new BigDecimal("0")); // Benefit: 0 * 0.13 = 0
+        scores.put("financialAttractivenessScore", new BigDecimal("0")); // Benefit: 0 * 0.16 = 0
+        scores.put("collaborationPotentialScore", new BigDecimal("0")); // Benefit: 0 * 0.16 = 0
+        scores.put("partnershipRiskScore", new BigDecimal("0")); // Benefit: 0 * 0.10 = 0
 
         RoleEvaluationCalculationRequest req = RoleEvaluationCalculationRequest.builder()
                 .evaluatedRole(CompanyRole.POTENTIAL_PARTNER)
@@ -151,8 +151,9 @@ class RoleScoringEngineTest {
         RoleEvaluationCalculationResult res = engine.calculate(req);
 
         assertThat(res.getCompletenessStatus()).isEqualTo(EvaluationCompletenessStatus.COMPLETE);
-        assertThat(res.getOverallScore().compareTo(new BigDecimal("15.00"))).isEqualTo(0);
-        assertThat(res.getNormalizedCriterionScores().get("partnershipRiskScore").compareTo(new BigDecimal("100"))).isEqualTo(0);
+        assertThat(res.getOverallScore().compareTo(new BigDecimal("0.00"))).isEqualTo(0);
+        // partnershipRiskScore=0 with BENEFIT: normalized stays 0, NOT 100
+        assertThat(res.getNormalizedCriterionScores().get("partnershipRiskScore").compareTo(BigDecimal.ZERO)).isEqualTo(0);
     }
 
     @Test

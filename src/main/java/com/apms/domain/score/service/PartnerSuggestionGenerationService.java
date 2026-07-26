@@ -37,6 +37,7 @@ public class PartnerSuggestionGenerationService {
     private final com.apms.domain.ai.service.provider.PartnerAiPromptProvider promptProvider;
     private final com.apms.domain.ai.service.provider.PartnerCriterionSuggestionProvider aiProvider;
     private final PartnerDataSufficiencyEvaluator sufficiencyEvaluator;
+    private final PotentialPartnerDataSufficiencyEvaluator potentialPartnerSufficiencyEvaluator;
 
     public String generateSuggestion(String draftId, String criterionKey, String generationId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
@@ -46,7 +47,12 @@ public class PartnerSuggestionGenerationService {
             return "NO_SOURCES_PINNED";
         }
 
-        com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse readiness = sufficiencyEvaluator.evaluate(draft);
+        com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse readiness;
+        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.POTENTIAL_PARTNER) {
+            readiness = potentialPartnerSufficiencyEvaluator.evaluate(draft);
+        } else {
+            readiness = sufficiencyEvaluator.evaluate(draft);
+        }
         com.apms.domain.score.dto.draft.CriterionReadinessResult criterionReadiness = readiness.getCriterionResults().get(criterionKey);
 
         if (criterionReadiness != null && criterionReadiness.getSufficiencyStatus() == PartnerDataSufficiencyEvaluator.SufficiencyStatus.INCOMPLETE) {

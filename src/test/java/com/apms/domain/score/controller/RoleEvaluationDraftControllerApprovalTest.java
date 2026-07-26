@@ -63,6 +63,9 @@ public class RoleEvaluationDraftControllerApprovalTest {
     private PartnerDataSufficiencyEvaluator dataSufficiencyEvaluator;
 
     @MockBean
+    private com.apms.domain.score.service.PotentialPartnerDataSufficiencyEvaluator potentialPartnerDataSufficiencyEvaluator;
+
+    @MockBean
     private PartnerSuggestionReviewService partnerSuggestionReviewService;
 
     @MockBean
@@ -102,13 +105,23 @@ public class RoleEvaluationDraftControllerApprovalTest {
         request.setDecision(RoleEvaluationReviewDecision.APPROVE);
         request.setComment("Looks good");
 
+        com.apms.domain.score.draft.RoleEvaluationDraft mockDraft = new com.apms.domain.score.draft.RoleEvaluationDraft();
+        mockDraft.setStatus(com.apms.domain.score.enums.RoleEvaluationStatus.APPROVAL_PROCESSING);
+        mockDraft.setCurrentApprovedVersionId("ver-1");
+        mockDraft.setCurrentApprovedVersionNumber(2);
+
+        org.mockito.Mockito.when(draftService.getRawDraft("draft-1")).thenReturn(mockDraft);
+
         mockMvc.perform(post("/api/v1/role-evaluations/draft-1/review")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request))
                         .header("Idempotency-Key", "key-123")
                         .with(SecurityMockMvcRequestPostProcessors.csrf())
                         .with(SecurityMockMvcRequestPostProcessors.user(userDetails)))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isAccepted())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.status").value("APPROVAL_PROCESSING"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.evaluationId").value("draft-1"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.approvedVersionId").value("ver-1"));
 
         verify(approvalService).reviewDraft(eq("draft-1"), any(ReviewRoleEvaluationRequest.class), eq(100L), eq("key-123"));
     }

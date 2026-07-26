@@ -9,6 +9,7 @@ import com.apms.domain.score.enums.WeightingMethod;
 import com.apms.domain.score.registry.CanonicalRoleCriteria;
 import com.apms.domain.score.repository.sql.RoleScoreRuleSetRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -18,7 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class RoleScoringSeedService {
@@ -47,14 +50,17 @@ public class RoleScoringSeedService {
                 "governanceAndRiskScore", new BigDecimal("0.09")
         ));
 
+        // Note: For POTENTIAL_PARTNER we call seedRole, but also apply a targeted migration below
+        // in case an older seed version was already deployed with incorrect weights/directions.
         seedRole(CompanyRole.POTENTIAL_PARTNER, CanonicalRoleCriteria.POTENTIAL_PARTNER_CRITERIA, CanonicalRoleCriteria.POTENTIAL_PARTNER_DIRECTIONS, Map.of(
                 "strategicFitScore", new BigDecimal("0.25"),
                 "capabilityComplementarityScore", new BigDecimal("0.20"),
                 "trustReputationScore", new BigDecimal("0.13"),
-                "financialAttractivenessScore", new BigDecimal("0.11"),
-                "collaborationPotentialScore", new BigDecimal("0.20"),
-                "partnershipRiskScore", new BigDecimal("0.11")
+                "financialAttractivenessScore", new BigDecimal("0.16"),
+                "collaborationPotentialScore", new BigDecimal("0.16"),
+                "partnershipRiskScore", new BigDecimal("0.10")
         ));
+        migratePotentialPartnerIllustrativeRules();
 
         seedRole(CompanyRole.COMPETITOR, CanonicalRoleCriteria.COMPETITOR_CRITERIA, CanonicalRoleCriteria.COMPETITOR_DIRECTIONS, Map.of(
                 "marketPositionScore", new BigDecimal("0.20"),
@@ -82,6 +88,49 @@ public class RoleScoringSeedService {
                 "serviceResponsivenessScore", new BigDecimal("0.10"),
                 "supplyRiskComplianceScore", new BigDecimal("0.18")
         ));
+    }
+
+    private void migratePotentialPartnerIllustrativeRules() {
+        Optional<RoleScoreRuleSet> ruleSetOpt = ruleSetRepository.findByEvaluatedRoleAndRuleSetVersion(
+                CompanyRole.POTENTIAL_PARTNER, RULE_SET_VERSION);
+        if (ruleSetOpt.isEmpty()) {
+            return;
+        }
+        RoleScoreRuleSet ruleSet = ruleSetOpt.get();
+
+        // ONLY migrate if it's ILLUSTRATIVE, do NOT overwrite EXPERT created ones
+        if (ruleSet.getWeightSource() != WeightSource.ILLUSTRATIVE) {
+            log.info("POTENTIAL_PARTNER rule set is not ILLUSTRATIVE. Skipping migration.");
+            return;
+        }
+
+        Map<String, BigDecimal> expectedWeights = Map.of(
+                "strategicFitScore", new BigDecimal("0.25"),
+                "capabilityComplementarityScore", new BigDecimal("0.20"),
+                "trustReputationScore", new BigDecimal("0.13"),
+                "financialAttractivenessScore", new BigDecimal("0.16"),
+                "collaborationPotentialScore", new BigDecimal("0.16"),
+                "partnershipRiskScore", new BigDecimal("0.10")
+        );
+
+        boolean updated = false;
+        for (RoleCriterionRule rule : ruleSet.getRules()) {
+            BigDecimal expectedWeight = expectedWeights.get(rule.getCriterionKey());
+            if (expectedWeight != null && rule.getWeight().compareTo(expectedWeight) != 0) {
+                rule.setWeight(expectedWeight);
+                updated = true;
+            }
+
+            if ("partnershipRiskScore".equals(rule.getCriterionKey()) && rule.getDirection() == ScoreDirection.COST) {
+                rule.setDirection(ScoreDirection.BENEFIT);
+                updated = true;
+            }
+        }
+
+        if (updated) {
+            log.info("Migrated POTENTIAL_PARTNER ILLUSTRATIVE rules to new weights/directions.");
+            ruleSetRepository.save(ruleSet);
+        }
     }
 
     private void seedRole(CompanyRole role, List<String> criteriaKeys, Map<String, ScoreDirection> directions, Map<String, BigDecimal> weights) {

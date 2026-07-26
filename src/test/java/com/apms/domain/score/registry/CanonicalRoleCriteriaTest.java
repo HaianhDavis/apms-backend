@@ -49,7 +49,7 @@ class CanonicalRoleCriteriaTest {
         );
 
         assertThat(CanonicalRoleCriteria.getDirectionForRoleAndCriterion(CompanyRole.POTENTIAL_PARTNER, "partnershipRiskScore"))
-                .isEqualTo(ScoreDirection.COST);
+                .isEqualTo(ScoreDirection.BENEFIT);
         
         assertThat(CanonicalRoleCriteria.getDirectionForRoleAndCriterion(CompanyRole.POTENTIAL_PARTNER, "strategicFitScore"))
                 .isEqualTo(ScoreDirection.BENEFIT);

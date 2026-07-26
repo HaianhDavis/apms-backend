@@ -64,7 +64,7 @@ public final class CanonicalRoleCriteria {
             "trustReputationScore", ScoreDirection.BENEFIT,
             "financialAttractivenessScore", ScoreDirection.BENEFIT,
             "collaborationPotentialScore", ScoreDirection.BENEFIT,
-            "partnershipRiskScore", ScoreDirection.COST
+            "partnershipRiskScore", ScoreDirection.BENEFIT
     );
 
     // COMPETITOR

@@ -74,7 +74,8 @@ class PartnerSideEffectAbsenceTest {
             draftRepository, contextProvider, validator, mongoTemplate,
             promptProvider,
             aiProvider,
-            sufficiencyEvaluator
+            sufficiencyEvaluator,
+            null
         );
     }
 

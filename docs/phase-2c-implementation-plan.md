@@ -427,3 +427,7 @@ For detailed breakdown, refer to the active [Implementation Plan](file:///Users/
 - Hash verified post-claim before SQL processing.
 - Missing/mismatched hash routed to DEAD_LETTER (no retry, safe ownership loss).
 - SQL receipt includes `payload_hash` in `processed_outbox_events`.
+
+## Phase 2C.8 — POTENTIAL_PARTNER Scoring
+
+**Status:** COMPLETED

@@ -22,6 +22,7 @@ public class RoleEvaluationDraftController {
     private final com.apms.domain.score.service.CompetitorSuggestionGenerationService suggestionGenerationService;
     private final com.apms.domain.score.service.PartnerSuggestionGenerationService partnerSuggestionGenerationService;
     private final com.apms.domain.score.service.PartnerDataSufficiencyEvaluator dataSufficiencyEvaluator;
+    private final com.apms.domain.score.service.PotentialPartnerDataSufficiencyEvaluator potentialPartnerDataSufficiencyEvaluator;
     private final com.apms.domain.score.service.PartnerSuggestionReviewService partnerSuggestionReviewService;
     private final com.apms.domain.score.service.RoleEvaluationSecurityService securityService;
 
@@ -84,22 +85,23 @@ public class RoleEvaluationDraftController {
             @PathVariable String criterionKey,
             @RequestBody(required = false) GenerateSuggestionRequest request) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
-        
+
         String outcome;
-        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER) {
+        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER ||
+            draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.POTENTIAL_PARTNER) {
             securityService.canAccessDraft(evaluationId, request != null ? null : null); // Mock accountId extraction for now
             String generationId = request != null && request.getGenerationId() != null ? request.getGenerationId() : java.util.UUID.randomUUID().toString();
             outcome = partnerSuggestionGenerationService.generateSuggestion(evaluationId, criterionKey, generationId);
         } else {
             outcome = suggestionGenerationService.generateSingleAndSave(draft, criterionKey, request);
         }
-        
+
         return SingleGenerationResponse.builder()
                 .draft(draftService.getDraft(evaluationId))
                 .outcome(outcome)
                 .build();
     }
-    
+
     @GetMapping("/role-evaluations/{evaluationId}/readiness")
     @PreAuthorize("hasAnyRole('ADMIN', 'STAFF', 'MANAGER')")
     public com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse checkReadiness(
@@ -109,7 +111,11 @@ public class RoleEvaluationDraftController {
             securityService.canAccessDraft(evaluationId, 1L); // mocked ID
             return dataSufficiencyEvaluator.evaluate(draft);
         }
-        throw new com.apms.common.exception.BusinessValidationException("Readiness endpoint only supported for PARTNER");
+        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.POTENTIAL_PARTNER) {
+            securityService.canAccessDraft(evaluationId, 1L);
+            return potentialPartnerDataSufficiencyEvaluator.evaluate(draft);
+        }
+        throw new com.apms.common.exception.BusinessValidationException("Readiness endpoint only supported for PARTNER and POTENTIAL_PARTNER");
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/product-market-overlap/suggest")
@@ -137,7 +143,8 @@ public class RoleEvaluationDraftController {
             @RequestBody AcceptAutomaticSuggestionRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
-        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER) {
+        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER ||
+            draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.POTENTIAL_PARTNER) {
             PartnerSuggestionReviewRequest reviewReq = new PartnerSuggestionReviewRequest();
             reviewReq.setStatus(com.apms.domain.score.enums.CriterionSuggestionReviewStatus.ACCEPTED);
             partnerSuggestionReviewService.reviewSuggestion(evaluationId, criterionKey, reviewReq, currentUser.getId());
@@ -154,7 +161,8 @@ public class RoleEvaluationDraftController {
             @RequestBody EditCriterionSuggestionRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
-        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER) {
+        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER ||
+            draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.POTENTIAL_PARTNER) {
             PartnerSuggestionReviewRequest reviewReq = new PartnerSuggestionReviewRequest();
             reviewReq.setStatus(com.apms.domain.score.enums.CriterionSuggestionReviewStatus.EDITED);
             reviewReq.setEditedRationale(request.getOverrideReason());
@@ -172,7 +180,8 @@ public class RoleEvaluationDraftController {
             @RequestBody RejectCriterionSuggestionRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
-        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER) {
+        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER ||
+            draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.POTENTIAL_PARTNER) {
             PartnerSuggestionReviewRequest reviewReq = new PartnerSuggestionReviewRequest();
             reviewReq.setStatus(com.apms.domain.score.enums.CriterionSuggestionReviewStatus.REJECTED);
             partnerSuggestionReviewService.reviewSuggestion(evaluationId, criterionKey, reviewReq, currentUser.getId());
@@ -189,7 +198,8 @@ public class RoleEvaluationDraftController {
             @RequestBody NeedsMoreDataCriterionSuggestionRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
-        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER) {
+        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER ||
+            draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.POTENTIAL_PARTNER) {
             PartnerSuggestionReviewRequest reviewReq = new PartnerSuggestionReviewRequest();
             reviewReq.setStatus(com.apms.domain.score.enums.CriterionSuggestionReviewStatus.NEEDS_MORE_DATA);
             partnerSuggestionReviewService.reviewSuggestion(evaluationId, criterionKey, reviewReq, currentUser.getId());
@@ -217,14 +227,24 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/review")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
-    public void reviewDraft(
+    public org.springframework.http.ResponseEntity<?> reviewDraft(
             @PathVariable String evaluationId,
             @RequestBody ReviewRoleEvaluationRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         Long accountId = currentUser.getId();
         approvalService.reviewDraft(evaluationId, request, accountId, idempotencyKey);
+
+        com.apms.domain.score.draft.RoleEvaluationDraft updatedDraft = draftService.getRawDraft(evaluationId);
+        if (updatedDraft.getStatus() == com.apms.domain.score.enums.RoleEvaluationStatus.APPROVAL_PROCESSING) {
+            java.util.Map<String, Object> response = new java.util.HashMap<>();
+            response.put("status", updatedDraft.getStatus().name());
+            response.put("evaluationId", evaluationId);
+            response.put("approvedVersionId", updatedDraft.getCurrentApprovedVersionId());
+            response.put("approvedVersionNumber", updatedDraft.getCurrentApprovedVersionNumber());
+            return org.springframework.http.ResponseEntity.accepted().body(response);
+        }
+        return org.springframework.http.ResponseEntity.noContent().build();
     }
 }

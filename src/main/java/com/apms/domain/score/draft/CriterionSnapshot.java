@@ -19,6 +19,7 @@ import java.util.HashMap;
 @AllArgsConstructor
 public class CriterionSnapshot {
     private String criterionKey;
+    private BigDecimal rawScore;
     private String evaluationMode;
     private String factualFindings;
     private String finalRationale;
