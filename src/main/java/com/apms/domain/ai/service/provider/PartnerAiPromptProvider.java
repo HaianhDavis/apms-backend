@@ -117,7 +117,44 @@ public class PartnerAiPromptProvider {
             "You are an expert partnership analyst evaluating a CUSTOMER. " +
             "Analyze the provided data to evaluate Payment Churn Risk (where higher score indicates safer, reliable payment and low churn). " +
             "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
-            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES.")
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES."),
+
+            // SUPPLIER Criteria
+            Map.entry("qualityPerformanceScore",
+            "You are an expert partnership analyst evaluating a SUPPLIER. " +
+            "Analyze the provided data (e.g. defect/rejection rates, quality SLAs, inspection records) to evaluate Quality Performance. " +
+            "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES. DO NOT INFER OR FABRICATE DEFECT RATES, REJECTION RATES, OR AUDIT SCORES IF NOT PROVIDED."),
+
+            Map.entry("costCompetitivenessScore",
+            "You are an expert partnership analyst evaluating a SUPPLIER. " +
+            "Analyze the provided data (e.g. quotations, pricing benchmarks, TCO models, commercial terms) to evaluate Cost Competitiveness. " +
+            "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES. DO NOT INFER OR FABRICATE PRICES, DISCOUNTS, LOGISTICS COSTS, OR SPECIFIC TCO FIGURES IF NOT PROVIDED."),
+
+            Map.entry("deliveryPerformanceScore",
+            "You are an expert partnership analyst evaluating a SUPPLIER. " +
+            "Analyze the provided data (e.g. on-time delivery rates, lead times, order/quantity accuracy) to evaluate Delivery Performance. " +
+            "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES. DO NOT INFER OR FABRICATE DELIVERY TIMES, FILL RATES, OR ACCURACY METRICS IF NOT PROVIDED."),
+
+            Map.entry("capacityFlexibilityScore",
+            "You are an expert partnership analyst evaluating a SUPPLIER. " +
+            "Analyze the provided data (e.g. verified production capacity, utilization, MOQ, surge scalability) to evaluate Capacity Flexibility. " +
+            "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES. DO NOT INFER OR FABRICATE CAPACITY, UTILIZATION, OR SURGE METRICS IF NOT PROVIDED."),
+
+            Map.entry("serviceResponsivenessScore",
+            "You are an expert partnership analyst evaluating a SUPPLIER. " +
+            "Analyze the provided data (e.g. support SLAs, resolution times, response times, escalation history) to evaluate Service Responsiveness. " +
+            "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES. DO NOT INFER OR FABRICATE SLA RESPONSE TIMES OR RESOLUTION TIMES IF NOT PROVIDED."),
+
+            Map.entry("supplyRiskComplianceScore",
+            "You are an expert partnership analyst evaluating a SUPPLIER. " +
+            "Analyze the provided data (e.g. geopolitical exposure, ESG, financial health, continuity plans) to evaluate Supply Risk Compliance (where higher score indicates low or well-controlled supply risk and strong compliance). " +
+            "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES. DO NOT INFER OR FABRICATE FINANCIAL STABILITY, CONTINUITY RATINGS, OR COMPLIANCE RESULTS IF NOT PROVIDED.")
     );
 
     public String getPromptTemplate(String criterionKey) {

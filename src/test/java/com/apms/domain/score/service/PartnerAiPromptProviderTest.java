@@ -115,4 +115,77 @@ class PartnerAiPromptProviderTest {
         assertTrue(p.contains("Payment Churn Risk"));
         assertTrue(p.contains("higher score indicates safer"), "Must define BENEFIT direction semantics");
     }
+
+    // SUPPLIER prompt-provider tests covering all six keys
+
+    @Test
+    void testAllSixSupplierCriteriaHavePrompts() {
+        String[] supplierCriteria = {
+                "qualityPerformanceScore",
+                "costCompetitivenessScore",
+                "deliveryPerformanceScore",
+                "capacityFlexibilityScore",
+                "serviceResponsivenessScore",
+                "supplyRiskComplianceScore"
+        };
+        for (String c : supplierCriteria) {
+            String p = provider.getPromptTemplate(c);
+            assertNotNull(p, "Missing prompt for " + c);
+            assertTrue(p.contains("rationale"), c + " must request rationale");
+            assertTrue(p.contains("qualitative findings"), c + " must request qualitative findings");
+            assertTrue(p.contains("evidenceReferenceIds"), c + " must retain evidence references");
+            assertTrue(p.contains("DO NOT RETURN ANY NUMERIC SCORES"), c + " must prohibit numeric scores");
+            assertFalse(p.contains("weight:"), c + " must not contain weight:");
+            assertFalse(p.contains("overallScore"), c + " must not contain overallScore");
+            assertTrue(p.contains("DO NOT INFER OR FABRICATE"), c + " must prohibit inference");
+        }
+    }
+
+    @Test
+    void testQualityPerformanceScorePrompt() {
+        String p = provider.getPromptTemplate("qualityPerformanceScore");
+        assertTrue(p.contains("SUPPLIER"));
+        assertTrue(p.contains("Quality Performance"));
+        assertTrue(p.contains("defect/rejection rates"));
+    }
+
+    @Test
+    void testCostCompetitivenessScorePrompt() {
+        String p = provider.getPromptTemplate("costCompetitivenessScore");
+        assertTrue(p.contains("SUPPLIER"));
+        assertTrue(p.contains("Cost Competitiveness"));
+        assertTrue(p.contains("PRICES"));
+    }
+
+    @Test
+    void testDeliveryPerformanceScorePrompt() {
+        String p = provider.getPromptTemplate("deliveryPerformanceScore");
+        assertTrue(p.contains("SUPPLIER"));
+        assertTrue(p.contains("Delivery Performance"));
+        assertTrue(p.contains("DELIVERY TIMES"));
+    }
+
+    @Test
+    void testCapacityFlexibilityScorePrompt() {
+        String p = provider.getPromptTemplate("capacityFlexibilityScore");
+        assertTrue(p.contains("SUPPLIER"));
+        assertTrue(p.contains("Capacity Flexibility"));
+        assertTrue(p.contains("capacity"));
+    }
+
+    @Test
+    void testServiceResponsivenessScorePrompt() {
+        String p = provider.getPromptTemplate("serviceResponsivenessScore");
+        assertTrue(p.contains("SUPPLIER"));
+        assertTrue(p.contains("Service Responsiveness"));
+        assertTrue(p.contains("response times"));
+    }
+
+    @Test
+    void testSupplyRiskComplianceScorePrompt() {
+        String p = provider.getPromptTemplate("supplyRiskComplianceScore");
+        assertTrue(p.contains("SUPPLIER"));
+        assertTrue(p.contains("Supply Risk Compliance"));
+        assertTrue(p.contains("higher score indicates low or well-controlled supply risk"));
+    }
 }

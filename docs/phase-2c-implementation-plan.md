@@ -435,3 +435,7 @@ For detailed breakdown, refer to the active [Implementation Plan](file:///Users/
 ## Phase 2C.9 — CUSTOMER Scoring
 
 **Status:** COMPLETED
+
+## Phase 2C.8 — SUPPLIER Scoring
+**STATUS: COMPLETED**
+Implemented exact 6 criteria, AI prompts, and scoring workflow.
