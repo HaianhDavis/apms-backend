@@ -73,9 +73,10 @@ class PartnerSideEffectAbsenceTest {
         generationService = new PartnerSuggestionGenerationService(
             draftRepository, contextProvider, validator, mongoTemplate,
             promptProvider,
-            aiProvider,
-            sufficiencyEvaluator,
-            null
+                aiProvider,
+                sufficiencyEvaluator,
+                null,
+                null // customer evaluator
         );
     }
 

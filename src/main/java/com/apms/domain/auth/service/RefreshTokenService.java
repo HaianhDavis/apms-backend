@@ -51,7 +51,7 @@ public class RefreshTokenService {
         if (parts.length != 2) {
             throw new BusinessValidationException("Invalid refresh token format");
         }
-        
+
         Long accountId;
         try {
             accountId = Long.parseLong(parts[0]);

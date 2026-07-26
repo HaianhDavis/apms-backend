@@ -30,12 +30,12 @@ public class RoleEvaluationFoundationTest {
         assertTrue(partnerCriteria.contains("capabilityAndComplementarityScore"));
         assertTrue(partnerCriteria.contains("relationshipQualityScore"));
         assertTrue(partnerCriteria.contains("governanceAndRiskScore"));
-        
+
         // Ensure no legacy keys are present in canonical definition
         assertFalse(partnerCriteria.contains("capabilityComplementarityScore"));
         assertFalse(partnerCriteria.contains("governanceComplianceScore"));
     }
-    
+
     @Test
     void testCanonicalKeyNormalization() {
         assertEquals("capabilityAndComplementarityScore", CanonicalRoleCriteria.normalizeCriterionKey("capabilityComplementarityScore"));
@@ -55,14 +55,14 @@ public class RoleEvaluationFoundationTest {
                 .type(EvaluationPeriodType.AS_OF_DATE)
                 .build();
         assertThrows(BusinessValidationException.class, invalidAsOf::validate);
-        
+
         EvaluationPeriod annual = EvaluationPeriod.builder()
                 .type(EvaluationPeriodType.ANNUAL)
                 .periodStart(LocalDate.of(2025, 1, 1))
                 .periodEnd(LocalDate.of(2025, 12, 31))
                 .build();
         assertDoesNotThrow(annual::validate);
-        
+
         EvaluationPeriod quarterly = EvaluationPeriod.builder()
                 .type(EvaluationPeriodType.QUARTERLY)
                 .periodStart(LocalDate.of(2025, 4, 1))
@@ -70,7 +70,7 @@ public class RoleEvaluationFoundationTest {
                 .build();
         assertDoesNotThrow(quarterly::validate);
     }
-    
+
     @Test
     void testApprovedSourceReferenceValidation() {
         ApprovedSourceReference ref = ApprovedSourceReference.builder()
@@ -82,7 +82,7 @@ public class RoleEvaluationFoundationTest {
                 .pinnedAt(LocalDateTime.now())
                 .build();
         assertDoesNotThrow(ref::validate);
-        
+
         // Test mutually exclusive
         ApprovedSourceReference refBothIds = ApprovedSourceReference.builder()
                 .referenceId("uuid")
@@ -95,7 +95,7 @@ public class RoleEvaluationFoundationTest {
                 .build();
         assertThrows(BusinessValidationException.class, refBothIds::validate);
     }
-    
+
     @Test
     void testSourceSelectionDeduplicationAndContainment() {
         EvaluationPeriod period = EvaluationPeriod.builder()
@@ -103,7 +103,7 @@ public class RoleEvaluationFoundationTest {
                 .periodStart(LocalDate.of(2025, 1, 1))
                 .periodEnd(LocalDate.of(2025, 3, 31))
                 .build();
-                
+
         RoleMetricRecordVersion v1 = new RoleMetricRecordVersion();
         v1.setRoleMetricRecordId(1L);
         v1.setVersionNumber(1);
@@ -111,7 +111,7 @@ public class RoleEvaluationFoundationTest {
         v1.setStatus(RoleMetricStatus.APPROVED);
         v1.setPeriodType(MetricPeriodType.POINT_IN_TIME);
         v1.setMeasurementDate(LocalDate.of(2025, 2, 1));
-        
+
         RoleMetricRecordVersion v2 = new RoleMetricRecordVersion();
         v2.setRoleMetricRecordId(1L);
         v2.setVersionNumber(2); // Higher version
@@ -119,7 +119,7 @@ public class RoleEvaluationFoundationTest {
         v2.setStatus(RoleMetricStatus.APPROVED);
         v2.setPeriodType(MetricPeriodType.POINT_IN_TIME);
         v2.setMeasurementDate(LocalDate.of(2025, 2, 1));
-        
+
         RoleMetricRecordVersion outOfBounds = new RoleMetricRecordVersion();
         outOfBounds.setRoleMetricRecordId(2L);
         outOfBounds.setVersionNumber(1);
@@ -127,9 +127,9 @@ public class RoleEvaluationFoundationTest {
         outOfBounds.setStatus(RoleMetricStatus.APPROVED);
         outOfBounds.setPeriodType(MetricPeriodType.POINT_IN_TIME);
         outOfBounds.setMeasurementDate(LocalDate.of(2025, 4, 1));
-        
+
         List<RoleMetricRecordVersion> selected = RoleMetricSourceSelectionUtil.selectForPeriod(List.of(v1, v2, outOfBounds), period);
-        
+
         assertEquals(1, selected.size());
         assertEquals(2, selected.get(0).getVersionNumber(), "Should select the highest approved version");
     }
@@ -141,41 +141,41 @@ public class RoleEvaluationFoundationTest {
                 .periodStart(LocalDate.of(2025, 1, 1))
                 .periodEnd(LocalDate.of(2025, 3, 31))
                 .build();
-                
+
         // Record 1: Month 1
         RoleMetricRecordVersion m1v1 = createApprovedMetric(1L, 1, "mKey", LocalDate.of(2025, 1, 15));
         RoleMetricRecordVersion m1v2 = createApprovedMetric(1L, 2, "mKey", LocalDate.of(2025, 1, 15));
-        
+
         // Record 2: Month 2
         RoleMetricRecordVersion m2v1 = createApprovedMetric(2L, 1, "mKey", LocalDate.of(2025, 2, 15));
-        
+
         // Record 3: Month 3
         RoleMetricRecordVersion m3v1 = createApprovedMetric(3L, 1, "mKey", LocalDate.of(2025, 3, 15));
-        
+
         List<RoleMetricRecordVersion> selected = RoleMetricSourceSelectionUtil.selectForPeriod(
             List.of(m1v1, m1v2, m2v1, m3v1), period);
-            
+
         assertEquals(3, selected.size(), "Should retain all 3 distinct records");
         assertTrue(selected.stream().anyMatch(v -> v.getRoleMetricRecordId() == 1L && v.getVersionNumber() == 2));
         assertTrue(selected.stream().anyMatch(v -> v.getRoleMetricRecordId() == 2L && v.getVersionNumber() == 1));
         assertTrue(selected.stream().anyMatch(v -> v.getRoleMetricRecordId() == 3L && v.getVersionNumber() == 1));
     }
-    
+
     @Test
     void testPointInTimeSelectionAsOfDate() {
         EvaluationPeriod asOf = EvaluationPeriod.builder()
                 .type(EvaluationPeriodType.AS_OF_DATE)
                 .asOfDate(LocalDate.of(2025, 12, 31))
                 .build();
-                
+
         RoleMetricRecordVersion match = createApprovedMetric(1L, 1, "key", LocalDate.of(2025, 12, 31));
         RoleMetricRecordVersion noMatch = createApprovedMetric(2L, 1, "key", LocalDate.of(2025, 12, 30));
-        
+
         List<RoleMetricRecordVersion> selected = RoleMetricSourceSelectionUtil.selectForPeriod(List.of(match, noMatch), asOf);
         assertEquals(1, selected.size());
         assertEquals(1L, selected.get(0).getRoleMetricRecordId());
     }
-    
+
     @Test
     void testPeriodMetricsFullyContained() {
         EvaluationPeriod q1 = EvaluationPeriod.builder()
@@ -183,7 +183,7 @@ public class RoleEvaluationFoundationTest {
                 .periodStart(LocalDate.of(2025, 1, 1))
                 .periodEnd(LocalDate.of(2025, 3, 31))
                 .build();
-                
+
         RoleMetricRecordVersion fullyContained = new RoleMetricRecordVersion();
         fullyContained.setRoleMetricRecordId(1L);
         fullyContained.setVersionNumber(1);
@@ -192,7 +192,7 @@ public class RoleEvaluationFoundationTest {
         fullyContained.setPeriodType(MetricPeriodType.PERIOD);
         fullyContained.setPeriodStart(LocalDate.of(2025, 1, 15));
         fullyContained.setPeriodEnd(LocalDate.of(2025, 2, 15));
-        
+
         RoleMetricRecordVersion overlapping = new RoleMetricRecordVersion();
         overlapping.setRoleMetricRecordId(2L);
         overlapping.setVersionNumber(1);
@@ -201,12 +201,12 @@ public class RoleEvaluationFoundationTest {
         overlapping.setPeriodType(MetricPeriodType.PERIOD);
         overlapping.setPeriodStart(LocalDate.of(2024, 12, 15)); // Starts before Q1
         overlapping.setPeriodEnd(LocalDate.of(2025, 2, 15));
-        
+
         List<RoleMetricRecordVersion> selected = RoleMetricSourceSelectionUtil.selectForPeriod(List.of(fullyContained, overlapping), q1);
         assertEquals(1, selected.size());
         assertEquals(1L, selected.get(0).getRoleMetricRecordId());
     }
-    
+
     @Test
     void testMissingRequiredFieldsApprovedSourceReference() {
         ApprovedSourceReference missingSql = ApprovedSourceReference.builder()
@@ -218,7 +218,7 @@ public class RoleEvaluationFoundationTest {
                 .build();
         assertThrows(BusinessValidationException.class, missingSql::validate);
     }
-    
+
     @Test
     void testForbiddenCrossSourceFieldsApprovedSourceReference() {
         ApprovedSourceReference forbiddenMetadata = ApprovedSourceReference.builder()
@@ -232,7 +232,7 @@ public class RoleEvaluationFoundationTest {
                 .build();
         assertThrows(BusinessValidationException.class, forbiddenMetadata::validate);
     }
-    
+
     @Test
     void testConflictDetectionLegacyCanonical() {
         List<String> providedKeys = List.of("capabilityComplementarityScore", "capabilityAndComplementarityScore");

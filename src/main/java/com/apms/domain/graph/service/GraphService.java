@@ -66,14 +66,14 @@ public class GraphService {
         // For now, we attempt to find the newly created/updated profile.
         CompanyProfile profile = profileRepository.findByCandidateId(event.getCandidateId())
                 .orElse(null);
-        
+
         if (profile == null) {
             log.error("CompanyProfile not found for candidateId: {}. Ensure ProfileService runs first.", event.getCandidateId());
             return;
         }
 
         RelationshipType finalRelType = event.getFinalRelationshipType();
-        
+
         // 1. Create or merge CompanyNode for the approved CompanyProfile
         mergeCompanyNode(profile);
 
@@ -96,7 +96,7 @@ public class GraphService {
 
     private void mergeCompanyNode(CompanyProfile profile) {
         String name = profile.getIdentity() != null && profile.getIdentity().getLegalName() != null ? profile.getIdentity().getLegalName() : "Unknown";
-        String industry = profile.getBusiness() != null && profile.getBusiness().getIndustries() != null && !profile.getBusiness().getIndustries().isEmpty() 
+        String industry = profile.getBusiness() != null && profile.getBusiness().getIndustries() != null && !profile.getBusiness().getIndustries().isEmpty()
                 ? profile.getBusiness().getIndustries().get(0) : "Unknown";
 
         String cypher = """
@@ -112,7 +112,7 @@ public class GraphService {
                         "industry", industry
                 ))
                 .run();
-                
+
         log.info("Merged CompanyNode: companyId={}, name={}", profile.getCompanyId(), name);
     }
 
@@ -175,10 +175,10 @@ public class GraphService {
                         "metadata", metadataJson != null ? metadataJson : ""
                 ))
                 .run();
-                
+
         log.info("Created/Updated relationship ({})-[:{}]->({})", dto.getSourceCompanyId(), dto.getRelationshipType(), dto.getTargetCompanyId());
     }
-    
+
     public void updateRelationshipMetadata(String sourceCompanyId, String targetCompanyId, String relType, CompanyRelationshipDto metadataDto) {
         if (!relType.matches("^[A-Z_]+$")) {
             throw new IllegalArgumentException("Invalid relationship type: " + relType);
@@ -215,7 +215,7 @@ public class GraphService {
                         "metadata", metadataJson != null ? metadataJson : ""
                 ))
                 .run();
-                
+
         log.info("Updated relationship metadata ({})-[:{}]->({})", sourceCompanyId, relType, targetCompanyId);
     }
 
@@ -229,7 +229,7 @@ public class GraphService {
         if (node == null) return null;
 
         List<CompanyRelationshipDto> relationships = getOutgoingRelationships(companyId);
-        
+
         return GraphCompanyDto.builder()
                 .companyId(node.getCompanyId())
                 .name(node.getName())
@@ -258,7 +258,7 @@ public class GraphService {
         }
 
         String cypher = String.format("MATCH (c:Company)-[:%s]->() RETURN DISTINCT c", relType);
-        
+
         return neo4jClient.query(cypher)
                 .fetchAs(CompanyNode.class)
                 .mappedBy((typeSystem, record) -> {
@@ -281,8 +281,8 @@ public class GraphService {
     private List<CompanyRelationshipDto> getOutgoingRelationships(String companyId) {
         String cypher = """
             MATCH (c1:Company {companyId: $companyId})-[r]->(c2:Company)
-            RETURN type(r) as relType, c2.companyId as targetCompanyId, 
-                   r.confidenceScore as confidenceScore, r.confirmedBy as confirmedBy, 
+            RETURN type(r) as relType, c2.companyId as targetCompanyId,
+                   r.confidenceScore as confidenceScore, r.confirmedBy as confirmedBy,
                    r.projectId as projectId, r.candidateId as candidateId,
                    r.startDate as startDate, r.endDate as endDate, r.status as status, r.metadata as metadata
             """;
@@ -302,10 +302,10 @@ public class GraphService {
                             log.error("Failed to parse metadata JSON", e);
                         }
                     }
-                    
+
                     String startDateStr = (String) record.get("startDate");
                     String endDateStr = (String) record.get("endDate");
-                    
+
                     return CompanyRelationshipDto.builder()
                         .sourceCompanyId(companyId)
                         .targetCompanyId((String) record.get("targetCompanyId"))

@@ -23,7 +23,7 @@ public class PartnerSuggestionReviewService {
     public void reviewSuggestion(String draftId, String criterionKey, PartnerSuggestionReviewRequest request, Long staffAccountId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new BusinessValidationException("Draft not found"));
-                
+
         // Validation for Staff assignment would go here or at controller level
 
         AutomaticSuggestion suggestion = draft.getAutomaticSuggestions().get(criterionKey);
@@ -33,7 +33,7 @@ public class PartnerSuggestionReviewService {
 
         suggestion.setReviewedByAccountId(staffAccountId);
         suggestion.setReviewedAt(LocalDateTime.now());
-        
+
         switch (request.getStatus()) {
             case ACCEPTED:
                 CriterionInput inputAcc = draft.getCriterionInputs().computeIfAbsent(criterionKey, k -> new CriterionInput());
@@ -42,14 +42,14 @@ public class PartnerSuggestionReviewService {
                 suggestion.setAccepted(true);
                 suggestion.setAcceptedAt(LocalDateTime.now());
                 suggestion.setAcceptedByAccountId(staffAccountId);
-                
+
                 inputAcc.setExplanation(suggestion.getSuggestionRationale());
                 inputAcc.setEvidenceIds(new ArrayList<>(suggestion.getEvidenceIds()));
                 inputAcc.setInputMethod(CriterionInputMethod.AI_ASSISTED);
                 inputAcc.setPreparedByAccountId(staffAccountId);
                 inputAcc.setPreparedAt(LocalDateTime.now());
                 break;
-                
+
             case EDITED:
                 CriterionInput inputEdit = draft.getCriterionInputs().computeIfAbsent(criterionKey, k -> new CriterionInput());
                 inputEdit.setCriterionKey(criterionKey);
@@ -60,7 +60,7 @@ public class PartnerSuggestionReviewService {
                 suggestion.setAccepted(true); // Treat as accepted but edited
                 suggestion.setAcceptedAt(LocalDateTime.now());
                 suggestion.setAcceptedByAccountId(staffAccountId);
-                
+
                 // Original AI suggestion is preserved in `suggestion.getSuggestionRationale()`
                 // Staff final rationale goes to `input.setExplanation()`
                 inputEdit.setExplanation(request.getEditedRationale());
@@ -69,18 +69,18 @@ public class PartnerSuggestionReviewService {
                 inputEdit.setPreparedByAccountId(staffAccountId);
                 inputEdit.setPreparedAt(LocalDateTime.now());
                 break;
-                
+
             case REJECTED:
                 draft.getCriterionInputs().remove(criterionKey);
                 suggestion.setReviewStatus(CriterionSuggestionReviewStatus.REJECTED);
                 suggestion.setAccepted(false);
                 break;
-                
+
             case NEEDS_MORE_DATA:
                 suggestion.setReviewStatus(CriterionSuggestionReviewStatus.NEEDS_MORE_DATA);
                 suggestion.setAccepted(false);
                 break;
-                
+
             default:
                 throw new BusinessValidationException("Invalid review status");
         }

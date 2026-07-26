@@ -38,6 +38,7 @@ public class PartnerSuggestionGenerationService {
     private final com.apms.domain.ai.service.provider.PartnerCriterionSuggestionProvider aiProvider;
     private final PartnerDataSufficiencyEvaluator sufficiencyEvaluator;
     private final PotentialPartnerDataSufficiencyEvaluator potentialPartnerSufficiencyEvaluator;
+    private final CustomerDataSufficiencyEvaluator customerSufficiencyEvaluator;
 
     public String generateSuggestion(String draftId, String criterionKey, String generationId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
@@ -50,6 +51,8 @@ public class PartnerSuggestionGenerationService {
         com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse readiness;
         if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.POTENTIAL_PARTNER) {
             readiness = potentialPartnerSufficiencyEvaluator.evaluate(draft);
+        } else if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.CUSTOMER) {
+            readiness = customerSufficiencyEvaluator.evaluate(draft);
         } else {
             readiness = sufficiencyEvaluator.evaluate(draft);
         }

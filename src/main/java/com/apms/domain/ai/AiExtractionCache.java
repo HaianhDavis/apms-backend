@@ -38,7 +38,7 @@ public class AiExtractionCache {
     private LocalDateTime reviewedAt;
 
     private LocalDateTime createdAt;
-    
+
     private String lastModifiedBy;
     private LocalDateTime updatedAt;
 }

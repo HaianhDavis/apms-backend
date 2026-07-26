@@ -27,7 +27,7 @@ public class CandidateResponse {
     private CompanyCandidate.CompanySize companySize;
     private CompanyCandidate.Contact contact;
     private CompanyCandidate.Insights insights;
-    
+
     private com.apms.domain.company.model.FinancialInfo financial;
     private com.apms.domain.company.model.MarketInfo market;
     private com.apms.domain.company.model.InnovationInfo innovation;

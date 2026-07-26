@@ -81,7 +81,7 @@ public class PotentialPartnerRoleEvaluationSubmissionStrategy implements RoleEva
 
         // 3. Create Outbox Event
         String eventId = java.util.UUID.randomUUID().toString();
-        
+
         RoleEvaluationOutboxPayload payload = RoleEvaluationOutboxPayload.builder()
                 .eventId(eventId)
                 .eventType(RoleEvaluationOutboxEventType.POTENTIAL_PARTNER_EVALUATION_SUBMITTED.name())
@@ -95,7 +95,7 @@ public class PotentialPartnerRoleEvaluationSubmissionStrategy implements RoleEva
                 .occurredAt(LocalDateTime.now())
                 .payloadVersion(1)
                 .build();
-                
+
         RoleEvaluationOutboxEvent event = RoleEvaluationOutboxEvent.builder()
                 .id(eventId)
                 .eventId(eventId)
@@ -110,7 +110,7 @@ public class PotentialPartnerRoleEvaluationSubmissionStrategy implements RoleEva
                 .nextAttemptAt(LocalDateTime.now())
                 .attemptCount(0)
                 .build();
-                
+
         mongoTemplate.insert(event);
     }
 }

@@ -107,7 +107,7 @@ public class ExternalDataService {
 
     public String simulateAnalyze() {
         List<ExternalDataItem> allNews = externalDataRepository.findAll();
-        
+
         for (ExternalDataItem item : allNews) {
             boolean updated = false;
             String text = (item.getTitle() + " " + item.getSummary()).toLowerCase();

@@ -149,7 +149,7 @@ public class SourcePinningValidator {
         } else if (req.getSourceType() == ApprovedSourceType.COMPANY_PROFILE_VERSION) {
             CompanyProfileVersion version = companyProfileVersionRepository.findById(req.getMongoSourceId())
                     .orElseThrow(() -> new BusinessValidationException("Profile version not found: " + req.getMongoSourceId()));
-            
+
             if (!version.getCompanyId().equals(draft.getTargetCompanyId())) {
                 throw new BusinessValidationException("Profile version company mismatch");
             }
@@ -158,7 +158,7 @@ public class SourcePinningValidator {
         }
 
         builder.sourceHash(computeSha256(canonicalJson));
-        
+
         // Deterministic referenceId generation
         String idInput = String.format("%s:%s:%s:%s:%s",
                 req.getSourceType().name(),

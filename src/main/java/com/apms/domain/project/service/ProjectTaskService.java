@@ -228,17 +228,17 @@ public class ProjectTaskService {
 
         Project project = task.getProject();
         TaskType tType = task.getTaskType() != null ? task.getTaskType() : TaskType.GENERAL_TASK;
-        
+
         // 1. Evaluate actions
         List<TaskAction> actions = evaluateAvailableActions(currentUser, task, project, tType);
 
         // 2. Fetch documents (only metadata/import jobs)
         List<ImportJobResponse> rawDocuments = documentService.getProjectImportJobs(projectId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
-        
+
         List<WorkbenchDocumentResponse> documents = new ArrayList<>();
         for (ImportJobResponse doc : rawDocuments) {
             AiExtractionCache extraction = extractionCacheRepository.findTopByImportJobIdOrderByCreatedAtDesc(doc.getId()).orElse(null);
-            
+
             String latestExtractionId = null;
             ExtractionQualityStatus status = null;
             Double evidenceCoverageRate = null;
@@ -246,21 +246,21 @@ public class ProjectTaskService {
             Integer warningFields = null;
             Integer failedFields = null;
             boolean canGenerateDraft = false;
-            
+
             if (extraction != null) {
                 latestExtractionId = extraction.getId();
                 status = extraction.getQualityStatus();
-                
+
                 if (extraction.getQualityMetrics() != null) {
                     evidenceCoverageRate = extraction.getQualityMetrics().getEvidenceCoverageRate();
                     completenessRate = extraction.getQualityMetrics().getCompletenessRate();
                     warningFields = extraction.getQualityMetrics().getWarningFields();
                     failedFields = extraction.getQualityMetrics().getFailedFields();
                 }
-                
+
                 canGenerateDraft = status == ExtractionQualityStatus.REVIEWED;
             }
-            
+
             WorkbenchDocumentResponse wDoc = WorkbenchDocumentResponse.workbenchBuilder()
                     .id(doc.getId())
                     .projectId(doc.getProjectId())
@@ -288,10 +288,10 @@ public class ProjectTaskService {
         // 3. Fetch drafts (Candidate / ProfileUpdateProposal) and map to summaries
         List<CandidateDraftSummary> candidateSummaries = new ArrayList<>();
         List<ProposalDraftSummary> proposalSummaries = new ArrayList<>();
-        
+
         // 4. Fetch submissions (needed for both display and draft-linking)
         List<ProjectTaskSubmission> submissionsEntities = submissionRepository.findByProjectTask_Id(taskId);
-        
+
         if (tType == TaskType.COMPANY_DATA_PREPARATION) {
             List<CompanyCandidate> candidates = candidateRepository.findByTaskId(taskId);
             candidateSummaries = candidates.stream().map(c -> {
@@ -337,7 +337,7 @@ public class ProjectTaskService {
         }
 
         // 5. Map submissions to response DTOs
-        List<ProjectTaskSubmissionResponse> submissions = submissionsEntities.stream().map(sub -> 
+        List<ProjectTaskSubmissionResponse> submissions = submissionsEntities.stream().map(sub ->
                 ProjectTaskSubmissionResponse.builder()
                 .id(sub.getId())
                 .projectTaskId(sub.getProjectTask().getId())

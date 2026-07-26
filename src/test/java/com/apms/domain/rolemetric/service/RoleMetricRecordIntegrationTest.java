@@ -102,7 +102,7 @@ class RoleMetricRecordIntegrationTest extends ApmsIntegrationTestBase {
                 req.setPeriodStart(LocalDate.of(2025, 1, 1));
                 req.setPeriodEnd(LocalDate.of(2025, 12, 31));
                 req.setTargetNumericValue(new BigDecimal("1000"));
-                
+
                 latch.await(); // wait for all threads
                 service.createDraft(projectId, req);
                 successCount.incrementAndGet();
@@ -223,7 +223,7 @@ class RoleMetricRecordIntegrationTest extends ApmsIntegrationTestBase {
         List<RoleMetricRecord> records = repository.findAll().stream()
             .filter(r -> r.getProjectId().equals(projectId) && "nps_score".equals(r.getMetricKey()))
             .collect(Collectors.toList());
-            
+
         assertEquals(1, records.size(), "Exactly one matching SQL row should exist");
         assertEquals("AT:2025-06-01", records.get(0).getPeriodKey(), "Persisted periodKey should be AT:2025-06-01");
     }
@@ -256,7 +256,7 @@ class RoleMetricRecordIntegrationTest extends ApmsIntegrationTestBase {
         evidenceRepository.save(evidence);
 
         service.submitForReview(projectId, draft.getId());
-        
+
         ReviewRoleMetricRequest reviewReq = new ReviewRoleMetricRequest();
         reviewReq.setDecision(RoleMetricReviewDecision.APPROVE);
         RoleMetricResponse approved = service.reviewMetric(projectId, draft.getId(), reviewReq);
@@ -271,12 +271,12 @@ class RoleMetricRecordIntegrationTest extends ApmsIntegrationTestBase {
         assertEquals(snapshotsBefore, scoreSnapshotRepository.count());
         assertEquals(rulesBefore, roleCriterionRuleRepository.count());
         assertEquals(profilesBefore, companyProfileRepository.count());
-        
+
         // Assert no Neo4j relationship mutation or AI classification occurred
         org.mockito.Mockito.verifyNoInteractions(companyNodeRepository);
         org.mockito.Mockito.verifyNoInteractions(aiExtractionService);
         org.mockito.Mockito.verifyNoInteractions(scoreService);
-        
+
         // Repeated approve
         service.reviewMetric(projectId, draft.getId(), reviewReq);
         assertEquals(versionsBefore + 1, versionRepo.count()); // idempotent
@@ -286,13 +286,13 @@ class RoleMetricRecordIntegrationTest extends ApmsIntegrationTestBase {
     void testRollbackOnSnapshotFailure() {
         long versionsBefore = versionRepo.count();
         long evVersionsBefore = evVersionRepo.count();
-        
+
         CreateRoleMetricRequest req = new CreateRoleMetricRequest();
         req.setMetricKey("revenue_generated");
         req.setPeriodStart(LocalDate.of(2027, 1, 1));
         req.setPeriodEnd(LocalDate.of(2027, 12, 31));
         req.setTargetNumericValue(new BigDecimal("2000"));
-        
+
         RoleMetricResponse draft = service.createDraft(projectId, req);
 
         com.apms.domain.rolemetric.entity.RoleMetricEvidence evidence = new com.apms.domain.rolemetric.entity.RoleMetricEvidence();
@@ -300,7 +300,7 @@ class RoleMetricRecordIntegrationTest extends ApmsIntegrationTestBase {
         evidence.setValueScope(com.apms.domain.rolemetric.enums.RoleMetricEvidenceValueScope.BOTH);
         evidence.setSourceType(com.apms.domain.rolemetric.enums.RoleMetricEvidenceSourceType.MANUAL_NOTE);
         // Force SQL failure: document_hash is VARCHAR(64)
-        evidence.setDocumentHash("A".repeat(100)); 
+        evidence.setDocumentHash("A".repeat(100));
         evidence.setCreatedByAccountId(account.getId());
         evidence.setUpdatedByAccountId(account.getId());
         evidence.setCreatedAt(java.time.LocalDateTime.now());
@@ -310,15 +310,15 @@ class RoleMetricRecordIntegrationTest extends ApmsIntegrationTestBase {
         service.submitForReview(projectId, draft.getId());
 
         long auditsBeforeReview = auditLogRepository.count();
-        
+
         ReviewRoleMetricRequest reviewReq = new ReviewRoleMetricRequest();
         reviewReq.setDecision(RoleMetricReviewDecision.APPROVE);
-        
+
         // Simulating SQL error on snapshot save
         org.mockito.Mockito.doThrow(new org.springframework.dao.DataIntegrityViolationException("Simulated SQL duplicate error"))
                 .when(evVersionRepo).save(org.mockito.ArgumentMatchers.any());
-                
-        assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () -> 
+
+        assertThrows(org.springframework.dao.DataIntegrityViolationException.class, () ->
             service.reviewMetric(projectId, draft.getId(), reviewReq)
         );
 

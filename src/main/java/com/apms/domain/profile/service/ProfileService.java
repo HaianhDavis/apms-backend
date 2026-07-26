@@ -149,7 +149,7 @@ public class ProfileService {
     private void addSourceRefs(CompanyProfile profile, Project project, CompanyCandidate candidate) {
         profile.getSourceRefs().getProjectIds().add(String.valueOf(project.getId()));
         profile.getSourceRefs().getCandidateIds().add(candidate.getId());
-        
+
         if (StringUtils.hasText(candidate.getImportJobId())) {
             profile.getSourceRefs().getImportJobIds().add(candidate.getImportJobId());
         }
@@ -171,11 +171,11 @@ public class ProfileService {
     public ProfileResponse getProfileByCompanyId(String companyId) {
         CompanyProfile profile = profileRepository.findByCompanyId(companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId));
-        
+
         if (Boolean.TRUE.equals(profile.getIsDeleted())) {
             throw new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId);
         }
-        
+
         return toResponse(profile);
     }
 
@@ -183,15 +183,15 @@ public class ProfileService {
     public ProfileResponse getApprovedProfileResponse(String companyProfileId) {
         CompanyProfile profile = profileRepository.findById(companyProfileId)
                 .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for ID: " + companyProfileId));
-        
+
         if (Boolean.TRUE.equals(profile.getIsDeleted())) {
             throw new ResourceNotFoundException("CompanyProfile not found for ID: " + companyProfileId);
         }
-        
+
         if (!"APPROVED".equals(profile.getReviewStatus())) {
             throw new com.apms.common.exception.BusinessValidationException("CompanyProfile must be approved.");
         }
-        
+
         return toResponse(profile);
     }
 
@@ -273,11 +273,11 @@ public class ProfileService {
     public ProfileSourcesResponse getProfileSources(String companyId) {
         CompanyProfile profile = profileRepository.findByCompanyId(companyId)
                 .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId));
-        
+
         if (Boolean.TRUE.equals(profile.getIsDeleted())) {
             throw new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId);
         }
-        
+
         return ProfileSourcesResponse.builder()
                 .companyId(profile.getCompanyId())
                 .projectIds(profile.getSourceRefs().getProjectIds())
@@ -322,7 +322,7 @@ public class ProfileService {
 
         profile.setVersion(profile.getVersion() + 1);
         profile.getMetadata().setUpdatedAt(LocalDateTime.now());
-        
+
         Long currentUserId = getCurrentUserId();
         profile.getMetadata().setLastModifiedBy(currentUserId != null ? String.valueOf(currentUserId) : "SYSTEM");
 

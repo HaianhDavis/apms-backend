@@ -88,7 +88,7 @@ public class PotentialPartnerEvaluationApprovedEventProcessorTest {
     @Test
     void testProcessApprovedEventAndScoreFromImmutableVersion() {
         when(versionRepository.findById("ver-1")).thenReturn(Optional.of(version));
-        
+
         RoleScoreRuleSet ruleSet = new RoleScoreRuleSet();
         ruleSet.setRuleSetVersion("V1");
         when(ruleSetRepository.findByEvaluatedRoleAndRuleSetVersion(CompanyRole.POTENTIAL_PARTNER, "ROLE_SCORING_V1"))

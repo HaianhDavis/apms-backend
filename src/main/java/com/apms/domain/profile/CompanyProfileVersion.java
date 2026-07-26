@@ -18,26 +18,26 @@ public class CompanyProfileVersion {
 
     @Id
     private String id;
-    
+
     @Indexed
     private String companyProfileId;
-    
+
     @Indexed
     private String companyId;
-    
+
     private Integer version;
-    
+
     private Map<String, Object> snapshot;
-    
+
     private String createdFromProposalId;
     private Long createdFromProjectId;
     private Long createdFromTaskId;
-    
+
     private List<String> sourceDocumentIds;
     private String changeSummary;
-    
+
     private Long createdBy;
-    
+
     @CreatedDate
     private LocalDateTime createdAt;
 }

@@ -14,10 +14,10 @@ public class CompanyNode {
     private String companyId; // The universal UUID
 
     private String name;
-    
+
     private String industry;
 
     private LocalDateTime createdAt;
-    
+
     private LocalDateTime updatedAt;
 }

@@ -59,7 +59,7 @@ class PartnerSuggestionGenerationServiceTest {
             .build();
         Mockito.when(sufficiencyEvaluator.evaluate(any())).thenReturn(readiness);
 
-        service = new PartnerSuggestionGenerationService(draftRepository, contextProvider, validator, mongoTemplate, promptProvider, aiProvider, sufficiencyEvaluator, null);
+        service = new PartnerSuggestionGenerationService(draftRepository, contextProvider, validator, mongoTemplate, promptProvider, aiProvider, sufficiencyEvaluator, null, null);
     }
 
     @Test

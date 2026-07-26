@@ -34,7 +34,7 @@ class PartnerDataSufficiencyEvaluatorTest {
     void testIncompleteWhenNoPinnedSources() {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setPinnedSourceReferences(new ArrayList<>());
-        
+
         var result = evaluator.evaluate(draft);
         assertEquals(EvaluationCompletenessStatus.INCOMPLETE, result.getAggregateCompletenessStatus());
         assertFalse(result.isStaffMaySubmit());
@@ -44,13 +44,13 @@ class PartnerDataSufficiencyEvaluatorTest {
     void testSufficientScenarioAllCriteria() {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setPinnedSourceReferences(List.of(new ApprovedSourceReference()));
-        
+
         for (String crit : com.apms.domain.score.registry.CanonicalRoleCriteria.PARTNER_CRITERIA) {
             PartnerCriterionContext ctx = PartnerCriterionContext.builder()
                 .criterionKey(crit)
                 .pinnedSources(new ArrayList<>())
                 .build();
-                
+
             if (crit.equals("businessValueContributionScore")) {
                 ctx.getPinnedSources().add(createMetric("revenue_generated", java.math.BigDecimal.TEN));
             } else if (crit.equals("strategicAlignmentScore")) {
@@ -65,7 +65,7 @@ class PartnerDataSufficiencyEvaluatorTest {
             } else if (crit.equals("governanceAndRiskScore")) {
                 ctx.getPinnedSources().add(createSource("PARTNER_CONTRACT_CLAUSE_VERSION"));
             }
-            
+
             when(contextProvider.buildContext(eq(draft), eq(crit))).thenReturn(ctx);
         }
 
@@ -78,13 +78,13 @@ class PartnerDataSufficiencyEvaluatorTest {
     void testPartialScenarioAllCriteria() {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setPinnedSourceReferences(List.of(new ApprovedSourceReference()));
-        
+
         for (String crit : com.apms.domain.score.registry.CanonicalRoleCriteria.PARTNER_CRITERIA) {
             PartnerCriterionContext ctx = PartnerCriterionContext.builder()
                 .criterionKey(crit)
                 .pinnedSources(new ArrayList<>())
                 .build();
-                
+
             if (crit.equals("strategicAlignmentScore")) {
                 ctx.getPinnedSources().add(createSource("COMPANY_PROFILE_VERSION"));
             } else if (crit.equals("capabilityAndComplementarityScore")) {
@@ -92,7 +92,7 @@ class PartnerDataSufficiencyEvaluatorTest {
             } else {
                 ctx.getPinnedSources().add(createSource("ROLE_METRIC_EVIDENCE_VERSION"));
             }
-            
+
             when(contextProvider.buildContext(eq(draft), eq(crit))).thenReturn(ctx);
         }
 
@@ -105,7 +105,7 @@ class PartnerDataSufficiencyEvaluatorTest {
     void testInsufficientScenarioAllCriteria() {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setPinnedSourceReferences(List.of(new ApprovedSourceReference()));
-        
+
         for (String crit : com.apms.domain.score.registry.CanonicalRoleCriteria.PARTNER_CRITERIA) {
             PartnerCriterionContext ctx = PartnerCriterionContext.builder()
                 .criterionKey(crit)

@@ -11,7 +11,7 @@ public class UpdateRoleMetricRequest {
     private LocalDate measurementDate;
     private LocalDate periodStart;
     private LocalDate periodEnd;
-    
+
     // Value fields
     private BigDecimal targetNumericValue;
     private BigDecimal actualNumericValue;

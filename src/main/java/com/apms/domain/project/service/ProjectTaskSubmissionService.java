@@ -83,7 +83,7 @@ public class ProjectTaskSubmissionService {
 
         boolean isStaff = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_STAFF);
         boolean isAdmin = hasRole(currentUser, SystemRole.SYSTEM_ADMIN);
-        
+
         if (isStaff && !isAdmin) {
             if (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(currentUser.getId())) {
                 throw new AccessDeniedException("Staff can only submit work for tasks assigned to them");
@@ -129,7 +129,7 @@ public class ProjectTaskSubmissionService {
     public Page<ProjectTaskSubmissionResponse> getSubmissions(Long projectId, Long taskId, Pageable pageable) {
         UserDetailsImpl currentUser = getCurrentUser();
         if (currentUser == null) throw new AccessDeniedException("Unauthorized");
-        
+
         Specification<ProjectTaskSubmission> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.equal(root.get("project").get("id"), projectId));
@@ -179,7 +179,7 @@ public class ProjectTaskSubmissionService {
                 task.setStatus(TaskStatus.DONE);
                 task.setCompletedAt(now);
                 auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMISSION_APPROVED, "ProjectTaskSubmission", String.valueOf(submissionId), "Submission approved");
-                
+
                 // Handle proposal apply
                 if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
                     CompanyProfileUpdateProposal proposal = proposalRepository.findById(submission.getTargetEntityId())
@@ -196,7 +196,7 @@ public class ProjectTaskSubmissionService {
                         // 1. Snapshot
                         @SuppressWarnings("unchecked")
                         java.util.Map<String, Object> snapshotMap = objectMapper.convertValue(profile, java.util.Map.class);
-                        
+
                         com.apms.domain.profile.CompanyProfileVersion versionSnapshot = com.apms.domain.profile.CompanyProfileVersion.builder()
                                 .companyProfileId(profile.getId())
                                 .companyId(profile.getCompanyId())
@@ -209,7 +209,7 @@ public class ProjectTaskSubmissionService {
                                 .changeSummary(proposal.getChangeSummary())
                                 .createdBy(reviewer.getId())
                                 .build();
-                        
+
                         versionRepository.save(versionSnapshot);
                         auditLogService.log(currentUser.getId(), AuditAction.COMPANY_PROFILE_VERSION_CREATED, "CompanyProfileVersion", versionSnapshot.getId(), "Version snapshot created");
 
@@ -265,7 +265,7 @@ public class ProjectTaskSubmissionService {
                         proposal.setReviewedBy(reviewer.getId());
                         proposal.setReviewComment(request.getComment());
                         proposalRepository.save(proposal);
-                        
+
                         auditLogService.log(currentUser.getId(), AuditAction.PROFILE_UPDATE_PROPOSAL_APPLIED, "CompanyProfileUpdateProposal", proposal.getId(), "Proposal applied and profile updated");
                     }
                 }
@@ -334,8 +334,8 @@ public class ProjectTaskSubmissionService {
 
         try {
             @SuppressWarnings("unchecked")
-            java.util.Map<String, Object> currentMap = currentSection != null 
-                    ? objectMapper.convertValue(currentSection, java.util.Map.class) 
+            java.util.Map<String, Object> currentMap = currentSection != null
+                    ? objectMapper.convertValue(currentSection, java.util.Map.class)
                     : new java.util.HashMap<>();
 
             for (java.util.Map.Entry<String, Object> entry : proposedMap.entrySet()) {

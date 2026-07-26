@@ -26,7 +26,7 @@ class GraphServiceMetadataTest extends ApmsIntegrationTestBase {
     @BeforeEach
     void setUp() {
         neo4jClient.query("MATCH (n) DETACH DELETE n").run();
-        
+
         // Create initial nodes
         neo4jClient.query("CREATE (c:Company {companyId: 'C1', name: 'Company 1', industry: 'Tech'})").run();
         neo4jClient.query("CREATE (c:Company {companyId: 'C2', name: 'Company 2', industry: 'Finance'})").run();
@@ -48,7 +48,7 @@ class GraphServiceMetadataTest extends ApmsIntegrationTestBase {
 
         var result = neo4jClient.query("MATCH (c1:Company {companyId: 'C1'})-[r:PARTNER_WITH]->(c2:Company {companyId: 'C2'}) RETURN r.startDate as startDate, r.endDate as endDate, r.status as status, r.metadata as metadata")
                 .fetch().one().orElseThrow();
-        
+
         assertThat(result.get("startDate")).isEqualTo("2023-01-01");
         assertThat(result.get("endDate")).isEqualTo("2024-01-01");
         assertThat(result.get("status")).isEqualTo("ACTIVE");
@@ -67,7 +67,7 @@ class GraphServiceMetadataTest extends ApmsIntegrationTestBase {
 
         var result = neo4jClient.query("MATCH (c1:Company {companyId: 'C1'})-[r:PARTNER_WITH]->(c2:Company {companyId: 'C2'}) RETURN r.startDate as startDate, r.endDate as endDate, r.status as status, r.metadata as metadata")
                 .fetch().one().orElseThrow();
-        
+
         assertThat(result.get("startDate")).isEqualTo("");
         assertThat(result.get("endDate")).isEqualTo("");
         assertThat(result.get("status")).isEqualTo("");
@@ -94,7 +94,7 @@ class GraphServiceMetadataTest extends ApmsIntegrationTestBase {
 
         var result = neo4jClient.query("MATCH (c1:Company {companyId: 'C1'})-[r:PARTNER_WITH]->(c2:Company {companyId: 'C2'}) RETURN r.startDate as startDate, r.endDate as endDate, r.status as status, r.metadata as metadata")
                 .fetch().one().orElseThrow();
-        
+
         assertThat(result.get("startDate")).isEqualTo("2024-05-01");
         assertThat(result.get("endDate")).isEqualTo(""); // Should remain null
         assertThat(result.get("status")).isEqualTo("PENDING");

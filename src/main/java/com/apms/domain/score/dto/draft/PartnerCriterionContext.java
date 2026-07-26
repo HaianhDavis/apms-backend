@@ -12,7 +12,7 @@ public class PartnerCriterionContext {
     private String criterionKey;
     private String sourceSnapshotHash;
     private Integer draftRevisionNumber;
-    
+
     private LocalDate periodStart;
     private LocalDate periodEnd;
 

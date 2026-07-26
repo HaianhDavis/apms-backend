@@ -24,19 +24,19 @@ public class CriterionSnapshot {
     private String factualFindings;
     private String finalRationale;
     private CriterionInputMethod inputMethod;
-    
+
     @Builder.Default
     private List<String> evidenceReferenceIds = new ArrayList<>();
-    
+
     private String dataSufficiencyStatus;
     private String missingDataExplanation;
     private CriterionSuggestionReviewStatus suggestionReviewStatus;
     private Boolean staffEdited;
     private String managerFeedback;
-    
+
     @Builder.Default
     private Map<String, Object> acceptedAiMetadata = new HashMap<>();
-    
+
     // AI provider confidence (e.g. 0.0 to 1.0) - NOT a business score
     private BigDecimal aiConfidence;
 }

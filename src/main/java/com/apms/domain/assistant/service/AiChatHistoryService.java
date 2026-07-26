@@ -20,7 +20,7 @@ public class AiChatHistoryService {
 
     public List<AiChatSessionResponse> listProjectAssistantSessions(Long currentUserId) {
         List<AiChatMessage> allMessages = aiChatMessageRepository.findByUserIdOrderByCreatedAtAsc(currentUserId);
-        
+
         List<AiChatMessage> projectMessages = allMessages.stream()
                 .filter(m -> m.getProjectId() != null)
                 .collect(Collectors.toList());
@@ -37,7 +37,7 @@ public class AiChatHistoryService {
 
     public List<AiChatSessionResponse> listOwnerAssistantSessions(Long currentUserId) {
         List<AiChatMessage> allMessages = aiChatMessageRepository.findByUserIdOrderByCreatedAtAsc(currentUserId);
-        
+
         List<AiChatMessage> ownerMessages = allMessages.stream()
                 .filter(m -> m.getProjectId() == null)
                 .collect(Collectors.toList());

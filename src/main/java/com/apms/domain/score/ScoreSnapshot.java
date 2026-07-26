@@ -36,13 +36,13 @@ public class ScoreSnapshot {
     private String candidateId;
 
     private Integer partnerFitScore;
-    
+
     private Integer competitionLevel;
-    
+
     private Integer riskLevel;
-    
+
     private Integer relationshipStrength;
-    
+
     private Integer totalScore;
 
     @Column(columnDefinition = "NVARCHAR(MAX)") // or TEXT depending on SQL Server mapping, NVARCHAR(MAX) is standard

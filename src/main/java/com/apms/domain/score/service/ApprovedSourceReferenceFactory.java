@@ -40,15 +40,15 @@ public class ApprovedSourceReferenceFactory {
             if (version.getSnapshot() == null || version.getSnapshot().isEmpty()) {
                 throw new BusinessValidationException("CompanyProfileVersion snapshot cannot be null or empty");
             }
-            
+
             ObjectMapper hashingMapper = objectMapper.copy()
                     .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
-                    
+
             byte[] bytes = hashingMapper.writeValueAsBytes(version.getSnapshot());
-            
+
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hashBytes = digest.digest(bytes);
-            
+
             StringBuilder hexString = new StringBuilder(2 * hashBytes.length);
             for (byte b : hashBytes) {
                 String hex = Integer.toHexString(0xff & b);
@@ -72,7 +72,7 @@ public class ApprovedSourceReferenceFactory {
                 .sourceHash(sourceHash)
                 .pinnedAt(LocalDateTime.now())
                 .build();
-                
+
         ref.validate();
         return ref;
     }

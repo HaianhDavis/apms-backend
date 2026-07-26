@@ -77,7 +77,7 @@ public class ProjectService {
                     log.warn("Unknown relationship type in Neo4j: {}", relString);
                 }
             }
-            
+
             if (resolvedRelationshipType == null) {
                 throw new BusinessValidationException("No existing relationship found for this company. Please provide targetRelationshipType.");
             }

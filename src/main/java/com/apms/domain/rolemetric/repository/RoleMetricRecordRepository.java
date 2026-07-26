@@ -13,7 +13,7 @@ import java.util.Optional;
 @Repository
 public interface RoleMetricRecordRepository extends JpaRepository<RoleMetricRecord, Long> {
     List<RoleMetricRecord> findByProjectId(Long projectId);
-    
+
     // Exact duplicate constraint mapping finder
     Optional<RoleMetricRecord> findByProjectIdAndCompanyIdAndRelationshipTypeAndMetricKeyAndPeriodKey(
             Long projectId, String companyId, String relationshipType, String metricKey, String periodKey

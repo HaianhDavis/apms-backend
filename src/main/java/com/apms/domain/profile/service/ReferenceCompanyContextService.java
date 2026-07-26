@@ -75,7 +75,7 @@ public class ReferenceCompanyContextService {
         boolean sfHasInd = p.getBusiness() != null && !CollectionUtils.isEmpty(p.getBusiness().getIndustries());
         boolean sfHasProd = p.getBusiness() != null && !CollectionUtils.isEmpty(p.getBusiness().getProducts());
         boolean sfHasMarket = p.getBusiness() != null && !CollectionUtils.isEmpty(p.getBusiness().getMarkets());
-        map.put("strategicFit", buildAvailability(sfHasInd && sfHasProd && sfHasMarket, 
+        map.put("strategicFit", buildAvailability(sfHasInd && sfHasProd && sfHasMarket,
                 List.of("business.industries", "business.products", "business.markets"),
                 getMissingFields(
                     !sfHasInd, "business.industries",
@@ -85,12 +85,12 @@ public class ReferenceCompanyContextService {
 
         // 2. capabilityComplementarity
         boolean ccHasTech = p.getInnovation() != null && !CollectionUtils.isEmpty(p.getInnovation().getTechnologyCapabilities());
-        map.put("capabilityComplementarity", buildAvailability(ccHasTech, 
+        map.put("capabilityComplementarity", buildAvailability(ccHasTech,
                 List.of("innovation.technologyCapabilities"),
                 getMissingFields(!ccHasTech, "innovation.technologyCapabilities")));
 
         // 3. productMarketOverlap
-        map.put("productMarketOverlap", buildAvailability(sfHasProd && sfHasMarket, 
+        map.put("productMarketOverlap", buildAvailability(sfHasProd && sfHasMarket,
                 List.of("business.products", "business.markets"),
                 getMissingFields(
                     !sfHasProd, "business.products",
@@ -101,7 +101,7 @@ public class ReferenceCompanyContextService {
         boolean hasEmpCount = p.getCompanySize() != null && p.getCompanySize().getEmployeeCount() != null;
         boolean hasEmpTier = p.getCompanySize() != null && StringUtils.hasText(p.getCompanySize().getEmployeeTier());
         boolean hasSize = hasEmpCount || hasEmpTier;
-        map.put("competitiveCapabilityComparison", buildAvailability(ccHasTech && hasSize, 
+        map.put("competitiveCapabilityComparison", buildAvailability(ccHasTech && hasSize,
                 List.of("innovation.technologyCapabilities", "companySize.employeeCount OR companySize.employeeTier"),
                 getMissingFields(
                     !ccHasTech, "innovation.technologyCapabilities",
@@ -113,7 +113,7 @@ public class ReferenceCompanyContextService {
         boolean hasBrandRank = p.getMarket() != null && p.getMarket().getBrandRank() != null;
         boolean hasClientCount = p.getMarket() != null && p.getMarket().getClientCount() != null;
         boolean hasMarketPos = hasMarketShare || hasBrandRank || hasClientCount;
-        map.put("marketPositionComparison", buildAvailability(hasMarketPos, 
+        map.put("marketPositionComparison", buildAvailability(hasMarketPos,
                 List.of("market.marketShare OR market.brandRank OR market.clientCount"),
                 getMissingFields(!hasMarketPos, "market.marketShare OR market.brandRank OR market.clientCount")));
 
@@ -122,7 +122,7 @@ public class ReferenceCompanyContextService {
         boolean hasProf = p.getFinancial() != null && p.getFinancial().getProfitMargin() != null;
         boolean hasGrow = p.getFinancial() != null && p.getFinancial().getRevenueGrowth() != null;
         boolean hasFin = hasRev || hasProf || hasGrow;
-        map.put("financialComparison", buildAvailability(hasFin, 
+        map.put("financialComparison", buildAvailability(hasFin,
                 List.of("financial.revenue OR financial.profitMargin OR financial.revenueGrowth"),
                 getMissingFields(!hasFin, "financial.revenue OR financial.profitMargin OR financial.revenueGrowth")));
 
@@ -131,7 +131,7 @@ public class ReferenceCompanyContextService {
         boolean hasQual = p.getCompliance() != null && !CollectionUtils.isEmpty(p.getCompliance().getQualityCertifications());
         boolean hasSec = p.getCompliance() != null && !CollectionUtils.isEmpty(p.getCompliance().getSecurityCertifications());
         boolean hasComp = hasStatus || hasQual || hasSec;
-        map.put("complianceComparison", buildAvailability(hasComp, 
+        map.put("complianceComparison", buildAvailability(hasComp,
                 List.of("compliance.status OR compliance.qualityCertifications OR compliance.securityCertifications"),
                 getMissingFields(!hasComp, "compliance.status OR compliance.qualityCertifications OR compliance.securityCertifications")));
 

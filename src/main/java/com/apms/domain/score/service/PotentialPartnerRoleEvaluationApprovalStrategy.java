@@ -154,7 +154,7 @@ public class PotentialPartnerRoleEvaluationApprovalStrategy implements RoleEvalu
 
         // 3. Create Outbox Event
         String eventId = UUID.randomUUID().toString();
-        
+
         RoleEvaluationOutboxPayload payload = RoleEvaluationOutboxPayload.builder()
                 .eventId(eventId)
                 .eventType(RoleEvaluationOutboxEventType.POTENTIAL_PARTNER_EVALUATION_APPROVED.name())
@@ -172,7 +172,7 @@ public class PotentialPartnerRoleEvaluationApprovalStrategy implements RoleEvalu
                 .occurredAt(LocalDateTime.now())
                 .payloadVersion(1)
                 .build();
-                
+
         RoleEvaluationOutboxEvent event = RoleEvaluationOutboxEvent.builder()
                 .id(eventId)
                 .eventId(eventId)
@@ -187,7 +187,7 @@ public class PotentialPartnerRoleEvaluationApprovalStrategy implements RoleEvalu
                 .nextAttemptAt(LocalDateTime.now())
                 .attemptCount(0)
                 .build();
-                
+
         mongoTemplate.insert(event);
 
         // 4. Draft Update (Mongo)
@@ -212,7 +212,7 @@ public class PotentialPartnerRoleEvaluationApprovalStrategy implements RoleEvalu
         if (modified == 0) {
             throw new IllegalStateException("Draft state changed or optimistic lock failed");
         }
-        
+
         // Update local object to reflect the new state so the controller returns APPROVAL_PROCESSING
         draft.setStatus(RoleEvaluationStatus.APPROVAL_PROCESSING);
         draft.setCurrentApprovedVersionId(versionId);
@@ -249,7 +249,7 @@ public class PotentialPartnerRoleEvaluationApprovalStrategy implements RoleEvalu
 
         // Create Outbox Event
         String eventId = UUID.randomUUID().toString();
-        
+
         RoleEvaluationOutboxPayload payload = RoleEvaluationOutboxPayload.builder()
                 .eventId(eventId)
                 .eventType(RoleEvaluationOutboxEventType.POTENTIAL_PARTNER_EVALUATION_REVISION_REQUESTED.name())
@@ -263,7 +263,7 @@ public class PotentialPartnerRoleEvaluationApprovalStrategy implements RoleEvalu
                 .occurredAt(LocalDateTime.now())
                 .payloadVersion(1)
                 .build();
-                
+
         RoleEvaluationOutboxEvent event = RoleEvaluationOutboxEvent.builder()
                 .id(eventId)
                 .eventId(eventId)
@@ -278,7 +278,7 @@ public class PotentialPartnerRoleEvaluationApprovalStrategy implements RoleEvalu
                 .nextAttemptAt(LocalDateTime.now())
                 .attemptCount(0)
                 .build();
-                
+
         mongoTemplate.insert(event);
     }
 

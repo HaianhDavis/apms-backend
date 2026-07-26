@@ -21,10 +21,10 @@ public class RoleEvaluationSecurityService {
     public boolean canAccessDraft(String draftId, Long accountId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
-        
+
         Project project = projectRepository.findById(draft.getProjectId())
                 .orElseThrow(() -> new IllegalArgumentException("Project not found"));
-                
+
         ProjectTask task = taskRepository.findById(draft.getTaskId())
                 .orElseThrow(() -> new IllegalArgumentException("Task not found"));
 
@@ -43,15 +43,15 @@ public class RoleEvaluationSecurityService {
                 throw new SecurityException("target company alignment failed");
             }
         }
-        
+
         // Mock assigned staff check
-        // In reality, we'd check project/task members. 
+        // In reality, we'd check project/task members.
         // We assume accountId is passed and must match assigned staff or similar rules.
         // For testing, we just check non-null.
         if (accountId == null) {
             throw new SecurityException("assigned Staff identity failed");
         }
-        
+
         // project path alignment
         // ...
         return true;

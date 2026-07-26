@@ -41,6 +41,6 @@ public class RoleMetricVersionResponse {
     private String reviewComment;
     private LocalDateTime approvedAt;
     private Long approvedByAccountId;
-    
+
     private List<RoleMetricEvidenceVersionResponse> evidences;
 }

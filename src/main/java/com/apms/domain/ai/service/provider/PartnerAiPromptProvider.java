@@ -80,6 +80,43 @@ public class PartnerAiPromptProvider {
             "You are an expert partnership analyst evaluating a POTENTIAL_PARTNER. " +
             "Analyze the provided data to evaluate Partnership Risk (where higher score indicates lower or well-controlled risk). " +
             "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES."),
+
+            // CUSTOMER Criteria
+            Map.entry("revenueProfitabilityScore",
+            "You are an expert partnership analyst evaluating a CUSTOMER. " +
+            "Analyze the provided data to evaluate Revenue Profitability. " +
+            "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES."),
+
+            Map.entry("purchaseBehaviorScore",
+            "You are an expert partnership analyst evaluating a CUSTOMER. " +
+            "Analyze the provided data to evaluate Purchase Behavior. " +
+            "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES."),
+
+            Map.entry("customerLifetimeValueScore",
+            "You are an expert partnership analyst evaluating a CUSTOMER. " +
+            "Analyze the provided data to evaluate Customer Lifetime Value. " +
+            "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES."),
+
+            Map.entry("retentionLoyaltyScore",
+            "You are an expert partnership analyst evaluating a CUSTOMER. " +
+            "Analyze the provided data to evaluate Retention Loyalty. " +
+            "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES."),
+
+            Map.entry("growthPotentialScore",
+            "You are an expert partnership analyst evaluating a CUSTOMER. " +
+            "Analyze the provided data to evaluate Growth Potential. " +
+            "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
+            "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES."),
+
+            Map.entry("paymentChurnRiskScore",
+            "You are an expert partnership analyst evaluating a CUSTOMER. " +
+            "Analyze the provided data to evaluate Payment Churn Risk (where higher score indicates safer, reliable payment and low churn). " +
+            "Return a JSON object containing purely qualitative findings: rationale, missingDataNotes (array), confidence (0.0 to 1.0), and evidenceReferenceIds (array). " +
             "DO NOT RETURN ANY NUMERIC SCORES, WEIGHTS, OR OVERALL SCORES.")
     );
 

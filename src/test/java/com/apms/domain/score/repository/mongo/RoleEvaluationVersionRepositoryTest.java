@@ -35,8 +35,8 @@ public class RoleEvaluationVersionRepositoryTest {
     void shouldEnforceUniqueIndexOnEvaluationIdAndVersionNumber() {
         // Assert index exists at runtime
         List<IndexInfo> indexInfoList = mongoTemplate.indexOps(RoleEvaluationVersion.class).getIndexInfo();
-        boolean indexExists = indexInfoList.stream().anyMatch(info -> 
-            info.isUnique() && 
+        boolean indexExists = indexInfoList.stream().anyMatch(info ->
+            info.isUnique() &&
             info.getIndexFields().size() == 2 &&
             info.getIndexFields().get(0).getKey().equals("evaluationId") &&
             info.getIndexFields().get(1).getKey().equals("versionNumber")
@@ -65,7 +65,7 @@ public class RoleEvaluationVersionRepositoryTest {
                 .evaluatedRole(CompanyRole.PARTNER)
                 .status(RoleEvaluationStatus.APPROVED)
                 .build();
-                
+
         assertThrows(DuplicateKeyException.class, () -> repository.save(duplicate));
 
         // Create version 2 for the same evaluation (should succeed)
@@ -78,10 +78,10 @@ public class RoleEvaluationVersionRepositoryTest {
                 .status(RoleEvaluationStatus.APPROVED)
                 .build();
         assertDoesNotThrow(() -> repository.save(v2));
-        
+
         Optional<RoleEvaluationVersion> foundV1 = repository.findByEvaluationIdAndVersionNumber("eval123", 1);
         Optional<RoleEvaluationVersion> foundV2 = repository.findByEvaluationIdAndVersionNumber("eval123", 2);
-        
+
         assertTrue(foundV1.isPresent());
         assertTrue(foundV2.isPresent());
     }

@@ -82,7 +82,7 @@ public class OwnerOrganizationService {
      */
     public OwnerProfileReadinessResponse checkReadiness() {
         Optional<CompanyProfile> profileOpt = findOwnerCompanyProfile();
-        
+
         List<String> completed = new ArrayList<>();
         List<String> missing = new ArrayList<>();
         boolean ready = true;

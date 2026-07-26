@@ -47,7 +47,7 @@ public class OpenAiExtractionProvider implements ExtractionProvider {
                     .chatResponse();
 
             rawAiOutput = response.getResult().getOutput().getText();
-            
+
             if (rawAiOutput.startsWith("```json")) {
                 rawAiOutput = rawAiOutput.replaceFirst("```json", "");
                 if (rawAiOutput.endsWith("```")) {

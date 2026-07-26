@@ -48,7 +48,7 @@ public class PotentialPartnerEvaluationSubmittedEventProcessorTest {
                 .build();
 
         when(accountRepository.findById(100L)).thenReturn(Optional.of(new Account()));
-        
+
         ProjectTask task = new ProjectTask();
         when(taskRepository.findById(20L)).thenReturn(Optional.of(task));
 

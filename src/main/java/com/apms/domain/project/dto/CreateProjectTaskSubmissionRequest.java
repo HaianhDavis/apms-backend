@@ -8,9 +8,9 @@ import lombok.Data;
 public class CreateProjectTaskSubmissionRequest {
     @NotNull
     private SubmissionType submissionType;
-    
+
     private String targetEntityType;
     private String targetEntityId;
-    
+
     private String note;
 }

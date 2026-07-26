@@ -29,7 +29,7 @@ public final class CanonicalRoleCriteria {
             "relationshipQualityScore", ScoreDirection.BENEFIT,
             "governanceAndRiskScore", ScoreDirection.BENEFIT
     );
-    
+
     public static final Map<String, com.apms.domain.score.enums.PartnerEvaluationMode> PARTNER_MODES = Map.of(
             "businessValueContributionScore", com.apms.domain.score.enums.PartnerEvaluationMode.HYBRID,
             "strategicAlignmentScore", com.apms.domain.score.enums.PartnerEvaluationMode.AI_ASSISTED,
@@ -102,7 +102,7 @@ public final class CanonicalRoleCriteria {
             "customerLifetimeValueScore", ScoreDirection.BENEFIT,
             "retentionLoyaltyScore", ScoreDirection.BENEFIT,
             "growthPotentialScore", ScoreDirection.BENEFIT,
-            "paymentChurnRiskScore", ScoreDirection.COST
+            "paymentChurnRiskScore", ScoreDirection.BENEFIT
     );
 
     // SUPPLIER

@@ -64,7 +64,7 @@ public class OwnerAssistantContextService {
         StringBuilder ctx = new StringBuilder();
 
         ctx.append("APMS Executive Business Intelligence Data\n");
-        
+
         Optional<CompanyProfile> ownerProfileOpt = ownerOrganizationService.findOwnerCompanyProfile();
         String ownerName = ownerProfileOpt.map(p -> {
             if (p.getIdentity() != null && StringUtils.hasText(p.getIdentity().getTradeName())) {
@@ -75,7 +75,7 @@ public class OwnerAssistantContextService {
                 return p.getCompanyId();
             }
         }).orElse(ownerOrganizationService.getOwnerCompanyId());
-        
+
         ctx.append("Owner Organization: ").append(ownerName).append("\n\n");
 
         // ── 1. Load Neo4j relationships from owner org ────────────────────────

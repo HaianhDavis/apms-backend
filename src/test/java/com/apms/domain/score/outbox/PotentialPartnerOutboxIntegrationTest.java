@@ -105,11 +105,11 @@ public class PotentialPartnerOutboxIntegrationTest {
             HibernateJpaVendorAdapter vendorAdapter = new HibernateJpaVendorAdapter();
             vendorAdapter.setGenerateDdl(true); // Ensure entities are created
             em.setJpaVendorAdapter(vendorAdapter);
-            
+
             java.util.Properties properties = new java.util.Properties();
             properties.setProperty("hibernate.physical_naming_strategy", "org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy");
             em.setJpaProperties(properties);
-            
+
             return em;
         }
 
@@ -155,7 +155,7 @@ public class PotentialPartnerOutboxIntegrationTest {
                 ScoreSnapshotRepository snapshotRepository,
                 RoleScoreRuleSetRepository ruleSetRepository,
                 AccountRepository accountRepository) {
-            
+
             com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService = org.mockito.Mockito.mock(com.apms.domain.profile.service.OwnerOrganizationService.class);
             com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository companyProfileVersionRepository = org.mockito.Mockito.mock(com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository.class);
             com.apms.domain.profile.CompanyProfileVersion mockProfile = com.apms.domain.profile.CompanyProfileVersion.builder().id("mock-profile-id").build();
@@ -164,7 +164,7 @@ public class PotentialPartnerOutboxIntegrationTest {
             com.apms.domain.score.service.CanonicalScoreJsonMapper canonicalScoreJsonMapper = org.mockito.Mockito.mock(com.apms.domain.score.service.CanonicalScoreJsonMapper.class);
             org.mockito.Mockito.when(canonicalScoreJsonMapper.serializeMap(org.mockito.ArgumentMatchers.any())).thenReturn("{}");
             org.mockito.Mockito.when(canonicalScoreJsonMapper.serializeList(org.mockito.ArgumentMatchers.any())).thenReturn("[]");
-            
+
             return new CanonicalScoreSnapshotService(
                     roleScoringEngine,
                     snapshotRepository,

@@ -9,11 +9,11 @@ import java.util.Optional;
 
 @Repository
 public interface RoleEvaluationVersionRepository extends MongoRepository<RoleEvaluationVersion, String> {
-    
+
     Optional<RoleEvaluationVersion> findByEvaluationIdAndVersionNumber(String evaluationId, Integer versionNumber);
-    
+
     List<RoleEvaluationVersion> findByEvaluationIdOrderByVersionNumberDesc(String evaluationId);
-    
+
     // Explicitly do not define any custom update or delete methods
     // to enforce immutability at the domain level.
 }

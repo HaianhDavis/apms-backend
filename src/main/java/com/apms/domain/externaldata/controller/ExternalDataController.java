@@ -35,7 +35,7 @@ public class ExternalDataController {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "publishedAt"));
         PageResponse<ExternalDataItemResponse> response = PageResponse.of(
                 externalDataService.getExternalData(ExternalDataCategory.NEWS, keyword, source, fromDate, toDate, pageable));
-        
+
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

@@ -31,7 +31,7 @@ public class AiChatHistoryController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<List<AiChatSessionResponse>>> getProjectAssistantSessions(
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-        
+
         List<AiChatSessionResponse> sessions = aiChatHistoryService.listProjectAssistantSessions(currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(sessions));
     }
@@ -41,7 +41,7 @@ public class AiChatHistoryController {
     public ResponseEntity<ApiResponse<List<AiChatMessageResponse>>> getProjectAssistantMessages(
             @PathVariable String sessionId,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-        
+
         List<AiChatMessageResponse> messages = aiChatHistoryService.getProjectAssistantMessages(currentUser.getId(), sessionId);
         return ResponseEntity.ok(ApiResponse.success(messages));
     }
@@ -54,7 +54,7 @@ public class AiChatHistoryController {
     @PreAuthorize("hasRole('BUSINESS_OWNER')")
     public ResponseEntity<ApiResponse<List<AiChatSessionResponse>>> getOwnerAssistantSessions(
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-        
+
         List<AiChatSessionResponse> sessions = aiChatHistoryService.listOwnerAssistantSessions(currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(sessions));
     }
@@ -64,7 +64,7 @@ public class AiChatHistoryController {
     public ResponseEntity<ApiResponse<List<AiChatMessageResponse>>> getOwnerAssistantMessages(
             @PathVariable String sessionId,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-        
+
         List<AiChatMessageResponse> messages = aiChatHistoryService.getOwnerAssistantMessages(currentUser.getId(), sessionId);
         return ResponseEntity.ok(ApiResponse.success(messages));
     }

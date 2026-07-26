@@ -67,7 +67,7 @@ public class PotentialPartnerRoleEvaluationApprovalStrategyTest {
         draft.setSubmittedSourceSnapshotHash("hash1");
         draft.setOptimisticVersion(1L);
         draft.setCriterionInputs(new LinkedHashMap<>());
-        
+
         CriterionInput input = new CriterionInput();
         input.setRawScore(new BigDecimal("100"));
         draft.getCriterionInputs().put("strategicFitScore", input);

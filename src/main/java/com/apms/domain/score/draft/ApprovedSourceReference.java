@@ -28,17 +28,17 @@ public class ApprovedSourceReference {
     private LocalDate periodEnd;
     private String sourceHash;
     private LocalDateTime pinnedAt;
-    
+
     @Builder.Default
     private boolean sharedAcrossCriteria = false;
-    
+
     // Metadata for source-specific fields
     private String documentId;
     private String segmentId;
     private String reviewerAccountId;
     private String externalSourceUrl;
     private String manualNoteContent;
-    
+
     public void validate() {
         if (referenceId == null || referenceId.isBlank()) {
             throw new BusinessValidationException("referenceId is required");
@@ -61,7 +61,7 @@ public class ApprovedSourceReference {
         if (pinnedAt == null) {
             throw new BusinessValidationException("pinnedAt is required");
         }
-        
+
         switch (sourceType) {
             case ROLE_METRIC_VERSION:
             case ROLE_METRIC_EVIDENCE_VERSION:
@@ -115,19 +115,19 @@ public class ApprovedSourceReference {
                 break;
         }
     }
-    
+
     private void assertNoMongoMetadata() {
         if (mongoSourceId != null) throw new BusinessValidationException("mongoSourceId not allowed for this source type");
     }
-    
+
     private void assertNoExternalMetadata() {
         if (externalSourceUrl != null) throw new BusinessValidationException("externalSourceUrl not allowed for this source type");
     }
-    
+
     private void assertNoManualMetadata() {
         if (manualNoteContent != null) throw new BusinessValidationException("manualNoteContent not allowed for this source type");
     }
-    
+
     private void assertNoRawDocumentMetadata() {
         if (documentId != null || segmentId != null) throw new BusinessValidationException("documentId and segmentId not allowed for this source type");
     }

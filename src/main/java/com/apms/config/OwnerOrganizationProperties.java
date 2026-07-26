@@ -9,7 +9,7 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties(prefix = "apms.owner")
 public class OwnerOrganizationProperties {
-    
+
     /**
      * The ID of the CompanyProfile that represents the APMS Owner Organization.
      * Default is the legacy demo ID to preserve current runtime behavior.

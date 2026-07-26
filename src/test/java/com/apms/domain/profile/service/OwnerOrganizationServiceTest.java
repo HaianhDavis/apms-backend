@@ -56,7 +56,7 @@ class OwnerOrganizationServiceTest {
         CompanyProfile profile = new CompanyProfile();
         profile.setId(DEFAULT_OWNER_ID);
         when(companyProfileRepository.findById(DEFAULT_OWNER_ID)).thenReturn(Optional.of(profile));
-        
+
         Optional<CompanyProfile> result = ownerOrganizationService.findOwnerCompanyProfile();
         assertTrue(result.isPresent());
         assertEquals(DEFAULT_OWNER_ID, result.get().getId());
@@ -65,10 +65,10 @@ class OwnerOrganizationServiceTest {
     @Test
     void getRequiredOwnerCompanyProfile_ThrowsException_WhenNotFound() {
         when(companyProfileRepository.findById(DEFAULT_OWNER_ID)).thenReturn(Optional.empty());
-        
-        BusinessValidationException exception = assertThrows(BusinessValidationException.class, 
+
+        BusinessValidationException exception = assertThrows(BusinessValidationException.class,
             () -> ownerOrganizationService.getRequiredOwnerCompanyProfile());
-            
+
         assertTrue(exception.getMessage().contains("Owner CompanyProfile not found for ID:"));
     }
 

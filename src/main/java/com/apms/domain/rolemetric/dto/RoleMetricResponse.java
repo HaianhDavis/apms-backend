@@ -43,6 +43,6 @@ public class RoleMetricResponse {
     private Long createdByAccountId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    
+
     private List<RoleMetricEvidenceResponse> evidences;
 }

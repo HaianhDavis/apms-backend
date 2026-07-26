@@ -147,7 +147,7 @@ class RoleMetricRecordControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isOk());
-        
+
         verify(roleMetricRecordService).updateDraft(eq(1L), eq(10L), any());
     }
 
@@ -156,10 +156,10 @@ class RoleMetricRecordControllerTest {
         com.apms.domain.rolemetric.dto.RoleMetricEvidenceResponse evResp = new com.apms.domain.rolemetric.dto.RoleMetricEvidenceResponse();
         evResp.setId(5L);
         when(roleMetricRecordService.attachEvidence(eq(1L), eq(10L), any())).thenReturn(evResp);
-        
+
         RoleMetricEvidenceRequest req = new RoleMetricEvidenceRequest();
         req.setSourceType(com.apms.domain.rolemetric.enums.RoleMetricEvidenceSourceType.MANUAL_NOTE);
-        
+
         mockMvc.perform(post("/api/v1/projects/1/role-metrics/10/evidences")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))

@@ -31,7 +31,7 @@ class PartnerAiSuggestionValidatorTest {
                 }
                 """;
         List<ApprovedSourceReference> refs = new ArrayList<>();
-        
+
         PartnerCriterionSuggestionResponse resp = validator.validateAndMap(json, "businessValueContributionScore", refs);
         assertNotNull(resp);
         assertEquals("businessValueContributionScore", resp.getCriterionKey());
@@ -47,12 +47,12 @@ class PartnerAiSuggestionValidatorTest {
                 }
                 """;
         List<ApprovedSourceReference> refs = new ArrayList<>();
-        
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> 
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(json, "businessValueContributionScore", refs));
         assertTrue(ex.getMessage().contains("Forbidden field"));
     }
-    
+
     @Test
     void testRejectsNestedForbiddenField() {
         String badJson = """
@@ -65,10 +65,10 @@ class PartnerAiSuggestionValidatorTest {
                 }
                 """;
         List<ApprovedSourceReference> refs = new ArrayList<>();
-        
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> 
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(badJson, "businessValueContributionScore", refs));
-        assertTrue(ex.getMessage().contains("Forbidden field found in AI response: calculationDetails") || 
+        assertTrue(ex.getMessage().contains("Forbidden field found in AI response: calculationDetails") ||
                    ex.getMessage().contains("Forbidden field found in AI response: score"));
     }
 
@@ -84,8 +84,8 @@ class PartnerAiSuggestionValidatorTest {
                 }
                 """;
         List<ApprovedSourceReference> refs = new ArrayList<>();
-        
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> 
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(badJson, "businessValueContributionScore", refs));
         assertTrue(ex.getMessage().contains("Unknown field found in AI response: nested"));
     }
@@ -100,8 +100,8 @@ class PartnerAiSuggestionValidatorTest {
                 }
                 """;
         List<ApprovedSourceReference> refs = new ArrayList<>();
-        
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> 
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(json, "businessValueContributionScore", refs));
         assertTrue(ex.getMessage().contains("evidenceReferenceIds contains duplicates"));
     }
@@ -116,8 +116,8 @@ class PartnerAiSuggestionValidatorTest {
                 }
                 """;
         List<ApprovedSourceReference> refs = new ArrayList<>();
-        
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> 
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(json, "businessValueContributionScore", refs));
         assertTrue(ex.getMessage().contains("does not belong to the pinned source set"));
     }
@@ -134,10 +134,10 @@ class PartnerAiSuggestionValidatorTest {
         ApprovedSourceReference ref = new ApprovedSourceReference();
         ref.setReferenceId("ref2");
         ref.setCriterionKey("someOtherCriterion");
-        
+
         List<ApprovedSourceReference> refs = List.of(ref);
-        
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> 
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(json, "businessValueContributionScore", refs));
         assertTrue(ex.getMessage().contains("is associated with a different criterion"));
     }
@@ -154,8 +154,8 @@ class PartnerAiSuggestionValidatorTest {
                 }
                 """;
         List<ApprovedSourceReference> refs = new ArrayList<>();
-        
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> 
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(badJson, "businessValueContributionScore", refs));
         assertTrue(ex.getMessage().contains("Forbidden field found in AI response: score") || ex.getMessage().contains("Unknown field found in AI response"));
     }
@@ -170,8 +170,8 @@ class PartnerAiSuggestionValidatorTest {
                 }
                 """;
         List<ApprovedSourceReference> refs = new ArrayList<>();
-        
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> 
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(badJson, "businessValueContributionScore", refs));
         assertTrue(ex.getMessage().contains("Forbidden field found in AI response: overallScore"));
     }

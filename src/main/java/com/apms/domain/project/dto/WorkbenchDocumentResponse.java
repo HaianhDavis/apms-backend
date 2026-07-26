@@ -9,7 +9,7 @@ import lombok.EqualsAndHashCode;
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class WorkbenchDocumentResponse extends ImportJobResponse {
-    
+
     private String latestExtractionId;
     private ExtractionQualityStatus extractionQualityStatus;
     private Double evidenceCoverageRate;
@@ -19,12 +19,12 @@ public class WorkbenchDocumentResponse extends ImportJobResponse {
     private boolean canGenerateDraft;
 
     @Builder(builderMethodName = "workbenchBuilder")
-    public WorkbenchDocumentResponse(Long id, Long projectId, String rawDocumentId, com.apms.common.enums.InputType inputType, 
-                                     String sourceType, String fileName, com.apms.common.enums.ImportJobStatus status, 
-                                     Long uploadedBy, java.time.LocalDateTime startedAt, java.time.LocalDateTime completedAt, 
+    public WorkbenchDocumentResponse(Long id, Long projectId, String rawDocumentId, com.apms.common.enums.InputType inputType,
+                                     String sourceType, String fileName, com.apms.common.enums.ImportJobStatus status,
+                                     Long uploadedBy, java.time.LocalDateTime startedAt, java.time.LocalDateTime completedAt,
                                      String errorMessage, java.time.LocalDateTime createdAt,
                                      String latestExtractionId, ExtractionQualityStatus extractionQualityStatus,
-                                     Double evidenceCoverageRate, Double completenessRate, 
+                                     Double evidenceCoverageRate, Double completenessRate,
                                      Integer warningFields, Integer failedFields, boolean canGenerateDraft) {
         super(id, projectId, rawDocumentId, inputType, sourceType, fileName, status, uploadedBy, startedAt, completedAt, errorMessage, createdAt);
         this.latestExtractionId = latestExtractionId;

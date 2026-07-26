@@ -532,25 +532,25 @@ public class RoleEvaluationDraftService {
     public void pinSourceReferences(String draftId, List<SourceSelectionRequest> requests, Integer expectedWorkingRevisionNumber, Long expectedOptimisticVersion) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
-        
+
         if (draft.getStatus() != RoleEvaluationStatus.DRAFT && draft.getStatus() != RoleEvaluationStatus.REVISION_REQUIRED) {
             throw new IllegalStateException("Draft cannot be edited in current state");
         }
-        
+
         List<ApprovedSourceReference> verifiedReferences = sourcePinningValidator.validateAndBuildReferences(requests, draft);
         String snapshotHash = SourceSnapshotHasher.hash(verifiedReferences);
-        
+
         Query query = new Query(Criteria.where("_id").is(draftId)
                 .and("workingRevisionNumber").is(expectedWorkingRevisionNumber)
                 .and("optimisticVersion").is(expectedOptimisticVersion));
-                
+
         Update update = new Update()
                 .set("pinnedSourceReferences", verifiedReferences)
                 .set("sourceSnapshotHash", snapshotHash)
                 .inc("workingRevisionNumber", 1)
                 .inc("optimisticVersion", 1)
                 .set("updatedAt", LocalDateTime.now());
-                
+
         var result = mongoTemplate.updateFirst(query, update, RoleEvaluationDraft.class);
         if (result.getMatchedCount() == 0) {
             throw new BusinessConflictException("Concurrent modification detected. Draft was modified by another writer.");

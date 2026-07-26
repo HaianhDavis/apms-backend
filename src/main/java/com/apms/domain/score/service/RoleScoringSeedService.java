@@ -79,6 +79,7 @@ public class RoleScoringSeedService {
                 "growthPotentialScore", new BigDecimal("0.11"),
                 "paymentChurnRiskScore", new BigDecimal("0.10")
         ));
+        migrateCustomerIllustrativeRules();
 
         seedRole(CompanyRole.SUPPLIER, CanonicalRoleCriteria.SUPPLIER_CRITERIA, CanonicalRoleCriteria.SUPPLIER_DIRECTIONS, Map.of(
                 "qualityPerformanceScore", new BigDecimal("0.22"),
@@ -129,6 +130,49 @@ public class RoleScoringSeedService {
 
         if (updated) {
             log.info("Migrated POTENTIAL_PARTNER ILLUSTRATIVE rules to new weights/directions.");
+            ruleSetRepository.save(ruleSet);
+        }
+    }
+
+    private void migrateCustomerIllustrativeRules() {
+        Optional<RoleScoreRuleSet> ruleSetOpt = ruleSetRepository.findByEvaluatedRoleAndRuleSetVersion(
+                CompanyRole.CUSTOMER, RULE_SET_VERSION);
+        if (ruleSetOpt.isEmpty()) {
+            return;
+        }
+        RoleScoreRuleSet ruleSet = ruleSetOpt.get();
+
+        // ONLY migrate if it's ILLUSTRATIVE, do NOT overwrite EXPERT created ones
+        if (ruleSet.getWeightSource() != WeightSource.ILLUSTRATIVE) {
+            log.info("CUSTOMER rule set is not ILLUSTRATIVE. Skipping migration.");
+            return;
+        }
+
+        Map<String, BigDecimal> expectedWeights = Map.of(
+                "revenueProfitabilityScore", new BigDecimal("0.22"),
+                "purchaseBehaviorScore", new BigDecimal("0.15"),
+                "customerLifetimeValueScore", new BigDecimal("0.24"),
+                "retentionLoyaltyScore", new BigDecimal("0.18"),
+                "growthPotentialScore", new BigDecimal("0.11"),
+                "paymentChurnRiskScore", new BigDecimal("0.10")
+        );
+
+        boolean updated = false;
+        for (RoleCriterionRule rule : ruleSet.getRules()) {
+            BigDecimal expectedWeight = expectedWeights.get(rule.getCriterionKey());
+            if (expectedWeight != null && rule.getWeight().compareTo(expectedWeight) != 0) {
+                rule.setWeight(expectedWeight);
+                updated = true;
+            }
+
+            if ("paymentChurnRiskScore".equals(rule.getCriterionKey()) && rule.getDirection() == ScoreDirection.COST) {
+                rule.setDirection(ScoreDirection.BENEFIT);
+                updated = true;
+            }
+        }
+
+        if (updated) {
+            log.info("Migrated CUSTOMER ILLUSTRATIVE rules to new weights/directions.");
             ruleSetRepository.save(ruleSet);
         }
     }

@@ -59,18 +59,18 @@ class PartnerSuggestionGenerationServiceIntegrationTest extends ApmsIntegrationT
         draft.setSourceSnapshotHash("hash-abc");
         draft.setPinnedSourceReferences(java.util.List.of(com.apms.domain.score.draft.ApprovedSourceReference.builder().referenceId("ref-1").build()));
         draft = draftRepository.save(draft);
-        
+
         String draftId = draft.getId();
         Long initialOptimisticVersion = draft.getOptimisticVersion();
         assertEquals(0L, initialOptimisticVersion);
-        
+
         // Mock provider responses
         com.apms.domain.score.dto.draft.PartnerCriterionContext context = com.apms.domain.score.dto.draft.PartnerCriterionContext.builder()
             .pinnedSources(java.util.List.of(java.util.Map.of("referenceId", "ref-1")))
             .build();
         when(contextProvider.buildContext(any(), anyString()))
             .thenReturn(context);
-            
+
         PartnerCriterionSuggestionResponse aiResponse = new PartnerCriterionSuggestionResponse();
         aiResponse.setRationale("Good rationale");
         when(validator.validateAndMap(anyString(), anyString(), any()))
@@ -85,10 +85,10 @@ class PartnerSuggestionGenerationServiceIntegrationTest extends ApmsIntegrationT
         assertEquals(1, reloaded.getGenerationIdempotency().get("strategicAlignmentScore").size());
         assertEquals("gen-A", reloaded.getGenerationIdempotency().get("strategicAlignmentScore").get(0).getGenerationId());
         assertEquals(GenerationStatus.APPLIED, reloaded.getGenerationIdempotency().get("strategicAlignmentScore").get(0).getValidationStatus());
-        
+
         // Prove workingRevisionNumber is unchanged (still 1)
         assertEquals(1, reloaded.getWorkingRevisionNumber());
-        
+
         // Prove optimisticVersion increased twice (from 0 to 1 in reserve, 1 to 2 in apply)
         assertEquals(2L, reloaded.getOptimisticVersion());
 
@@ -97,10 +97,10 @@ class PartnerSuggestionGenerationServiceIntegrationTest extends ApmsIntegrationT
         // Actually, since generation takes the draft ID, if we just call the service again, it reads the NEW revision, so it wouldn't be stale!
         // To make it stale, we could intercept the findById or simply do a direct update.
         // Let's simulate a concurrent update by directly modifying the DB *while* writer B is reading.
-        
+
         // Simpler way: Writer A does a successful generation. Writer B is executed after, but if we want to simulate CAS conflict,
         // we can just directly modify the draft's workingRevisionNumber in the DB to simulate another writer modifying it BEFORE the apply phase!
-        
+
         // Prove repository save using the reloaded document still succeeds
         reloaded.setSourceSnapshotHash("new-hash");
         draftRepository.save(reloaded);
@@ -108,7 +108,7 @@ class PartnerSuggestionGenerationServiceIntegrationTest extends ApmsIntegrationT
         assertEquals(3L, reloadedTwice.getOptimisticVersion());
         assertEquals("new-hash", reloadedTwice.getSourceSnapshotHash());
     }
-    
+
     @Test
     void testConcurrentCASConflict() {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
@@ -118,16 +118,16 @@ class PartnerSuggestionGenerationServiceIntegrationTest extends ApmsIntegrationT
         draft.setSourceSnapshotHash("hash-abc");
         draft.setPinnedSourceReferences(java.util.List.of(com.apms.domain.score.draft.ApprovedSourceReference.builder().referenceId("ref-1").build()));
         draft = draftRepository.save(draft);
-        
+
         String draftId = draft.getId();
-        
+
         // Mock provider responses
         com.apms.domain.score.dto.draft.PartnerCriterionContext context = com.apms.domain.score.dto.draft.PartnerCriterionContext.builder()
             .pinnedSources(java.util.List.of(java.util.Map.of("referenceId", "ref-1")))
             .build();
         when(contextProvider.buildContext(any(), anyString()))
             .thenReturn(context);
-            
+
         PartnerCriterionSuggestionResponse aiResponse = new PartnerCriterionSuggestionResponse();
         aiResponse.setRationale("Good rationale");
         when(validator.validateAndMap(anyString(), anyString(), any()))
@@ -137,13 +137,13 @@ class PartnerSuggestionGenerationServiceIntegrationTest extends ApmsIntegrationT
                 concurrent.setWorkingRevisionNumber(99); // bump revision
                 concurrent.setGenerationIdempotency(new java.util.LinkedHashMap<>()); // wipe metadata
                 draftRepository.save(concurrent); // optimistically increments version in DB
-                
+
                 return aiResponse;
             });
 
-        BusinessConflictException ex = assertThrows(BusinessConflictException.class, () -> 
+        BusinessConflictException ex = assertThrows(BusinessConflictException.class, () ->
             service.generateSuggestion(draftId, "strategicAlignmentScore", "gen-B"));
-            
+
         assertEquals("Reserved metadata lost", ex.getMessage());
     }
 }

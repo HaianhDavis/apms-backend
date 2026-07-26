@@ -40,4 +40,79 @@ class PartnerAiPromptProviderTest {
             assertTrue(p.contains("DO NOT RETURN ANY NUMERIC SCORES"));
         }
     }
+
+    // CUSTOMER prompt-provider tests covering all six keys
+
+    @Test
+    void testAllSixCustomerCriteriaHavePrompts() {
+        String[] customerCriteria = {
+                "revenueProfitabilityScore",
+                "purchaseBehaviorScore",
+                "customerLifetimeValueScore",
+                "retentionLoyaltyScore",
+                "growthPotentialScore",
+                "paymentChurnRiskScore"
+        };
+        for (String c : customerCriteria) {
+            String p = provider.getPromptTemplate(c);
+            assertNotNull(p, "Missing prompt for " + c);
+            // Qualitative findings and rationale are requested
+            assertTrue(p.contains("rationale"), c + " must request rationale");
+            assertTrue(p.contains("qualitative findings"), c + " must request qualitative findings");
+            // Evidence references are retained
+            assertTrue(p.contains("evidenceReferenceIds"), c + " must retain evidence references");
+            // No official numeric score
+            assertTrue(p.contains("DO NOT RETURN ANY NUMERIC SCORES"), c + " must prohibit numeric scores");
+            // No weight
+            assertFalse(p.contains("weight:"), c + " must not contain weight:");
+            // No overallScore
+            assertFalse(p.contains("overallScore"), c + " must not contain overallScore");
+            // No invented revenue, profit or CLV
+            assertFalse(p.contains("$"), c + " must not contain dollar amounts");
+            assertFalse(p.contains("revenue:"), c + " must not invent revenue figures");
+        }
+    }
+
+    @Test
+    void testRevenueProfitabilityScorePrompt() {
+        String p = provider.getPromptTemplate("revenueProfitabilityScore");
+        assertTrue(p.contains("CUSTOMER"));
+        assertTrue(p.contains("Revenue Profitability"));
+    }
+
+    @Test
+    void testPurchaseBehaviorScorePrompt() {
+        String p = provider.getPromptTemplate("purchaseBehaviorScore");
+        assertTrue(p.contains("CUSTOMER"));
+        assertTrue(p.contains("Purchase Behavior"));
+    }
+
+    @Test
+    void testCustomerLifetimeValueScorePrompt() {
+        String p = provider.getPromptTemplate("customerLifetimeValueScore");
+        assertTrue(p.contains("CUSTOMER"));
+        assertTrue(p.contains("Customer Lifetime Value"));
+    }
+
+    @Test
+    void testRetentionLoyaltyScorePrompt() {
+        String p = provider.getPromptTemplate("retentionLoyaltyScore");
+        assertTrue(p.contains("CUSTOMER"));
+        assertTrue(p.contains("Retention Loyalty"));
+    }
+
+    @Test
+    void testGrowthPotentialScorePrompt() {
+        String p = provider.getPromptTemplate("growthPotentialScore");
+        assertTrue(p.contains("CUSTOMER"));
+        assertTrue(p.contains("Growth Potential"));
+    }
+
+    @Test
+    void testPaymentChurnRiskScorePrompt() {
+        String p = provider.getPromptTemplate("paymentChurnRiskScore");
+        assertTrue(p.contains("CUSTOMER"));
+        assertTrue(p.contains("Payment Churn Risk"));
+        assertTrue(p.contains("higher score indicates safer"), "Must define BENEFIT direction semantics");
+    }
 }

@@ -59,7 +59,7 @@ class ReferenceCompanyContextServiceTest {
                 .markets(List.of("Vietnam", "Global"))
                 .products(List.of(CompanyProfile.Product.builder().name("Software").build()))
                 .build());
-        
+
         when(ownerOrganizationService.resolveApprovedOwnerProfile()).thenReturn(ownerProfile);
         when(versionRepository.findByCompanyProfileIdAndVersion("fpt-id", 1))
                 .thenReturn(Optional.of(CompanyProfileVersion.builder().build()));
@@ -73,7 +73,7 @@ class ReferenceCompanyContextServiceTest {
         assertThat(response.getCompanyProfileId()).isEqualTo("fpt-id");
         assertThat(response.getLegalName()).isEqualTo("FPT Corporation");
         assertThat(response.getIndustries()).containsExactly("IT Services");
-        
+
         Map<String, ComparisonInputAvailabilityResponse> availability = response.getComparisonInputAvailability();
         assertThat(availability.get("strategicFit").isAvailable()).isTrue();
         assertThat(availability.get("capabilityComplementarity").isAvailable()).isFalse();

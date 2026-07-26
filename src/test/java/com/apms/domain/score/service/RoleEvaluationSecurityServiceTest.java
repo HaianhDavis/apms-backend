@@ -45,7 +45,7 @@ class RoleEvaluationSecurityServiceTest {
         Project project = new Project();
         project.setId(1L);
         project.setTargetCompanyProfileId("prof1");
-        
+
         ProjectTask task = new ProjectTask();
         task.setId(10L);
         task.setProject(project);
@@ -69,10 +69,10 @@ class RoleEvaluationSecurityServiceTest {
         Project project = new Project();
         project.setId(1L);
         project.setTargetCompanyProfileId("prof1");
-        
+
         Project otherProject = new Project();
         otherProject.setId(2L);
-        
+
         ProjectTask task = new ProjectTask();
         task.setId(10L);
         task.setProject(otherProject);

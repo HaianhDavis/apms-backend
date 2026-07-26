@@ -31,7 +31,7 @@ public class CompanyProfileIdentifierResolver {
         return companyProfileRepository.findById(documentId)
                 .orElseThrow(() -> new IllegalArgumentException("Profile not found for document ID: " + documentId));
     }
-    
+
     /**
      * Resolves the profile version using the MongoDB _id (which is expected by the version repository).
      */

@@ -93,7 +93,7 @@ class RoleEvaluationOutboxPayloadHasherTest {
                 .build();
 
         String hash = RoleEvaluationOutboxPayloadHasher.hash(payload);
-        
+
         // This is a placeholder expected hash. We will print the actual one if it fails and fix it,
         // but since we want the test to pass eventually, we need the exact hash.
         // Let's assert it starts with the prefix for now, and I will run the test to get the real hash.

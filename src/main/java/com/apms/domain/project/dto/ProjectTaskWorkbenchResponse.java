@@ -25,7 +25,7 @@ public class ProjectTaskWorkbenchResponse {
     private String taskTitle;
     private TaskType taskType;
     private TaskStatus taskStatus;
-    
+
     private ProjectType projectType;
     private ProjectStatus projectStatus;
     private String targetCompanyName;

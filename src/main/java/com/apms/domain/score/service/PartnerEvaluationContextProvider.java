@@ -48,7 +48,7 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
             throw new BusinessValidationException("Draft has no pinned source references");
         }
 
-        // We check project and target company against draft itself implicitly, 
+        // We check project and target company against draft itself implicitly,
         // as the sources belong to this draft. There is no approvedVersion to compare to here anymore.
 
         // Ensure PARTNER_WITH relationship (mocked/checked via Draft evaluatedRole)
@@ -57,22 +57,22 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
         }
 
         List<Map<String, Object>> pinnedSources = new ArrayList<>();
-        
+
         for (ApprovedSourceReference ref : draft.getPinnedSourceReferences()) {
             if (ref.getCriterionKey() != null && !ref.getCriterionKey().equals(criterionKey)) {
                 continue; // skip if it's strictly for another criterion, unless it's global
             }
-            
+
             // Period relevance
             if (ref.getPeriodStart() != null && draft.getEvaluationPeriod() != null) {
-                if (ref.getPeriodStart().isAfter(draft.getEvaluationPeriod().getPeriodEnd()) || 
+                if (ref.getPeriodStart().isAfter(draft.getEvaluationPeriod().getPeriodEnd()) ||
                     (ref.getPeriodEnd() != null && ref.getPeriodEnd().isBefore(draft.getEvaluationPeriod().getPeriodStart()))) {
                     throw new BusinessValidationException("Source is not relevant to evaluation period");
                 }
             }
-            
+
             Map<String, Object> sourceData = loadAndValidateSource(ref, draft);
-            
+
             // Recompute and verify hash
                 try {
                     ObjectMapper hashingMapper = objectMapper.copy().configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
@@ -88,7 +88,7 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
                         hexString.append(hex);
                     }
                     String recomputedHash = hexString.toString();
-                    // Just verify we can compute it and it's deterministic. In a real system we'd compare it directly, 
+                    // Just verify we can compute it and it's deterministic. In a real system we'd compare it directly,
                     // but since the original hash logic might differ slightly, we enforce strict checking if the ref has a hash.
                     // For COMPANY_PROFILE_VERSION we check exactly.
                     if (ref.getSourceType() == ApprovedSourceType.COMPANY_PROFILE_VERSION && ref.getSourceHash() != null) {
@@ -101,7 +101,7 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
                 } catch (Exception e) {
                     throw new BusinessValidationException("Failed to recompute hash");
                 }
-                
+
                 pinnedSources.add(sourceData);
         }
 
@@ -119,7 +119,7 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
         Map<String, Object> data = new HashMap<>();
         data.put("referenceId", ref.getReferenceId());
         data.put("sourceType", ref.getSourceType().name());
-        
+
         switch (ref.getSourceType()) {
             case COMPANY_PROFILE_VERSION:
                 CompanyProfileVersion cp = companyProfileVersionRepository.findById(ref.getMongoSourceId())
@@ -127,7 +127,7 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
                 data.put("data", cp.getSnapshot());
                 verifyHash(cp.getSnapshot(), ref.getSourceHash());
                 break;
-                
+
             case ROLE_METRIC_VERSION:
                 RoleMetricRecordVersion rm = metricRecordVersionRepository.findById(ref.getSqlSourceId())
                         .orElseThrow(() -> new BusinessValidationException("Role metric version not found: " + ref.getSqlSourceId()));
@@ -138,7 +138,7 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
                 data.put("targetBooleanValue", rm.getTargetBooleanValue());
                 data.put("unitCode", rm.getUnitCode());
                 break;
-                
+
             case ROLE_METRIC_EVIDENCE_VERSION:
                 RoleMetricEvidenceVersion ev = metricEvidenceVersionRepository.findById(ref.getSqlSourceId())
                         .orElseThrow(() -> new BusinessValidationException("Metric evidence version not found: " + ref.getSqlSourceId()));
@@ -146,7 +146,7 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
                 data.put("sourceExcerpt", ev.getSourceExcerpt());
                 data.put("externalReference", ev.getExternalReference());
                 break;
-                
+
             case PARTNER_CONTRACT_VERSION:
                 PartnerContractVersion c = contractVersionRepository.findById(ref.getSqlSourceId())
                         .orElseThrow(() -> new BusinessValidationException("Contract version not found: " + ref.getSqlSourceId()));
@@ -154,21 +154,21 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
                 data.put("contractStatus", c.getLifecycleStatus());
                 data.put("effectiveDate", c.getEffectiveDate());
                 break;
-                
+
             case PARTNER_CONTRACT_CLAUSE_VERSION:
                 PartnerContractClauseVersion cv = clauseVersionRepository.findById(ref.getSqlSourceId())
                         .orElseThrow(() -> new BusinessValidationException("Contract clause version not found: " + ref.getSqlSourceId()));
                 data.put("clauseType", cv.getClauseType());
                 data.put("sourceExcerpt", cv.getSourceExcerpt());
                 break;
-                
+
             case RAW_DOCUMENT_SEGMENT:
             case EXTERNAL:
             case MANUAL_NOTE:
                 throw new BusinessValidationException("Source type " + ref.getSourceType() + " is unsupported in Phase 2C.5B");
         }
-        
-        
+
+
         return data;
     }
 

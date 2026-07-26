@@ -36,7 +36,7 @@ class PartnerEvaluationContextProviderTest {
     void setUp() {
         companyProfileVersionRepository = Mockito.mock(CompanyProfileVersionRepository.class);
         objectMapper = new ObjectMapper();
-        
+
         provider = new PartnerEvaluationContextProvider(
                 companyProfileVersionRepository,
                 Mockito.mock(com.apms.domain.rolemetric.repository.RoleMetricRecordVersionRepository.class),
@@ -51,7 +51,7 @@ class PartnerEvaluationContextProviderTest {
     void testRejectsEmptyPinnedSources() {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setPinnedSourceReferences(new ArrayList<>());
-        
+
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> provider.buildContext(draft, "crit1"));
         assertTrue(ex.getMessage().contains("has no pinned source references"));
     }
@@ -60,10 +60,10 @@ class PartnerEvaluationContextProviderTest {
     void testRejectsNonPartnerRole() {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setEvaluatedRole(CompanyRole.COMPETITOR);
-        
+
         ApprovedSourceReference ref = new ApprovedSourceReference();
         draft.setPinnedSourceReferences(List.of(ref));
-        
+
         assertThrows(BusinessValidationException.class, () -> provider.buildContext(draft, "crit1"));
     }
 
@@ -71,18 +71,18 @@ class PartnerEvaluationContextProviderTest {
     void testRejectsPeriodIrrelevantSource() {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setEvaluatedRole(CompanyRole.PARTNER);
-        
+
         EvaluationPeriod period = new EvaluationPeriod();
         period.setPeriodStart(LocalDate.of(2025, 1, 1));
         period.setPeriodEnd(LocalDate.of(2025, 12, 31));
         draft.setEvaluationPeriod(period);
-        
+
         ApprovedSourceReference ref = new ApprovedSourceReference();
         ref.setPeriodStart(LocalDate.of(2026, 1, 1)); // outside period
         ref.setPeriodEnd(LocalDate.of(2026, 12, 31));
-        
+
         draft.setPinnedSourceReferences(List.of(ref));
-        
+
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> provider.buildContext(draft, "crit1"));
         assertTrue(ex.getMessage().contains("Source is not relevant"));
     }

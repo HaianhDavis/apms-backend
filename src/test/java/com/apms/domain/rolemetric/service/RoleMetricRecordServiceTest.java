@@ -45,7 +45,7 @@ class RoleMetricRecordServiceTest {
 
     @Mock
     private RoleMetricEvidenceRepository evidenceRepository;
-    
+
     @Mock
     private ProjectRepository projectRepository;
 
@@ -73,7 +73,7 @@ class RoleMetricRecordServiceTest {
         project.setId(1L);
         project.setTargetCompanyProfileId("comp-1");
         project.setTargetRelationshipType(RelationshipType.PARTNER_WITH);
-        
+
         userDetails = new UserDetailsImpl(100L, "test@test.com", "password", java.util.Collections.emptyList(), true);
         SecurityContextHolder.setContext(securityContext);
         lenient().when(securityContext.getAuthentication()).thenReturn(authentication);
@@ -90,7 +90,7 @@ class RoleMetricRecordServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(recordRepository.findByProjectIdAndCompanyIdAndRelationshipTypeAndMetricKeyAndPeriodKey(
                 any(), any(), any(), any(), any())).thenReturn(Optional.empty());
-        
+
         RoleMetricRecord saved = new RoleMetricRecord();
         saved.setId(10L);
         saved.setProjectId(1L);
@@ -120,10 +120,10 @@ class RoleMetricRecordServiceTest {
     void createDraft_FailsIfNotPartnerWith() {
         project.setTargetRelationshipType(RelationshipType.POTENTIAL_PARTNER_OF);
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        
+
         CreateRoleMetricRequest req = new CreateRoleMetricRequest();
         req.setMetricKey("revenue_generated");
-        
+
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> service.createDraft(1L, req));
         assertTrue(ex.getMessage().contains("PARTNER_WITH"));
     }
@@ -150,10 +150,10 @@ class RoleMetricRecordServiceTest {
         record.setProjectId(1L);
         record.setProjectId(1L);
         record.setProjectId(2L); // Different project
-        
+
         when(recordRepository.findById(10L)).thenReturn(Optional.of(record));
-        
-        ResourceNotFoundException ex = assertThrows(ResourceNotFoundException.class, 
+
+        ResourceNotFoundException ex = assertThrows(ResourceNotFoundException.class,
             () -> service.getWorkingDetail(1L, 10L));
         assertEquals("Metric not found in this project", ex.getMessage());
     }
@@ -163,7 +163,7 @@ class RoleMetricRecordServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         CreateRoleMetricRequest req = new CreateRoleMetricRequest();
         req.setMetricKey("unknown_key");
-        
+
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> service.createDraft(1L, req));
         assertTrue(ex.getMessage().contains("Unknown metric key"));
     }
@@ -186,7 +186,7 @@ class RoleMetricRecordServiceTest {
         UpdateRoleMetricRequest req = new UpdateRoleMetricRequest();
         req.setPeriodStart(LocalDate.of(2025, 2, 1)); // Attempted change
 
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, 
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class,
             () -> service.updateDraft(1L, 10L, req));
         assertTrue(ex.getMessage().contains("Cannot modify identity fields"));
     }
@@ -194,7 +194,7 @@ class RoleMetricRecordServiceTest {
     @Test
     void createDraft_RejectsBooleanValueForNumericMetric() {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        
+
         CreateRoleMetricRequest req = new CreateRoleMetricRequest();
         req.setMetricKey("revenue_generated"); // Numeric
         req.setPeriodStart(LocalDate.of(2025, 1, 1));
@@ -245,11 +245,11 @@ class RoleMetricRecordServiceTest {
         record.setProjectId(1L);
         record.setProjectId(1L);
         record.setStatus(com.apms.domain.rolemetric.enums.RoleMetricStatus.SUBMITTED); // Already submitted
-        
+
         when(recordRepository.findById(10L)).thenReturn(Optional.of(record));
-        
+
         service.submitForReview(1L, 10L);
-        
+
         // No audit log generated, simply returns because it's idempotent
         verify(auditLogService, never()).log(any(), any(), any(), any(), any());
     }

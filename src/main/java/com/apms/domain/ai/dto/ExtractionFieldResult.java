@@ -19,11 +19,11 @@ public class ExtractionFieldResult {
     private String evidenceText;
     private String sourceDocumentId;
     private Integer pageNumber;
-    
+
     @Builder.Default
     private ExtractionValidationStatus validationStatus = ExtractionValidationStatus.NOT_CHECKED;
     private String validationMessages;
-    
+
     @Builder.Default
     private ExtractionReviewStatus reviewStatus = ExtractionReviewStatus.PENDING;
     private Object reviewedValue;

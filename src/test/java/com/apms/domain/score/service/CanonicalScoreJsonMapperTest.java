@@ -26,13 +26,13 @@ class CanonicalScoreJsonMapperTest {
         assertThat(json).contains("\"b\":null");
 
         LinkedHashMap<String, BigDecimal> deserialized = mapper.deserializeMap(json);
-        
+
         assertThat(deserialized).hasSize(3);
-        
+
         // Preserve order
         List<String> keys = List.copyOf(deserialized.keySet());
         assertThat(keys).containsExactly("a", "b", "c");
-        
+
         // Preserve values
         assertThat(deserialized.get("a")).isEqualTo(new BigDecimal("10.50"));
         assertThat(deserialized.get("b")).isNull();
@@ -42,7 +42,7 @@ class CanonicalScoreJsonMapperTest {
     @Test
     void shouldHandleNullAndEmptyMaps() {
         assertThat(mapper.serializeMap(null)).isNull();
-        
+
         assertThat(mapper.deserializeMap(null)).isEmpty();
         assertThat(mapper.deserializeMap("")).isEmpty();
     }
@@ -61,7 +61,7 @@ class CanonicalScoreJsonMapperTest {
     @Test
     void shouldHandleNullAndEmptyLists() {
         assertThat(mapper.serializeList(null)).isNull();
-        
+
         assertThat(mapper.deserializeList(null)).isEmpty();
         assertThat(mapper.deserializeList("")).isEmpty();
     }

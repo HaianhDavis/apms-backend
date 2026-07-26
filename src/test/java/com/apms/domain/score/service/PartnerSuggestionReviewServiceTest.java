@@ -33,7 +33,7 @@ class PartnerSuggestionReviewServiceTest {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setAutomaticSuggestions(new java.util.LinkedHashMap<>());
         draft.setCriterionInputs(new java.util.LinkedHashMap<>());
-        
+
         AutomaticSuggestion suggestion = new AutomaticSuggestion();
         suggestion.setCriterionKey("businessValueContributionScore");
         suggestion.setSuggestionRationale("Original AI Rationale");
@@ -64,7 +64,7 @@ class PartnerSuggestionReviewServiceTest {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setAutomaticSuggestions(new java.util.LinkedHashMap<>());
         draft.setCriterionInputs(new java.util.LinkedHashMap<>());
-        
+
         AutomaticSuggestion suggestion = new AutomaticSuggestion();
         suggestion.setCriterionKey("businessValueContributionScore");
         suggestion.setSuggestionRationale("Original AI Rationale");
@@ -97,7 +97,7 @@ class PartnerSuggestionReviewServiceTest {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setAutomaticSuggestions(new java.util.LinkedHashMap<>());
         draft.setCriterionInputs(new java.util.LinkedHashMap<>());
-        
+
         AutomaticSuggestion suggestion = new AutomaticSuggestion();
         suggestion.setCriterionKey("businessValueContributionScore");
         suggestion.setSuggestionRationale("Original AI Rationale");
@@ -124,7 +124,7 @@ class PartnerSuggestionReviewServiceTest {
     void testThrowsIfEditedMissingRationale() {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setAutomaticSuggestions(new java.util.LinkedHashMap<>());
-        
+
         AutomaticSuggestion suggestion = new AutomaticSuggestion();
         suggestion.setCriterionKey("businessValueContributionScore");
         draft.getAutomaticSuggestions().put("businessValueContributionScore", suggestion);
@@ -135,7 +135,7 @@ class PartnerSuggestionReviewServiceTest {
         req.setStatus(CriterionSuggestionReviewStatus.EDITED);
         req.setEditedRationale("   "); // Blank
 
-        assertThrows(BusinessValidationException.class, () -> 
+        assertThrows(BusinessValidationException.class, () ->
             service.reviewSuggestion("draft-1", "businessValueContributionScore", req, 999L));
     }
 }

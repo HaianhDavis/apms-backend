@@ -440,26 +440,26 @@ public class ExtractionMergeService {
         for (AiExtractionCache ex : extractions) {
             if (ex.getExtractedData() == null) continue;
             ExtractedCompanyData data = ex.getExtractedData();
-            
+
             String exLegalName = (String) getFieldValue(ex, "legalName", data.getLegalName());
             if (!isUnknown(exLegalName)) mergedLegalName = bestDisplayValue(mergedLegalName, exLegalName);
-            
+
             String exTradeName = (String) getFieldValue(ex, "tradeName", data.getTradeName());
             if (!isUnknown(exTradeName)) mergedTradeName = bestDisplayValue(mergedTradeName, exTradeName);
-            
+
             String exTaxCode = (String) getFieldValue(ex, "taxCode", data.getTaxCode());
             if (!isUnknown(exTaxCode) && mergedTaxCode == null) mergedTaxCode = exTaxCode;
-            
+
             mergeStringList(mergedIndustries, getListFieldValue(ex, "industries", data.getIndustries()));
-            
+
             String exBusinessModel = (String) getFieldValue(ex, "businessModel", data.getBusinessModel());
             if (!isUnknown(exBusinessModel)) mergedBusinessModel = bestDisplayValue(mergedBusinessModel, exBusinessModel);
-            
+
             mergeStringList(mergedMarkets, getListFieldValue(ex, "markets", data.getMarkets()));
-            
+
             String exWebsite = (String) getFieldValue(ex, "website", data.getWebsite());
             if (!isUnknown(exWebsite)) { if (mergedWebsite.isEmpty()) mergedWebsite.add(exWebsite); }
-            
+
             mergeStringList(mergedStrengths, getListFieldValue(ex, "strengths", data.getStrengths()));
             mergeStringList(mergedWeaknesses, getListFieldValue(ex, "weaknesses", data.getWeaknesses()));
             mergeStringList(mergedOpportunities, getListFieldValue(ex, "opportunities", data.getOpportunities()));

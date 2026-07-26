@@ -32,7 +32,7 @@ public class NotificationController {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         PageResponse<NotificationResponse> response = PageResponse.of(
                 notificationService.getNotifications(unreadOnly, type, userId, pageable));
-        
+
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

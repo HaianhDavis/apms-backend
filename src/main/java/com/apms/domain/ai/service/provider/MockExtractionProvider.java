@@ -34,7 +34,7 @@ public class MockExtractionProvider implements ExtractionProvider {
                 .opportunities(List.of("Growing demand for digital transformation"))
                 .threats(List.of("Global tech giants entering local market"))
                 .build();
-                
+
         Map<String, ExtractionFieldResult> fieldResults = new HashMap<>();
         fieldResults.put("legalName", ExtractionFieldResult.builder().fieldName("legalName").value("CMC Corporation").evidenceText("Document states CMC Corporation").build());
         fieldResults.put("tradeName", ExtractionFieldResult.builder().fieldName("tradeName").value("CMC").build());

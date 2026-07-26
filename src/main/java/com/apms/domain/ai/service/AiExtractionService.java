@@ -214,7 +214,7 @@ public class AiExtractionService {
             fieldResult.setReviewedValue(request.getReviewedValue());
         } else {
             // ACCEPTED, REJECTED, NEEDS_REVIEW
-            fieldResult.setReviewedValue(request.getReviewedValue()); 
+            fieldResult.setReviewedValue(request.getReviewedValue());
         }
 
         fieldResult.setReviewComment(request.getComment());
@@ -223,28 +223,28 @@ public class AiExtractionService {
 
         cache.setLastModifiedBy(String.valueOf(userId));
         cache.setUpdatedAt(LocalDateTime.now());
-        
+
         return extractionCacheRepository.save(cache);
     }
 
     @Transactional
     public AiExtractionCache completeReview(String extractionId, Long userId) {
         AiExtractionCache cache = getExtractionById(extractionId);
-        
+
         if (cache.getFieldResults() != null) {
             // Validate that no critical fields are NEEDS_REVIEW or FAILED and unreviewed
             for (Map.Entry<String, com.apms.domain.ai.dto.ExtractionFieldResult> entry : cache.getFieldResults().entrySet()) {
                 com.apms.domain.ai.dto.ExtractionFieldResult result = entry.getValue();
                 if ("legalName".equals(entry.getKey()) || "taxCode".equals(entry.getKey())) {
                     if (result.getReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW ||
-                       (result.getReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING && 
+                       (result.getReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING &&
                         result.getValidationStatus() == com.apms.domain.ai.dto.ExtractionValidationStatus.FAIL)) {
                         throw new BusinessValidationException("Cannot complete review. Critical field '" + entry.getKey() + "' requires review.");
                     }
                 }
             }
         }
-        
+
         cache.setQualityStatus(com.apms.domain.ai.dto.ExtractionQualityStatus.REVIEWED);
         cache.setReviewedByUserId(userId);
         cache.setReviewedAt(LocalDateTime.now());

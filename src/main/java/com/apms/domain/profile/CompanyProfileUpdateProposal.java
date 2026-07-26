@@ -20,12 +20,12 @@ public class CompanyProfileUpdateProposal {
 
     @Id
     private String id;
-    
+
     private Long projectId;
     private Long taskId;
-    
+
     private String companyProfileId;
-    
+
     private Map<String, Object> proposedIdentity;
     private Map<String, Object> proposedBusiness;
     private Map<String, Object> proposedContact;
@@ -35,7 +35,7 @@ public class CompanyProfileUpdateProposal {
     private Map<String, Object> proposedInnovation;
     private Map<String, Object> proposedRisk;
     private Map<String, Object> proposedCompliance;
-    
+
     private List<String> sourceDocumentIds;
     private String extractionId;        // Legacy: single extraction ID
     private List<String> extractionIds; // Multi-extraction merge IDs
@@ -43,7 +43,7 @@ public class CompanyProfileUpdateProposal {
     private Boolean hasConflicts;
     private Integer conflictCount;
     private SubmissionStatus status;
-    
+
     private Long submittedBy;
     private Long reviewedBy;
     private String reviewComment;

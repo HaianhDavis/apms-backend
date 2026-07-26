@@ -115,7 +115,7 @@ public class ApprovedSourceReferenceFactoryTest {
         Map<String, Object> map1 = new HashMap<>();
         map1.put("b", 2);
         map1.put("a", 1); // Reverse insertion order
-        
+
         CompanyProfileVersion version1 = CompanyProfileVersion.builder()
                 .id("vId")
                 .companyId("comp1")
@@ -130,7 +130,7 @@ public class ApprovedSourceReferenceFactoryTest {
         Map<String, Object> map2 = new HashMap<>();
         map2.put("a", 1);
         map2.put("b", 2);
-        
+
         CompanyProfileVersion version2 = CompanyProfileVersion.builder()
                 .id("vId2")
                 .companyId("comp1")
@@ -151,7 +151,7 @@ public class ApprovedSourceReferenceFactoryTest {
         Map<String, Object> mapChanged = new HashMap<>();
         mapChanged.put("a", 1);
         mapChanged.put("b", 3); // Changed value
-        
+
         CompanyProfileVersion version3 = CompanyProfileVersion.builder()
                 .id("vId3")
                 .companyId("comp1")

@@ -119,7 +119,7 @@ public class ReportService {
         StringBuilder csv = new StringBuilder();
         // Header
         csv.append("Company Profile ID,Company ID,Company Name,Industries,Markets,Relationship Types,Partner Fit Score,Competition Score,Risk Score,Relationship Score,Last Score Date\n");
-        
+
         DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
         for (CompanyReportItemResponse item : data.getContent()) {

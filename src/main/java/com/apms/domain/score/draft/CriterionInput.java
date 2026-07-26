@@ -18,25 +18,25 @@ import java.util.List;
 public class CriterionInput {
 
     private String criterionKey;
-    
+
     private BigDecimal rawScore;
-    
+
     private CriterionInputMethod inputMethod;
-    
+
     private String explanation;
-    
+
     @Builder.Default
     private List<String> evidenceIds = new ArrayList<>();
-    
+
     private Long preparedByAccountId;
     private LocalDateTime preparedAt;
-    
+
     private Long reviewedByAccountId;
     private LocalDateTime reviewedAt;
-    
+
     @Builder.Default
     private Boolean managerConfirmed = false;
-    
+
     private BigDecimal previousValue;
     private String overrideReason;
 }

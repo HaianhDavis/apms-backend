@@ -26,7 +26,7 @@ public class CompanyProfileVersionController {
             @RequestParam(defaultValue = "10") int size) {
         Pageable pageable = PageRequest.of(page, size);
         Page<CompanyProfileVersionResponse> pageResult = versionService.getVersions(companyProfileId, pageable);
-        
+
         PageResponse<CompanyProfileVersionResponse> response = new PageResponse<>(
                 pageResult.getContent(),
                 pageResult.getNumber(),

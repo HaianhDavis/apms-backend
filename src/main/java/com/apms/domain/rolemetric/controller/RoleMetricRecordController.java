@@ -97,7 +97,7 @@ public class RoleMetricRecordController {
     }
 
     // Reads
-    
+
     @GetMapping
     @PreAuthorize("@projectSecurity.isStaffOrManager(#projectId)")
     public ResponseEntity<List<RoleMetricResponse>> listWorkingMetrics(
@@ -121,7 +121,7 @@ public class RoleMetricRecordController {
             @PathVariable Long metricId) {
         return ResponseEntity.ok(roleMetricRecordService.getWorkingDetail(projectId, metricId));
     }
-    
+
     @GetMapping("/{metricId}/current-approved")
     @PreAuthorize("@projectSecurity.isProjectReadable(#projectId)")
     public ResponseEntity<RoleMetricVersionResponse> getCurrentApproved(

@@ -31,7 +31,7 @@ class RoleScoringEngineTest {
 
     @Mock
     private RoleScoreRuleSetRepository ruleSetRepository;
-    
+
     @Mock
     private RoleCriterionRuleRepository criterionRuleRepository;
 
@@ -40,7 +40,7 @@ class RoleScoringEngineTest {
 
     private RoleScoreRuleSet partnerRuleSet;
     private List<RoleCriterionRule> partnerRules;
-    
+
     private RoleScoreRuleSet potentialPartnerRuleSet;
     private List<RoleCriterionRule> potentialPartnerRules;
 
@@ -49,12 +49,12 @@ class RoleScoringEngineTest {
     @BeforeEach
     void setUp() {
         partnerRuleSet = RoleScoreRuleSet.builder().id(1L).evaluatedRole(CompanyRole.PARTNER).ruleSetVersion("v1").build();
-        
+
         partnerRules = List.of(
             RoleCriterionRule.builder().criterionKey("businessValueContributionScore").weight(new BigDecimal("0.50")).direction(ScoreDirection.BENEFIT).required(true).build(),
             RoleCriterionRule.builder().criterionKey("strategicAlignmentScore").weight(new BigDecimal("0.50")).direction(ScoreDirection.BENEFIT).required(true).build()
         );
-        
+
         validPartnerRules = List.of(
             RoleCriterionRule.builder().criterionKey("businessValueContributionScore").weight(new BigDecimal("0.20")).direction(ScoreDirection.BENEFIT).required(true).build(),
             RoleCriterionRule.builder().criterionKey("strategicAlignmentScore").weight(new BigDecimal("0.20")).direction(ScoreDirection.BENEFIT).required(true).build(),
@@ -63,9 +63,9 @@ class RoleScoringEngineTest {
             RoleCriterionRule.builder().criterionKey("relationshipQualityScore").weight(new BigDecimal("0.15")).direction(ScoreDirection.BENEFIT).required(true).build(),
             RoleCriterionRule.builder().criterionKey("governanceAndRiskScore").weight(new BigDecimal("0.15")).direction(ScoreDirection.BENEFIT).required(true).build()
         );
-        
+
         potentialPartnerRuleSet = RoleScoreRuleSet.builder().id(2L).evaluatedRole(CompanyRole.POTENTIAL_PARTNER).ruleSetVersion("v1").build();
-        
+
         potentialPartnerRules = List.of(
             RoleCriterionRule.builder().criterionKey("strategicFitScore").weight(new BigDecimal("0.25")).direction(ScoreDirection.BENEFIT).required(true).build(),
             RoleCriterionRule.builder().criterionKey("capabilityComplementarityScore").weight(new BigDecimal("0.20")).direction(ScoreDirection.BENEFIT).required(true).build(),
@@ -80,7 +80,7 @@ class RoleScoringEngineTest {
     void shouldCalculateBenefitScoresCorrectly() {
         when(ruleSetRepository.findByEvaluatedRoleAndRuleSetVersion(CompanyRole.PARTNER, "v1")).thenReturn(Optional.of(partnerRuleSet));
         when(criterionRuleRepository.findByRuleSetIdAndActiveTrueOrderByDisplayOrderAsc(1L)).thenReturn(validPartnerRules);
-        
+
         LinkedHashMap<String, BigDecimal> scores = new LinkedHashMap<>();
         scores.put("businessValueContributionScore", new BigDecimal("80"));
         scores.put("strategicAlignmentScore", new BigDecimal("90"));
@@ -107,7 +107,7 @@ class RoleScoringEngineTest {
     void shouldCalculateAllBenefitScoresForPotentialPartner() {
         when(ruleSetRepository.findByEvaluatedRoleAndRuleSetVersion(CompanyRole.POTENTIAL_PARTNER, "v1")).thenReturn(Optional.of(potentialPartnerRuleSet));
         when(criterionRuleRepository.findByRuleSetIdAndActiveTrueOrderByDisplayOrderAsc(2L)).thenReturn(potentialPartnerRules);
-        
+
         LinkedHashMap<String, BigDecimal> scores = new LinkedHashMap<>();
         scores.put("strategicFitScore", new BigDecimal("100")); // Benefit: 100 * 0.25 = 25
         scores.put("capabilityComplementarityScore", new BigDecimal("100")); // Benefit: 100 * 0.20 = 20
@@ -128,12 +128,12 @@ class RoleScoringEngineTest {
         assertThat(res.getOverallScore().compareTo(new BigDecimal("100.00"))).isEqualTo(0);
         assertThat(res.getNormalizedCriterionScores().get("partnershipRiskScore").compareTo(new BigDecimal("100"))).isEqualTo(0);
     }
-    
+
     @Test
     void shouldNotInvertBenefitRiskScore() {
         when(ruleSetRepository.findByEvaluatedRoleAndRuleSetVersion(CompanyRole.POTENTIAL_PARTNER, "v1")).thenReturn(Optional.of(potentialPartnerRuleSet));
         when(criterionRuleRepository.findByRuleSetIdAndActiveTrueOrderByDisplayOrderAsc(2L)).thenReturn(potentialPartnerRules);
-        
+
         LinkedHashMap<String, BigDecimal> scores = new LinkedHashMap<>();
         scores.put("strategicFitScore", new BigDecimal("0")); // Benefit: 0 * 0.25 = 0
         scores.put("capabilityComplementarityScore", new BigDecimal("0")); // Benefit: 0 * 0.20 = 0
@@ -160,7 +160,7 @@ class RoleScoringEngineTest {
     void shouldReturnIncompleteIfRequiredMissing() {
         when(ruleSetRepository.findByEvaluatedRoleAndRuleSetVersion(CompanyRole.PARTNER, "v1")).thenReturn(Optional.of(partnerRuleSet));
         when(criterionRuleRepository.findByRuleSetIdAndActiveTrueOrderByDisplayOrderAsc(1L)).thenReturn(validPartnerRules);
-        
+
         LinkedHashMap<String, BigDecimal> scores = new LinkedHashMap<>();
         scores.put("businessValueContributionScore", new BigDecimal("80"));
         scores.put("strategicAlignmentScore", null);
@@ -176,20 +176,20 @@ class RoleScoringEngineTest {
         assertThat(res.getCompletenessStatus()).isEqualTo(EvaluationCompletenessStatus.INCOMPLETE);
         assertThat(res.getOverallScore()).isNull();
         assertThat(res.getMissingCriteria()).containsExactly(
-            "strategicAlignmentScore", 
-            "operationalPerformanceScore", 
-            "capabilityAndComplementarityScore", 
-            "relationshipQualityScore", 
+            "strategicAlignmentScore",
+            "operationalPerformanceScore",
+            "capabilityAndComplementarityScore",
+            "relationshipQualityScore",
             "governanceAndRiskScore"
         );
         assertThat(res.getNormalizedCriterionScores().get("strategicAlignmentScore")).isNull();
     }
-    
+
     @Test
     void shouldRejectUnknownCriterion() {
         when(ruleSetRepository.findByEvaluatedRoleAndRuleSetVersion(CompanyRole.PARTNER, "v1")).thenReturn(Optional.of(partnerRuleSet));
         when(criterionRuleRepository.findByRuleSetIdAndActiveTrueOrderByDisplayOrderAsc(1L)).thenReturn(validPartnerRules);
-        
+
         LinkedHashMap<String, BigDecimal> scores = new LinkedHashMap<>();
         scores.put("strategicAlignmentScore", new BigDecimal("80"));
         scores.put("operationalPerformanceScore", new BigDecimal("80"));
@@ -208,12 +208,12 @@ class RoleScoringEngineTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("Unknown criterion");
     }
-    
+
     @Test
     void shouldRejectScoreBelowZero() {
         when(ruleSetRepository.findByEvaluatedRoleAndRuleSetVersion(CompanyRole.PARTNER, "v1")).thenReturn(Optional.of(partnerRuleSet));
         when(criterionRuleRepository.findByRuleSetIdAndActiveTrueOrderByDisplayOrderAsc(1L)).thenReturn(validPartnerRules);
-        
+
         LinkedHashMap<String, BigDecimal> scores = new LinkedHashMap<>();
         scores.put("businessValueContributionScore", new BigDecimal("-1"));
         scores.put("strategicAlignmentScore", new BigDecimal("80"));
@@ -232,7 +232,7 @@ class RoleScoringEngineTest {
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("between 0 and 100");
     }
-    
+
     @Test
     void shouldRejectMissingRule() {
         when(ruleSetRepository.findByEvaluatedRoleAndRuleSetVersion(CompanyRole.PARTNER, "v1")).thenReturn(Optional.of(partnerRuleSet));

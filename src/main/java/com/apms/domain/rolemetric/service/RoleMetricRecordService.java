@@ -51,7 +51,7 @@ public class RoleMetricRecordService {
     public RoleMetricResponse createDraft(Long projectId, CreateRoleMetricRequest request) {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
-        
+
         if (project.getTargetRelationshipType() == null || !project.getTargetRelationshipType().name().equals("PARTNER_WITH")) {
             throw new BusinessValidationException("Project relationship type must be PARTNER_WITH");
         }
@@ -65,9 +65,9 @@ public class RoleMetricRecordService {
         }
 
         PartnerMetricDefinition def = PartnerMetricDefinition.fromKey(request.getMetricKey());
-        
+
         String periodKey = generateAndValidatePeriodKey(def, request);
-        
+
         // Exact duplicate protection via query (will also be protected by UNIQUE constraint)
         if (recordRepository.findByProjectIdAndCompanyIdAndRelationshipTypeAndMetricKeyAndPeriodKey(
                 project.getId(), project.getTargetCompanyProfileId(), "PARTNER_WITH", request.getMetricKey(), periodKey).isPresent()) {
@@ -82,7 +82,7 @@ public class RoleMetricRecordService {
                 throw new BusinessValidationException("Metric overlaps with existing period metric.");
             }
         }
-        
+
         validateTypedValues(def, request.getTargetNumericValue(), request.getActualNumericValue(), request.getTargetBooleanValue(), request.getActualBooleanValue());
 
         RoleMetricRecord record = new RoleMetricRecord();
@@ -117,7 +117,7 @@ public class RoleMetricRecordService {
     @Transactional(isolation = Isolation.SERIALIZABLE)
     public RoleMetricResponse updateDraft(Long projectId, Long metricId, UpdateRoleMetricRequest request) {
         RoleMetricRecord record = getForUpdate(projectId, metricId);
-        
+
         PartnerMetricDefinition def = PartnerMetricDefinition.fromKey(record.getMetricKey());
 
         if (record.getCurrentApprovedVersionId() == null) {
@@ -126,9 +126,9 @@ public class RoleMetricRecordService {
             mockReq.setMeasurementDate(request.getMeasurementDate());
             mockReq.setPeriodStart(request.getPeriodStart());
             mockReq.setPeriodEnd(request.getPeriodEnd());
-            
+
             String newPeriodKey = generateAndValidatePeriodKey(def, mockReq);
-            
+
             if (!newPeriodKey.equals(record.getPeriodKey())) {
                 if (recordRepository.findByProjectIdAndCompanyIdAndRelationshipTypeAndMetricKeyAndPeriodKey(
                         record.getProjectId(), record.getCompanyId(), record.getRelationshipType(), record.getMetricKey(), newPeriodKey).isPresent()) {
@@ -144,7 +144,7 @@ public class RoleMetricRecordService {
                     throw new BusinessValidationException("Metric overlaps with existing period metric.");
                 }
             }
-            
+
             record.setMeasurementDate(request.getMeasurementDate());
             record.setPeriodStart(request.getPeriodStart());
             record.setPeriodEnd(request.getPeriodEnd());
@@ -153,12 +153,12 @@ public class RoleMetricRecordService {
             boolean dateChanged = request.getMeasurementDate() != null && !request.getMeasurementDate().equals(record.getMeasurementDate());
             boolean startChanged = request.getPeriodStart() != null && !request.getPeriodStart().equals(record.getPeriodStart());
             boolean endChanged = request.getPeriodEnd() != null && !request.getPeriodEnd().equals(record.getPeriodEnd());
-            
+
             if (dateChanged || startChanged || endChanged) {
                 throw new BusinessValidationException("Cannot modify identity fields (metricKey, period, measurementDate, unitCode) after initial approval.");
             }
         }
-        
+
         validateTypedValues(def, request.getTargetNumericValue(), request.getActualNumericValue(), request.getTargetBooleanValue(), request.getActualBooleanValue());
 
         record.setTargetNumericValue(request.getTargetNumericValue());
@@ -180,9 +180,9 @@ public class RoleMetricRecordService {
     @Transactional
     public RoleMetricEvidenceResponse attachEvidence(Long projectId, Long metricId, RoleMetricEvidenceRequest request) {
         RoleMetricRecord record = getForUpdate(projectId, metricId);
-        
+
         validateEvidenceSource(record, request);
-        
+
         RoleMetricEvidence ev = new RoleMetricEvidence();
         ev.setRoleMetricRecordId(record.getId());
         ev.setCreatedByAccountId(getCurrentAccountId());
@@ -197,22 +197,22 @@ public class RoleMetricRecordService {
         ev.setSourceExcerpt(request.getSourceExcerpt());
         ev.setExternalReference(request.getExternalReference());
         ev.setEvidenceNote(request.getEvidenceNote());
-        
+
         RoleMetricEvidence saved = evidenceRepository.save(ev);
         auditLogService.log(getCurrentAccountId(), AuditAction.ROLE_METRIC_EVIDENCE_ATTACHED, "RoleMetricRecord", String.valueOf(record.getId()), "Evidence attached");
         return mapToEvidenceResponse(saved);
     }
-    
+
     @Transactional
     public void deleteEvidence(Long projectId, Long metricId, Long evidenceId) {
         RoleMetricRecord record = getForUpdate(projectId, metricId);
         RoleMetricEvidence ev = evidenceRepository.findById(evidenceId)
                 .orElseThrow(() -> new ResourceNotFoundException("Evidence not found"));
-                
+
         if (!ev.getRoleMetricRecordId().equals(record.getId())) {
             throw new BusinessValidationException("Evidence does not belong to this metric");
         }
-        
+
         evidenceRepository.delete(ev);
         auditLogService.log(getCurrentAccountId(), AuditAction.ROLE_METRIC_EVIDENCE_DELETED, "RoleMetricRecord", String.valueOf(record.getId()), "Evidence deleted");
     }
@@ -220,21 +220,21 @@ public class RoleMetricRecordService {
     @Transactional
     public RoleMetricResponse submitForReview(Long projectId, Long metricId) {
         RoleMetricRecord record = getRecordAndVerifyProject(projectId, metricId);
-                
+
         if (record.getStatus() == RoleMetricStatus.SUBMITTED || record.getStatus() == RoleMetricStatus.APPROVED) {
             return mapToResponse(record);
         }
-        
+
         if (record.getStatus() != RoleMetricStatus.DRAFT && record.getStatus() != RoleMetricStatus.CHANGES_REQUESTED) {
             throw new BusinessValidationException("Only DRAFT or CHANGES_REQUESTED metrics can be submitted.");
         }
-        
+
         validateCompleteness(record);
 
         record.setStatus(RoleMetricStatus.SUBMITTED);
         record.setSubmittedByAccountId(getCurrentAccountId());
         record.setSubmittedAt(LocalDateTime.now());
-        
+
         RoleMetricRecord saved = recordRepository.save(record);
         auditLogService.log(getCurrentAccountId(), AuditAction.ROLE_METRIC_SUBMITTED, "RoleMetricRecord", String.valueOf(saved.getId()), "Submitted");
         return mapToResponse(saved);
@@ -243,7 +243,7 @@ public class RoleMetricRecordService {
     @Transactional
     public RoleMetricResponse reviewMetric(Long projectId, Long metricId, ReviewRoleMetricRequest request) {
         RoleMetricRecord record = getRecordAndVerifyProject(projectId, metricId);
-                
+
         if (record.getStatus() == RoleMetricStatus.APPROVED && request.getDecision() == RoleMetricReviewDecision.APPROVE) {
             return mapToResponse(record); // Idempotent
         }
@@ -251,7 +251,7 @@ public class RoleMetricRecordService {
         if (record.getStatus() != RoleMetricStatus.SUBMITTED) {
             throw new BusinessValidationException("Only SUBMITTED metrics can be reviewed.");
         }
-        
+
         if (request.getDecision() != RoleMetricReviewDecision.APPROVE && (request.getComment() == null || request.getComment().isBlank())) {
             throw new BusinessValidationException("Comment required for rejection or changes requested.");
         }
@@ -263,9 +263,9 @@ public class RoleMetricRecordService {
         if (request.getDecision() == RoleMetricReviewDecision.APPROVE) {
             // Revalidate completeness and hashes
             validateCompleteness(record);
-            
+
             record.setStatus(RoleMetricStatus.APPROVED);
-            
+
             RoleMetricRecordVersion version = new RoleMetricRecordVersion();
             version.setRoleMetricRecordId(record.getId());
             version.setVersionNumber(record.getWorkingRevisionNumber());
@@ -295,9 +295,9 @@ public class RoleMetricRecordService {
             version.setReviewComment(record.getReviewComment());
             version.setApprovedAt(LocalDateTime.now());
             version.setApprovedByAccountId(getCurrentAccountId());
-            
+
             RoleMetricRecordVersion savedVersion = versionRepository.save(version);
-            
+
             List<RoleMetricEvidence> evidences = evidenceRepository.findByRoleMetricRecordId(record.getId());
             for (RoleMetricEvidence ev : evidences) {
                 RoleMetricEvidenceVersion evv = new RoleMetricEvidenceVersion();
@@ -316,12 +316,12 @@ public class RoleMetricRecordService {
                 evv.setSnapshotAt(LocalDateTime.now());
                 evidenceVersionRepository.save(evv);
             }
-            
+
             record.setCurrentApprovedVersionId(savedVersion.getId());
             record.setCurrentApprovedVersionNumber(savedVersion.getVersionNumber());
-            
+
             auditLogService.log(getCurrentAccountId(), AuditAction.ROLE_METRIC_APPROVED, "RoleMetricRecord", String.valueOf(record.getId()), "Approved v" + savedVersion.getVersionNumber());
-            
+
         } else if (request.getDecision() == RoleMetricReviewDecision.REQUEST_CHANGES) {
             record.setStatus(RoleMetricStatus.CHANGES_REQUESTED);
             auditLogService.log(getCurrentAccountId(), AuditAction.ROLE_METRIC_CHANGES_REQUESTED, "RoleMetricRecord", String.valueOf(record.getId()), "Changes requested");
@@ -329,44 +329,44 @@ public class RoleMetricRecordService {
             record.setStatus(RoleMetricStatus.REJECTED);
             auditLogService.log(getCurrentAccountId(), AuditAction.ROLE_METRIC_REJECTED, "RoleMetricRecord", String.valueOf(record.getId()), "Rejected");
         }
-        
+
         return mapToResponse(recordRepository.save(record));
     }
 
     @Transactional
     public RoleMetricResponse reviseMetric(Long projectId, Long metricId) {
         RoleMetricRecord record = getRecordAndVerifyProject(projectId, metricId);
-                
+
         if (record.getStatus() != RoleMetricStatus.APPROVED) {
             throw new BusinessValidationException("Only APPROVED metrics can be revised.");
         }
-        
+
         record.setWorkingRevisionNumber(record.getWorkingRevisionNumber() + 1);
         record.setStatus(RoleMetricStatus.DRAFT);
         RoleMetricRecord saved = recordRepository.save(record);
-        
+
         auditLogService.log(getCurrentAccountId(), AuditAction.ROLE_METRIC_REVISION_CREATED, "RoleMetricRecord", String.valueOf(record.getId()), "Revision created");
-        
+
         return mapToResponse(saved);
     }
 
     @Transactional
     public RoleMetricResponse reopenMetric(Long projectId, Long metricId) {
         RoleMetricRecord record = getRecordAndVerifyProject(projectId, metricId);
-                
+
         if (record.getStatus() != RoleMetricStatus.CHANGES_REQUESTED && record.getStatus() != RoleMetricStatus.REJECTED) {
             throw new BusinessValidationException("Only CHANGES_REQUESTED or REJECTED metrics can be reopened.");
         }
-        
+
         if (record.getStatus() == RoleMetricStatus.REJECTED) {
             record.setWorkingRevisionNumber(record.getWorkingRevisionNumber() + 1);
         }
-        
+
         record.setStatus(RoleMetricStatus.DRAFT);
         RoleMetricRecord saved = recordRepository.save(record);
-        
+
         auditLogService.log(getCurrentAccountId(), AuditAction.ROLE_METRIC_REOPENED, "RoleMetricRecord", String.valueOf(record.getId()), "Reopened");
-        
+
         return mapToResponse(saved);
     }
 
@@ -386,7 +386,7 @@ public class RoleMetricRecordService {
         }
         return record;
     }
-    
+
     private void validateEvidenceSource(RoleMetricRecord record, RoleMetricEvidenceRequest request) {
         if (request.getSourceType() == RoleMetricEvidenceSourceType.CONTRACT_CLAUSE) {
             if (request.getSourceContractVersionId() == null || request.getSourceClauseVersionId() == null) {
@@ -420,18 +420,18 @@ public class RoleMetricRecordService {
             }
         }
     }
-    
+
     private void validateCompleteness(RoleMetricRecord record) {
         if (record.getTargetNumericValue() == null && record.getTargetBooleanValue() == null &&
             record.getActualNumericValue() == null && record.getActualBooleanValue() == null) {
             throw new BusinessValidationException("At least one target or actual value must be provided.");
         }
-        
+
         List<RoleMetricEvidence> evidences = evidenceRepository.findByRoleMetricRecordId(record.getId());
-        
+
         boolean hasTarget = record.getTargetNumericValue() != null || record.getTargetBooleanValue() != null;
         boolean hasActual = record.getActualNumericValue() != null || record.getActualBooleanValue() != null;
-        
+
         if (hasTarget) {
             boolean hasTargetEv = evidences.stream().anyMatch(e -> e.getValueScope() == RoleMetricEvidenceValueScope.TARGET || e.getValueScope() == RoleMetricEvidenceValueScope.BOTH);
             if (!hasTargetEv) throw new BusinessValidationException("Target requires evidence.");
@@ -440,7 +440,7 @@ public class RoleMetricRecordService {
             boolean hasActualEv = evidences.stream().anyMatch(e -> e.getValueScope() == RoleMetricEvidenceValueScope.ACTUAL || e.getValueScope() == RoleMetricEvidenceValueScope.BOTH);
             if (!hasActualEv) throw new BusinessValidationException("Actual requires evidence.");
         }
-        
+
         // Revalidate hash
         for (RoleMetricEvidence ev : evidences) {
             if (ev.getSourceType() == RoleMetricEvidenceSourceType.RAW_DOCUMENT) {
@@ -516,7 +516,7 @@ public class RoleMetricRecordService {
         resp.setEvidences(evidenceRepository.findByRoleMetricRecordId(r.getId()).stream().map(this::mapToEvidenceResponse).collect(Collectors.toList()));
         return resp;
     }
-    
+
     private RoleMetricEvidenceResponse mapToEvidenceResponse(RoleMetricEvidence ev) {
         RoleMetricEvidenceResponse resp = new RoleMetricEvidenceResponse();
         resp.setId(ev.getId());

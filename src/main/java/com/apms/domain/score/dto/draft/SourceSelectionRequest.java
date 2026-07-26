@@ -13,14 +13,14 @@ import jakarta.validation.constraints.NotNull;
 @NoArgsConstructor
 @AllArgsConstructor
 public class SourceSelectionRequest {
-    
+
     @NotNull(message = "sourceType is required")
     private ApprovedSourceType sourceType;
-    
+
     private Long sqlSourceId;
-    
+
     private String mongoSourceId;
-    
+
     @NotNull(message = "criterionKey is required")
     private String criterionKey;
 }

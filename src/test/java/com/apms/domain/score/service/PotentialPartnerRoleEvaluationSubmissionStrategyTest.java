@@ -54,7 +54,7 @@ public class PotentialPartnerRoleEvaluationSubmissionStrategyTest {
         task.setAssignedToAccount(account);
 
         submission = new ProjectTaskSubmission();
-        
+
         draft = new RoleEvaluationDraft();
         draft.setId("draft-1");
         draft.setEvaluatedRole(CompanyRole.POTENTIAL_PARTNER);

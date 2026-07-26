@@ -44,7 +44,7 @@ public class ProjectTaskController {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         PageResponse<ProjectTaskResponse> response = PageResponse.of(
                 projectTaskService.getTasks(projectId, status, assignedToUserId, pageable));
-        
+
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

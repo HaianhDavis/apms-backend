@@ -50,7 +50,7 @@ class CanonicalRoleCriteriaTest {
 
         assertThat(CanonicalRoleCriteria.getDirectionForRoleAndCriterion(CompanyRole.POTENTIAL_PARTNER, "partnershipRiskScore"))
                 .isEqualTo(ScoreDirection.BENEFIT);
-        
+
         assertThat(CanonicalRoleCriteria.getDirectionForRoleAndCriterion(CompanyRole.POTENTIAL_PARTNER, "strategicFitScore"))
                 .isEqualTo(ScoreDirection.BENEFIT);
     }
@@ -86,8 +86,8 @@ class CanonicalRoleCriteriaTest {
         );
 
         assertThat(CanonicalRoleCriteria.getDirectionForRoleAndCriterion(CompanyRole.CUSTOMER, "paymentChurnRiskScore"))
-                .isEqualTo(ScoreDirection.COST);
-        
+                .isEqualTo(ScoreDirection.BENEFIT);
+
         assertThat(CanonicalRoleCriteria.getDirectionForRoleAndCriterion(CompanyRole.CUSTOMER, "revenueProfitabilityScore"))
                 .isEqualTo(ScoreDirection.BENEFIT);
     }
@@ -108,7 +108,7 @@ class CanonicalRoleCriteriaTest {
             assertThat(CanonicalRoleCriteria.getDirectionForRoleAndCriterion(CompanyRole.SUPPLIER, key))
                     .isEqualTo(ScoreDirection.BENEFIT);
         }
-        
+
         // Explicitly verify supplyRiskComplianceScore is BENEFIT
         assertThat(CanonicalRoleCriteria.getDirectionForRoleAndCriterion(CompanyRole.SUPPLIER, "supplyRiskComplianceScore"))
                 .isEqualTo(ScoreDirection.BENEFIT);

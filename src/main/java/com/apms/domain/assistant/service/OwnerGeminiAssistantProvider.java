@@ -125,8 +125,8 @@ public class OwnerGeminiAssistantProvider implements AssistantProvider {
         answer.append("Based on the approved APMS context:\n\n");
 
         if (context.getCompanyProfile() != null) {
-            String name = context.getCompanyProfile().getIdentity() != null 
-                ? context.getCompanyProfile().getIdentity().getLegalName() 
+            String name = context.getCompanyProfile().getIdentity() != null
+                ? context.getCompanyProfile().getIdentity().getLegalName()
                 : "Unknown";
             answer.append("Focusing on specific company: **").append(name).append("**.\n");
         } else {
