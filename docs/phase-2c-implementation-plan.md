@@ -1,5 +1,7 @@
 # Phase 2C Implementation Plan
 
+**Status**: COMPLETED
+
 ## Purpose
 
 This plan divides the work identified in the Phase 2C.0 data-model audit into small, safe implementation phases. Each phase is designed to be independently deployable and backward-compatible.
@@ -7,6 +9,8 @@ This plan divides the work identified in the Phase 2C.0 data-model audit into sm
 ---
 
 ## Phase 2C.1 — Correct CompanyProfile Semantic Boundaries
+
+**Status**: COMPLETED
 
 ### Goal
 Clearly document and label the semantic boundary between factual company data and AI-generated insights within CompanyProfile, without destructive migration.
@@ -41,6 +45,8 @@ No behavioral changes. Existing `insights` SWOT field remains in CompanyProfile.
 ---
 
 ## Phase 2C.2 — Establish Relationship Source of Truth
+
+**Status**: COMPLETED
 
 ### Goal
 Establish distinct relationship source-of-truth semantics:
@@ -111,7 +117,7 @@ No contract scores or KPI actuals in this phase.
 
 ## Phase 2C.4 — RoleMetricRecord Foundation
 
-### Phase 2C.4: PLANNING — RoleMetricRecord Foundation
+**Status**: COMPLETED
 
 ### Goal
 Design the factual metric-record layer required for later PARTNER evaluation. `RoleMetricRecord` must store approved business measurements (targets, actuals, measurement periods) as factual input without calculating score properties.
@@ -386,8 +392,8 @@ For detailed breakdown, refer to the active [Implementation Plan](file:///Users/
 
 ### Phase 2C.5: Evaluation Approval Data Isolation (Mongo outbox)
 
-**Status:** PLANNING — CONDITIONAL APPROVAL PENDING FINAL PLAN VERIFICATION
-- Replaced by Phase 2C.5A and 2C.5B breakdown.
+**Status:** COMPLETED (Superseded by 2C.5A–D)
+- Replaced by Phase 2C.5A, 2C.5B, 2C.5C, and 2C.5D breakdowns.
 
 ### Phase 2C.5A: Canonical Keys, Evaluation Period, Approved Sources and Immutable Version Foundation
 
