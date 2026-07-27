@@ -105,10 +105,13 @@ public class CanonicalScoreSnapshotService {
         snapshot.setOverallScore(result.getOverallScore());
         snapshot.setCompletenessStatus(result.getCompletenessStatus());
         snapshot.setMissingCriteriaJson(jsonMapper.serializeList(result.getMissingCriteria()));
+        snapshot.setEvidenceRefsJson(jsonMapper.serializeEvidenceMap(request.getCriterionEvidenceRefs()));
         snapshot.setCalculatedByAccount(calculatedBy);
         snapshot.setCalculatedAt(Instant.now());
         snapshot.setSourceEvaluationDraftId(request.getSourceEvaluationDraftId());
         snapshot.setApprovalIdempotencyKey(request.getApprovalIdempotencyKey());
+        snapshot.setApprovedRoleEvaluationVersionId(request.getApprovedRoleEvaluationVersionId());
+        snapshot.setApprovedRoleEvaluationVersionNumber(request.getApprovedRoleEvaluationVersionNumber());
 
         // Legacy structural fields (companyId, project, candidateId, ruleVersion) are left null.
         // Legacy score fields (partnerFitScore, competitionLevel, etc.) are left null.

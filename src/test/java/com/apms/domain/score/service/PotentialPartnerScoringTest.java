@@ -422,10 +422,10 @@ class PotentialPartnerScoringTest {
         }
 
         @Test
-        @DisplayName("CUSTOMER paymentChurnRiskScore remains COST")
+        @DisplayName("CUSTOMER paymentChurnRiskScore remains BENEFIT")
         void customerRiskShouldRemainCost() {
             assertThat(CanonicalRoleCriteria.getDirectionForRoleAndCriterion(CompanyRole.CUSTOMER, "paymentChurnRiskScore"))
-                    .isEqualTo(ScoreDirection.COST);
+                    .isEqualTo(ScoreDirection.BENEFIT);
         }
 
         @Test

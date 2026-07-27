@@ -33,4 +33,8 @@ public class RoleEvaluationCalculationRequest {
     // --- Phase 2B Cross-DB Approval Idempotency ---
     private String sourceEvaluationDraftId;
     private String approvalIdempotencyKey;
+
+    // --- Phase 2C.9A Cross-Role Traceability Hardening ---
+    private String approvedRoleEvaluationVersionId;
+    private Integer approvedRoleEvaluationVersionNumber;
 }

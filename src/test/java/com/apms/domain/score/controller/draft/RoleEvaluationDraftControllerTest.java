@@ -387,11 +387,15 @@ class RoleEvaluationDraftControllerTest {
         req.setDecision(RoleEvaluationReviewDecision.APPROVE);
         req.setComment("Approved");
 
+        com.apms.domain.score.draft.RoleEvaluationDraft updatedDraft = new com.apms.domain.score.draft.RoleEvaluationDraft();
+        updatedDraft.setStatus(com.apms.domain.score.enums.RoleEvaluationStatus.APPROVAL_PROCESSING);
+        when(draftService.getRawDraft("eval-1")).thenReturn(updatedDraft);
+
         mockMvc.perform(post("/api/v1/role-evaluations/eval-1/review")
                 .contentType(MediaType.APPLICATION_JSON)
                 .header("Idempotency-Key", "idem-abc-123")
                 .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isAccepted()); // Because async roles return 202
 
         verify(approvalService).reviewDraft(eq("eval-1"),
                 any(ReviewRoleEvaluationRequest.class), eq(456L), eq("idem-abc-123"));
@@ -406,6 +410,10 @@ class RoleEvaluationDraftControllerTest {
         ReviewRoleEvaluationRequest req = new ReviewRoleEvaluationRequest();
         req.setDecision(RoleEvaluationReviewDecision.REQUEST_REVISION);
         req.setComment("Needs more evidence");
+
+        com.apms.domain.score.draft.RoleEvaluationDraft updatedDraft = new com.apms.domain.score.draft.RoleEvaluationDraft();
+        updatedDraft.setStatus(com.apms.domain.score.enums.RoleEvaluationStatus.REVISION_REQUIRED);
+        when(draftService.getRawDraft("eval-1")).thenReturn(updatedDraft);
 
         mockMvc.perform(post("/api/v1/role-evaluations/eval-1/review")
                 .contentType(MediaType.APPLICATION_JSON)

@@ -140,4 +140,11 @@ public class ScoreSnapshot {
 
     @Column(name = "approval_idempotency_key")
     private String approvalIdempotencyKey;
+
+    // --- Phase 2C.9A Cross-Role Traceability Hardening ---
+    @Column(name = "approved_role_evaluation_version_id")
+    private String approvedRoleEvaluationVersionId;
+
+    @Column(name = "approved_role_evaluation_version_number")
+    private Integer approvedRoleEvaluationVersionNumber;
 }

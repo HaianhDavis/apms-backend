@@ -66,7 +66,7 @@ class PartnerSuggestionGenerationServiceIntegrationTest extends ApmsIntegrationT
 
         // Mock provider responses
         com.apms.domain.score.dto.draft.PartnerCriterionContext context = com.apms.domain.score.dto.draft.PartnerCriterionContext.builder()
-            .pinnedSources(java.util.List.of(java.util.Map.of("referenceId", "ref-1")))
+            .pinnedSources(java.util.List.of(java.util.Map.of("referenceId", "ref-1", "sourceType", "PARTNER_CONTRACT_CLAUSE_VERSION")))
             .build();
         when(contextProvider.buildContext(any(), anyString()))
             .thenReturn(context);
@@ -123,7 +123,7 @@ class PartnerSuggestionGenerationServiceIntegrationTest extends ApmsIntegrationT
 
         // Mock provider responses
         com.apms.domain.score.dto.draft.PartnerCriterionContext context = com.apms.domain.score.dto.draft.PartnerCriterionContext.builder()
-            .pinnedSources(java.util.List.of(java.util.Map.of("referenceId", "ref-1")))
+            .pinnedSources(java.util.List.of(java.util.Map.of("referenceId", "ref-1", "sourceType", "PARTNER_CONTRACT_CLAUSE_VERSION")))
             .build();
         when(contextProvider.buildContext(any(), anyString()))
             .thenReturn(context);

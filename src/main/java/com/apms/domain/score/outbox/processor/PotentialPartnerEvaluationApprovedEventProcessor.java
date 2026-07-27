@@ -67,10 +67,19 @@ public class PotentialPartnerEvaluationApprovedEventProcessor implements RoleEva
         calcRequest.setCalculatedByAccountId(event.getPayload().getActorAccountId());
         calcRequest.setSourceEvaluationDraftId(version.getEvaluationId());
         calcRequest.setApprovalIdempotencyKey(event.getId());
+        calcRequest.setApprovedRoleEvaluationVersionId(version.getId());
+        calcRequest.setApprovedRoleEvaluationVersionNumber(version.getVersionNumber());
 
         Map<String, BigDecimal> scores = new HashMap<>();
-        version.getCriteria().forEach((k, snap) -> scores.put(k, snap.getRawScore()));
+        Map<String, java.util.List<String>> evidenceMap = new HashMap<>();
+        version.getCriteria().forEach((k, snap) -> {
+            scores.put(k, snap.getRawScore());
+            if (snap.getEvidenceReferenceIds() != null && !snap.getEvidenceReferenceIds().isEmpty()) {
+                evidenceMap.put(k, new java.util.ArrayList<>(snap.getEvidenceReferenceIds()));
+            }
+        });
         calcRequest.setCriterionScores(new LinkedHashMap<>(scores));
+        calcRequest.setCriterionEvidenceRefs(evidenceMap);
 
         RoleEvaluationCalculationResult result = scoringEngine.calculate(calcRequest);
         if (result.getCompletenessStatus() != EvaluationCompletenessStatus.COMPLETE) {
