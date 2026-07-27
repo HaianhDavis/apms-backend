@@ -13,6 +13,8 @@ import com.apms.domain.ai.util.ExtractionMergeUtil;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.candidate.CompanyCandidate;
 import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
+import com.apms.domain.company.model.FinancialInfo;
+import com.apms.domain.company.model.InnovationInfo;
 import com.apms.domain.document.ImportJob;
 import com.apms.domain.document.repository.sql.ImportJobRepository;
 import com.apms.domain.profile.CompanyProfile;
@@ -93,6 +95,9 @@ public class ExtractionMergeService {
                 .companySize(merged.companySize)
                 .contact(merged.contact)
                 .insights(merged.insights)
+                .keyPeople(merged.keyPeople)
+                .financial(merged.financial)
+                .innovation(merged.innovation)
                 .lifecycle(CompanyCandidate.Lifecycle.builder().status(CandidateStatus.DRAFT).build())
                 .extractionSource(CompanyCandidate.ExtractionSource.builder()
                         .extractionMethod("MULTI_DOCUMENT_MERGE").build())
@@ -114,8 +119,12 @@ public class ExtractionMergeService {
                 .candidateId(candidate.getId())
                 .identity(sectionToMap(merged.identity))
                 .business(sectionToMap(merged.business))
+                .companySize(sectionToMap(merged.companySize))
                 .contact(sectionToMap(merged.contact))
                 .insights(sectionToMap(merged.insights))
+                .keyPeople(merged.keyPeople)
+                .financial(sectionToMap(merged.financial))
+                .innovation(sectionToMap(merged.innovation))
                 .fieldEvidence(fieldEvidence)
                 .hasConflicts(hasConflicts)
                 .conflictCount((int) conflictCount)
@@ -245,6 +254,9 @@ public class ExtractionMergeService {
     }
 
     private Object getFieldValue(AiExtractionCache ex, String fieldName, Object fallbackValue) {
+        if (ex.getLastModifiedBy() != null && !ex.getLastModifiedBy().isBlank()) {
+            return fallbackValue;
+        }
         if (ex.getFieldResults() != null && ex.getFieldResults().containsKey(fieldName)) {
             ExtractionFieldResult fr = ex.getFieldResults().get(fieldName);
             if (fr.getReviewStatus() == ExtractionReviewStatus.REJECTED) return null;
@@ -271,7 +283,7 @@ public class ExtractionMergeService {
     // ─────────────────────────────────────────────
 
     private MergedCandidateData mergeCandidateFields(List<AiExtractionCache> extractions,
-            List<String> extractionIds, List<String> sourceDocIds, List<String> importJobIds, List<FieldEvidence> evidence) {
+                                                     List<String> extractionIds, List<String> sourceDocIds, List<String> importJobIds, List<FieldEvidence> evidence) {
 
         String mergedLegalName = null;
         String mergedTradeName = null;
@@ -281,9 +293,14 @@ public class ExtractionMergeService {
         String mergedBusinessModel = null;
         List<String> mergedMarkets = new ArrayList<>();
         List<String> mergedTargetCustomers = new ArrayList<>();
+        List<CompanyCandidate.Product> mergedProducts = new ArrayList<>();
 
         String mergedWebsite = null;
         List<String> mergedEmails = new ArrayList<>();
+        List<String> mergedPhones = new ArrayList<>();
+        String mergedAddress = null;
+        String mergedCompanySize = null;
+        List<String> mergedKeyPeople = new ArrayList<>();
 
         List<String> mergedStrengths = new ArrayList<>();
         List<String> mergedWeaknesses = new ArrayList<>();
@@ -291,6 +308,8 @@ public class ExtractionMergeService {
         List<String> mergedThreats = new ArrayList<>();
 
         String mergedEmployeeTier = null;
+        FinancialInfo mergedFinancial = null;
+        InnovationInfo mergedInnovation = null;
 
         for (AiExtractionCache ex : extractions) {
             if (ex.getExtractedData() == null) continue;
@@ -341,6 +360,7 @@ public class ExtractionMergeService {
             // markets
             mergeStringList(mergedMarkets, getListFieldValue(ex, "markets", data.getMarkets()));
             mergeStringList(mergedTargetCustomers, getListFieldValue(ex, "targetCustomers", data.getTargetCustomers()));
+            mergeProducts(mergedProducts, getFieldValue(ex, "products", data.getProducts()));
 
             // website
             String exWebsite = (String) getFieldValue(ex, "website", data.getWebsite());
@@ -362,12 +382,31 @@ public class ExtractionMergeService {
                             .build());
                 }
             }
+            mergeStringList(mergedEmails, getListFieldValue(ex, "email", data.getEmail()));
+            mergeStringList(mergedPhones, getListFieldValue(ex, "phone", data.getPhone()));
+
+            String exAddress = (String) getFieldValue(ex, "address", data.getAddress());
+            if (!isUnknown(exAddress)) {
+                mergedAddress = bestDisplayValue(mergedAddress, exAddress);
+            }
 
             // employeeTier
             String exEmployeeTier = (String) getFieldValue(ex, "employeeTier", data.getEmployeeTier());
             if (!isUnknown(exEmployeeTier)) {
                 mergedEmployeeTier = bestDisplayValue(mergedEmployeeTier, exEmployeeTier);
             }
+            String exCompanySize = (String) getFieldValue(ex, "companySize", data.getCompanySize());
+            if (!isUnknown(exCompanySize)) {
+                mergedCompanySize = bestDisplayValue(mergedCompanySize, exCompanySize);
+            }
+            mergeStringList(mergedKeyPeople, getListFieldValue(ex, "keyPeople", data.getKeyPeople()));
+
+            Object exFinancial = getFieldValue(ex, "financial", data.getFinancial());
+            FinancialInfo financialInfo = toModel(exFinancial, FinancialInfo.class);
+            if (financialInfo != null) mergedFinancial = financialInfo;
+            Object exInnovation = getFieldValue(ex, "innovation", data.getInnovation());
+            InnovationInfo innovationInfo = toModel(exInnovation, InnovationInfo.class);
+            if (innovationInfo != null) mergedInnovation = innovationInfo;
 
             // insights
             mergeStringList(mergedStrengths, getListFieldValue(ex, "strengths", data.getStrengths()));
@@ -390,17 +429,23 @@ public class ExtractionMergeService {
         CompanyCandidate.Business business = CompanyCandidate.Business.builder()
                 .industries(mergedIndustries.isEmpty() ? null : mergedIndustries)
                 .businessModel(mergedBusinessModel)
+                .products(mergedProducts.isEmpty() ? null : mergedProducts)
                 .markets(mergedMarkets.isEmpty() ? null : mergedMarkets)
                 .targetCustomers(mergedTargetCustomers.isEmpty() ? null : mergedTargetCustomers)
                 .build();
 
         CompanyCandidate.CompanySize companySize = CompanyCandidate.CompanySize.builder()
                 .employeeTier(mergedEmployeeTier)
+                .revenueTier(mergedCompanySize)
                 .build();
 
         CompanyCandidate.Contact contact = CompanyCandidate.Contact.builder()
                 .website(mergedWebsite)
                 .emails(mergedEmails.isEmpty() ? null : mergedEmails)
+                .phones(mergedPhones.isEmpty() ? null : mergedPhones)
+                .addresses(mergedAddress != null ? List.of(CompanyCandidate.Address.builder()
+                        .fullAddress(mergedAddress)
+                        .build()) : null)
                 .build();
 
         CompanyCandidate.Insights insights = CompanyCandidate.Insights.builder()
@@ -410,7 +455,8 @@ public class ExtractionMergeService {
                 .threats(mergedThreats.isEmpty() ? null : mergedThreats)
                 .build();
 
-        return new MergedCandidateData(identity, business, companySize, contact, insights);
+        return new MergedCandidateData(identity, business, companySize, contact, insights,
+                mergedKeyPeople.isEmpty() ? null : mergedKeyPeople, mergedFinancial, mergedInnovation);
     }
 
     // ─────────────────────────────────────────────
@@ -418,13 +464,13 @@ public class ExtractionMergeService {
     // ─────────────────────────────────────────────
 
     private void mergeProfileFields(List<AiExtractionCache> extractions, CompanyProfile current,
-            List<String> extractionIds, List<String> sourceDocIds, List<String> importJobIds,
-            List<FieldEvidence> evidence,
-            Map<String, Object> proposedIdentity, Map<String, Object> proposedBusiness,
-            Map<String, Object> proposedContact, Map<String, Object> proposedInsights,
-            Map<String, Object> proposedFinancial, Map<String, Object> proposedMarket,
-            Map<String, Object> proposedInnovation, Map<String, Object> proposedRisk,
-            Map<String, Object> proposedCompliance) {
+                                    List<String> extractionIds, List<String> sourceDocIds, List<String> importJobIds,
+                                    List<FieldEvidence> evidence,
+                                    Map<String, Object> proposedIdentity, Map<String, Object> proposedBusiness,
+                                    Map<String, Object> proposedContact, Map<String, Object> proposedInsights,
+                                    Map<String, Object> proposedFinancial, Map<String, Object> proposedMarket,
+                                    Map<String, Object> proposedInnovation, Map<String, Object> proposedRisk,
+                                    Map<String, Object> proposedCompliance) {
 
         // Merge across all extractions first
         String mergedLegalName = null, mergedTradeName = null, mergedTaxCode = null;
@@ -440,26 +486,26 @@ public class ExtractionMergeService {
         for (AiExtractionCache ex : extractions) {
             if (ex.getExtractedData() == null) continue;
             ExtractedCompanyData data = ex.getExtractedData();
-            
+
             String exLegalName = (String) getFieldValue(ex, "legalName", data.getLegalName());
             if (!isUnknown(exLegalName)) mergedLegalName = bestDisplayValue(mergedLegalName, exLegalName);
-            
+
             String exTradeName = (String) getFieldValue(ex, "tradeName", data.getTradeName());
             if (!isUnknown(exTradeName)) mergedTradeName = bestDisplayValue(mergedTradeName, exTradeName);
-            
+
             String exTaxCode = (String) getFieldValue(ex, "taxCode", data.getTaxCode());
             if (!isUnknown(exTaxCode) && mergedTaxCode == null) mergedTaxCode = exTaxCode;
-            
+
             mergeStringList(mergedIndustries, getListFieldValue(ex, "industries", data.getIndustries()));
-            
+
             String exBusinessModel = (String) getFieldValue(ex, "businessModel", data.getBusinessModel());
             if (!isUnknown(exBusinessModel)) mergedBusinessModel = bestDisplayValue(mergedBusinessModel, exBusinessModel);
-            
+
             mergeStringList(mergedMarkets, getListFieldValue(ex, "markets", data.getMarkets()));
-            
+
             String exWebsite = (String) getFieldValue(ex, "website", data.getWebsite());
             if (!isUnknown(exWebsite)) { if (mergedWebsite.isEmpty()) mergedWebsite.add(exWebsite); }
-            
+
             mergeStringList(mergedStrengths, getListFieldValue(ex, "strengths", data.getStrengths()));
             mergeStringList(mergedWeaknesses, getListFieldValue(ex, "weaknesses", data.getWeaknesses()));
             mergeStringList(mergedOpportunities, getListFieldValue(ex, "opportunities", data.getOpportunities()));
@@ -545,8 +591,8 @@ public class ExtractionMergeService {
     // ─────────────────────────────────────────────
 
     private void mergeInsightList(String fieldPath, List<String> current, List<String> merged,
-            List<String> sourceDocIds, List<String> importJobIds, List<String> extractionIds,
-            List<FieldEvidence> evidence, Map<String, Object> proposed, String key) {
+                                  List<String> sourceDocIds, List<String> importJobIds, List<String> extractionIds,
+                                  List<FieldEvidence> evidence, Map<String, Object> proposed, String key) {
         if (!merged.isEmpty()) {
             List<String> newOnly = newListItems(merged, current);
             if (!newOnly.isEmpty()) {
@@ -567,6 +613,59 @@ public class ExtractionMergeService {
         }
     }
 
+    private void mergeProducts(List<CompanyCandidate.Product> target, Object rawProducts) {
+        if (!(rawProducts instanceof Iterable<?> products)) return;
+        for (Object item : products) {
+            String name = null;
+            String category = null;
+            String description = null;
+
+            if (item instanceof ExtractedCompanyData.Product product) {
+                name = product.getName();
+                category = product.getCategory();
+                description = product.getDescription();
+            } else if (item instanceof Map<?, ?> map) {
+                name = stringValue(map.get("name"));
+                category = stringValue(map.get("category"));
+                description = stringValue(map.get("description"));
+            } else if (item != null) {
+                name = String.valueOf(item);
+            }
+
+            if (isUnknown(name)) continue;
+            String normalizedName = name.trim().toLowerCase(Locale.ROOT);
+            boolean alreadyPresent = target.stream()
+                    .map(CompanyCandidate.Product::getName)
+                    .filter(Objects::nonNull)
+                    .map(existing -> existing.trim().toLowerCase(Locale.ROOT))
+                    .anyMatch(normalizedName::equals);
+            if (!alreadyPresent) {
+                target.add(CompanyCandidate.Product.builder()
+                        .name(name)
+                        .category(category)
+                        .description(description)
+                        .build());
+            }
+        }
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private <T> T toModel(Object value, Class<T> type) {
+        if (value == null) return null;
+        if (type.isInstance(value)) return type.cast(value);
+        if (value instanceof Map<?, ?>) {
+            try {
+                return new com.fasterxml.jackson.databind.ObjectMapper().convertValue(value, type);
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
     private List<String> newListItems(List<String> newVals, List<String> existing) {
         if (newVals == null) return Collections.emptyList();
         if (existing == null || existing.isEmpty()) return newVals;
@@ -583,7 +682,7 @@ public class ExtractionMergeService {
     }
 
     private FieldEvidence conflictEvidence(String path, Object existing, Object proposed,
-            String docId, String jobId, String exId, String note) {
+                                           String docId, String jobId, String exId, String note) {
         return FieldEvidence.builder()
                 .fieldPath(path)
                 .existingValue(existing)
@@ -598,8 +697,8 @@ public class ExtractionMergeService {
     }
 
     private FieldEvidence evidence(String path, Object existing, Object proposed,
-            List<String> docIds, List<String> jobIds, List<String> exIds,
-            MergeAction action, boolean conflict, String note) {
+                                   List<String> docIds, List<String> jobIds, List<String> exIds,
+                                   MergeAction action, boolean conflict, String note) {
         return FieldEvidence.builder()
                 .fieldPath(path)
                 .existingValue(existing)
@@ -614,7 +713,7 @@ public class ExtractionMergeService {
     }
 
     private FieldEvidence listEvidence(String path, List<String> merged,
-            List<String> docIds, List<String> jobIds, List<String> exIds) {
+                                       List<String> docIds, List<String> jobIds, List<String> exIds) {
         return FieldEvidence.builder()
                 .fieldPath(path)
                 .proposedValue(merged)
@@ -646,10 +745,15 @@ public class ExtractionMergeService {
         final CompanyCandidate.CompanySize companySize;
         final CompanyCandidate.Contact contact;
         final CompanyCandidate.Insights insights;
+        final List<String> keyPeople;
+        final FinancialInfo financial;
+        final InnovationInfo innovation;
 
         MergedCandidateData(CompanyCandidate.Identity id, CompanyCandidate.Business b,
-                CompanyCandidate.CompanySize s, CompanyCandidate.Contact c, CompanyCandidate.Insights i) {
+                            CompanyCandidate.CompanySize s, CompanyCandidate.Contact c, CompanyCandidate.Insights i,
+                            List<String> people, FinancialInfo f, InnovationInfo n) {
             identity = id; business = b; companySize = s; contact = c; insights = i;
+            keyPeople = people; financial = f; innovation = n;
         }
     }
 }

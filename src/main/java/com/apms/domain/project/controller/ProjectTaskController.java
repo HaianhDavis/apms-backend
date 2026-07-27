@@ -8,12 +8,14 @@ import com.apms.domain.project.dto.ProjectTaskResponse;
 import com.apms.domain.project.dto.ProjectTaskWorkbenchResponse;
 import com.apms.domain.project.dto.UpdateProjectTaskRequest;
 import com.apms.domain.project.service.ProjectTaskService;
+import com.apms.security.UserDetailsImpl;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -39,11 +41,14 @@ public class ProjectTaskController {
             @RequestParam(required = false) TaskStatus status,
             @RequestParam(required = false) Long assignedToUserId,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        boolean staffOnly = currentUser.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_BUSINESS_DEVELOPMENT_STAFF".equals(authority.getAuthority()));
         PageResponse<ProjectTaskResponse> response = PageResponse.of(
-                projectTaskService.getTasks(projectId, status, assignedToUserId, pageable));
+                projectTaskService.getTasks(projectId, status, assignedToUserId, pageable, currentUser.getId(), staffOnly));
         
         return ResponseEntity.ok(ApiResponse.success(response));
     }
@@ -56,6 +61,16 @@ public class ProjectTaskController {
             @Valid @RequestBody UpdateProjectTaskRequest request) {
 
         return ResponseEntity.ok(ApiResponse.success(projectTaskService.updateTask(projectId, taskId, request), "Task updated"));
+    }
+
+    @DeleteMapping("/{taskId}")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId))")
+    public ResponseEntity<ApiResponse<Void>> deleteTask(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId) {
+
+        projectTaskService.deleteTask(projectId, taskId);
+        return ResponseEntity.ok(ApiResponse.success(null, "Task deleted"));
     }
 
     @GetMapping("/{taskId}/workbench")

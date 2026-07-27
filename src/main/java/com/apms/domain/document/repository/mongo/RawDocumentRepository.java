@@ -8,4 +8,5 @@ import java.util.Optional;
 public interface RawDocumentRepository extends MongoRepository<RawDocument, String> {
     Optional<RawDocument> findByImportJobId(String importJobId);
     java.util.List<RawDocument> findByProjectIdAndIsHiddenTrue(String projectId);
+    java.util.List<RawDocument> findByProjectIdAndTaskIdAndIsHiddenFalse(String projectId, String taskId);
 }

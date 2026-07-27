@@ -6,32 +6,22 @@ For each field, return an object containing the "value", "confidence" (0.0 to 1.
 
 Required fields:
 - legalName (string)
-- tradeName (string)
 - taxCode (string)
 - industries (array of strings)
 - businessModel (string)
-- productsServices (array of objects with "name", "category", "description")
-- targetMarkets (array of strings)
+- products (array of objects with "name", "category", "description")
+- markets (array of strings)
 - targetCustomers (array of strings)
 - employeeTier (string)
 - website (string)
 - email (array of strings)
 - phone (array of strings)
 - address (string)
-- headquarters (string)
-- description (string)
 - companySize (string)
-- keyPeople (array of strings)
-- notes (string)
 - strengths (array of strings)
-- weaknesses (array of strings)
 - opportunities (array of strings)
+- weaknesses (array of strings)
 - threats (array of strings)
-- financial (object with keys: revenue(number), revenueCurrency(string), revenueGrowth(number), debtRatio(number), profitMargin(number), fundingStage(string), profitability(string))
-- market (object with keys: marketShare(number), brandRank(number), clientCount(number), mainMarkets(array of strings))
-- innovation (object with keys: patents(number), rdInvestmentPercent(number), techStack(array of strings), techMaturityLevel(number), productInnovationRate(number), technologyCapabilities(array of strings))
-- risk (object with keys: legalRisk(string), financialRisk(string), reputationRisk(string), securityRisk(string), conflictOfInterestRisk(string), supplyInterruptionRisk(string), dependencyRisk(string), overallRiskLevel(string))
-- compliance (object with keys: status(string), qualityCertifications(array of strings), securityCertifications(array of strings), antiCorruptionPolicy(string), laborCompliance(string), environmentalPolicy(string))
 
 Format example for a field:
 "legalName": {
@@ -55,6 +45,7 @@ RULES:
 - Return null for the "value" when a field is not found.
 - Do NOT invent tax code, phone number, email, website, address, products, markets, or contact details.
 - Do NOT classify relationship type (e.g. partner, competitor). This is decided by the Manager.
+- Do NOT return any field outside the required field list above.
 - Strictly format the output as valid JSON.
 - DO NOT include markdown formatting or extra conversational text (no ```json).
 - Your entire response must be a single, valid JSON object where keys are the field names listed above.

@@ -2,9 +2,6 @@ package com.apms.config;
 
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.context.annotation.ComponentScan.Filter;
-import org.springframework.context.annotation.FilterType;
 
 @Configuration
 @EnableJpaRepositories(
@@ -17,8 +14,7 @@ import org.springframework.context.annotation.FilterType;
         "com.apms.domain.document.repository.sql",
         "com.apms.domain.notification.repository.sql",
         "com.apms.domain.contract.repository.sql"
-    },
-    includeFilters = @Filter(type = FilterType.ASSIGNABLE_TYPE, classes = JpaRepository.class)
+    }
 )
 public class SqlServerConfig {
 }

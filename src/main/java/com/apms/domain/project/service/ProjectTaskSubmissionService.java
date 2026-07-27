@@ -4,6 +4,7 @@ import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.SubmissionStatus;
 import com.apms.common.enums.SystemRole;
 import com.apms.common.enums.TaskStatus;
+import com.apms.common.enums.TaskType;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
@@ -93,6 +94,9 @@ public class ProjectTaskSubmissionService {
         Account submitter = accountRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
 
+        boolean directDocumentCollection = task.getTaskType() == TaskType.DOCUMENT_COLLECTION;
+        LocalDateTime now = LocalDateTime.now();
+
         ProjectTaskSubmission submission = ProjectTaskSubmission.builder()
                 .projectTask(task)
                 .project(project)
@@ -100,16 +104,19 @@ public class ProjectTaskSubmissionService {
                 .submissionType(request.getSubmissionType())
                 .targetEntityType(request.getTargetEntityType())
                 .targetEntityId(request.getTargetEntityId())
-                .status(SubmissionStatus.IN_REVIEW)
+                .status(directDocumentCollection ? SubmissionStatus.APPROVED : SubmissionStatus.IN_REVIEW)
                 .note(request.getNote())
-                .submittedAt(LocalDateTime.now())
+                .submittedAt(now)
+                .reviewedByAccount(directDocumentCollection ? submitter : null)
+                .reviewedAt(directDocumentCollection ? now : null)
+                .reviewComment(directDocumentCollection ? "Document collection submitted directly to project." : null)
                 .build();
 
         submission = submissionRepository.save(submission);
 
         // Update task status
-        task.setStatus(TaskStatus.IN_REVIEW);
-        task.setCompletedAt(null);
+        task.setStatus(directDocumentCollection ? TaskStatus.DONE : TaskStatus.IN_REVIEW);
+        task.setCompletedAt(directDocumentCollection ? now : null);
         taskRepository.save(task);
 
         // Update target entity if it's a proposal
@@ -120,7 +127,12 @@ public class ProjectTaskSubmissionService {
             });
         }
 
-        auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMITTED, "ProjectTask", String.valueOf(task.getId()), "Task submitted for review");
+        auditLogService.log(
+                currentUser.getId(),
+                AuditAction.PROJECT_TASK_SUBMITTED,
+                "ProjectTask",
+                String.valueOf(task.getId()),
+                directDocumentCollection ? "Document collection submitted directly to project" : "Task submitted for review");
 
         return toResponse(submission);
     }
@@ -168,6 +180,10 @@ public class ProjectTaskSubmissionService {
 
         LocalDateTime now = LocalDateTime.now();
         ProjectTask task = submission.getProjectTask();
+
+        if (task.getTaskType() == TaskType.DOCUMENT_COLLECTION) {
+            throw new com.apms.common.exception.BusinessValidationException("DOCUMENT_COLLECTION tasks are submitted directly and do not require manager review.");
+        }
 
         submission.setReviewedByAccount(reviewer);
         submission.setReviewedAt(now);

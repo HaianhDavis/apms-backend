@@ -2,6 +2,7 @@ package com.apms.domain.project.controller;
 
 import com.apms.common.enums.ProjectStatus;
 import com.apms.common.enums.ProjectType;
+import com.apms.common.enums.RelationshipType;
 import com.apms.common.response.ApiResponse;
 import com.apms.common.response.PageResponse;
 import com.apms.domain.project.dto.*;
@@ -17,7 +18,9 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/projects")
@@ -46,16 +49,19 @@ public class ProjectController {
     // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @GetMapping
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<PageResponse<ProjectResponse>>> getAllProjects(
             @RequestParam(required = false) ProjectStatus status,
             @RequestParam(required = false) ProjectType type,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        boolean staffOnly = currentUser.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_BUSINESS_DEVELOPMENT_STAFF".equals(authority.getAuthority()));
         PageResponse<ProjectResponse> response = PageResponse.of(
-                projectService.getAllProjects(status, type, pageable));
+                projectService.getAllProjects(status, type, pageable, currentUser.getId(), staffOnly));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -63,6 +69,28 @@ public class ProjectController {
     // GET /api/v1/projects/{id}
     // Role: All authenticated
     // ─────────────────────────────────────────────
+    @GetMapping("/relationship-types")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<List<Map<String, String>>>> getTargetRelationshipTypes() {
+        List<Map<String, String>> response = Arrays.stream(RelationshipType.values())
+                .map(type -> Map.of(
+                        "value", type.name(),
+                        "label", relationshipTypeLabel(type)))
+                .toList();
+
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    private String relationshipTypeLabel(RelationshipType type) {
+        return switch (type) {
+            case PARTNER_WITH -> "Partner";
+            case COMPETITOR_OF -> "Competitor";
+            case SUPPLIER_OF -> "Supplier";
+            case CUSTOMER_OF -> "Customer";
+            case POTENTIAL_PARTNER_OF -> "Potential partner";
+        };
+    }
+
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isProjectReadable(#id)")
     public ResponseEntity<ApiResponse<ProjectResponse>> getProjectById(@PathVariable Long id) {
@@ -102,6 +130,16 @@ public class ProjectController {
     // GET /api/v1/projects/{id}/members
     // Role: BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#id))")
+    public ResponseEntity<ApiResponse<Void>> deleteProject(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        projectService.deleteProject(id, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(null, "Project deleted successfully"));
+    }
+
     @GetMapping("/{id}/members")
     @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMember(#id)")
     public ResponseEntity<ApiResponse<List<ProjectMemberResponse>>> getProjectMembers(
@@ -118,11 +156,12 @@ public class ProjectController {
     @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#id)")
     public ResponseEntity<ApiResponse<ProjectMemberResponse>> addMember(
             @PathVariable Long id,
-            @Valid @RequestBody AddMemberRequest request) {
+            @Valid @RequestBody AddMemberRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(
-                        projectService.addMember(id, request), "Member added successfully"));
+                        projectService.addMember(id, request, currentUser.getId()), "Member added successfully"));
     }
 
     // ─────────────────────────────────────────────

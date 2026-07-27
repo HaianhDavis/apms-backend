@@ -30,6 +30,14 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @GetMapping("/users/search")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<List<UserProfileResponse>>> searchUsers(
+            @RequestParam(required = false) String email) {
+
+        return ResponseEntity.ok(ApiResponse.success(userService.searchActiveUsersByEmail(email)));
+    }
+
     @PostMapping("/users")
     @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<UserProfileResponse>> createUser(

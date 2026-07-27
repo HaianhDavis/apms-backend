@@ -5,16 +5,24 @@ import com.apms.common.enums.NotificationType;
 import com.apms.common.enums.SystemRole;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.audit.service.AuditLogService;
+import com.apms.domain.notification.FcmDeviceToken;
 import com.apms.domain.notification.Notification;
 import com.apms.domain.notification.dto.NotificationResponse;
+import com.apms.domain.notification.dto.RegisterFcmTokenRequest;
 import com.apms.domain.notification.dto.SendNotificationRequest;
+import com.apms.domain.notification.repository.sql.FcmDeviceTokenRepository;
 import com.apms.domain.notification.repository.sql.NotificationRepository;
+import com.apms.domain.project.Project;
+import com.apms.domain.project.ProjectTask;
 import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
 import com.apms.security.UserDetailsImpl;
+import com.google.firebase.messaging.FirebaseMessaging;
+import com.google.firebase.messaging.Message;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -23,6 +31,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -35,8 +46,10 @@ import java.util.stream.Collectors;
 public class NotificationService {
 
     private final NotificationRepository notificationRepository;
+    private final FcmDeviceTokenRepository fcmDeviceTokenRepository;
     private final AccountRepository accountRepository;
     private final AuditLogService auditLogService;
+    private final ObjectProvider<FirebaseMessaging> firebaseMessagingProvider;
 
     @Transactional(readOnly = true)
     public Page<NotificationResponse> getNotifications(Boolean unreadOnly, NotificationType type, Long targetUserId, Pageable pageable) {
@@ -156,6 +169,140 @@ public class NotificationService {
         auditLogService.log(currentUser.getId(), AuditAction.NOTIFICATION_SENT, "Notification", String.valueOf(notification.getId()), "Notification sent to user " + recipient.getId());
 
         return toResponse(notification);
+    }
+
+    @Transactional
+    public void registerFcmToken(RegisterFcmTokenRequest request) {
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
+
+        Account account = accountRepository.findById(currentUser.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
+
+        String token = request.getToken().trim();
+        FcmDeviceToken deviceToken = fcmDeviceTokenRepository.findByToken(token)
+                .orElseGet(() -> FcmDeviceToken.builder().token(token).build());
+
+        deviceToken.setAccount(account);
+        deviceToken.setDeviceType(StringUtils.hasText(request.getDeviceType()) ? request.getDeviceType().trim() : "WEB");
+        deviceToken.setIsActive(true);
+        deviceToken.setLastSeenAt(LocalDateTime.now());
+        fcmDeviceTokenRepository.save(deviceToken);
+    }
+
+    @Transactional
+    public void unregisterFcmToken(String token) {
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
+        if (!StringUtils.hasText(token)) return;
+
+        fcmDeviceTokenRepository.findByToken(token.trim()).ifPresent(deviceToken -> {
+            if (deviceToken.getAccount() != null && deviceToken.getAccount().getId().equals(currentUser.getId())) {
+                deviceToken.setIsActive(false);
+                fcmDeviceTokenRepository.save(deviceToken);
+            }
+        });
+    }
+
+    @Transactional
+    public void notifyTaskAssigned(ProjectTask task, Account recipient, Account sender) {
+        if (task == null || recipient == null) {
+            return;
+        }
+
+        String projectName = task.getProject() != null ? task.getProject().getProjectName() : "Project";
+        String title = "You have a new task";
+        String message = String.format("%s - %s", projectName, task.getTitle());
+        Notification notification = createSystemNotification(recipient, sender, title, message, NotificationType.TASK);
+
+        runAfterCommit(() -> pushToUser(
+                recipient.getId(),
+                title,
+                message,
+                java.util.Map.of(
+                        "type", "TASK_ASSIGNED",
+                        "notificationId", String.valueOf(notification.getId()),
+                        "projectId", String.valueOf(task.getProject() != null ? task.getProject().getId() : ""),
+                        "taskId", String.valueOf(task.getId())
+                )));
+    }
+
+    @Transactional
+    public void notifyProjectMemberAdded(Project project, Account recipient, Account sender) {
+        if (project == null || recipient == null) {
+            return;
+        }
+
+        String title = "You were added to a project";
+        String message = project.getProjectName();
+        Notification notification = createSystemNotification(recipient, sender, title, message, NotificationType.SYSTEM);
+
+        runAfterCommit(() -> pushToUser(
+                recipient.getId(),
+                title,
+                message,
+                java.util.Map.of(
+                        "type", "PROJECT_MEMBER_ADDED",
+                        "notificationId", String.valueOf(notification.getId()),
+                        "projectId", String.valueOf(project.getId())
+                )));
+    }
+
+    private Notification createSystemNotification(Account recipient, Account sender, String title, String message, NotificationType type) {
+        Notification notification = Notification.builder()
+                .recipientAccount(recipient)
+                .senderAccount(sender)
+                .title(title)
+                .message(message)
+                .type(type)
+                .isRead(false)
+                .isDeleted(false)
+                .build();
+
+        return notificationRepository.save(notification);
+    }
+
+    private void pushToUser(Long recipientId, String title, String body, java.util.Map<String, String> data) {
+        FirebaseMessaging firebaseMessaging = firebaseMessagingProvider.getIfAvailable();
+        if (firebaseMessaging == null) {
+            log.debug("Firebase is not configured; skipping FCM push for user={}", recipientId);
+            return;
+        }
+
+        List<FcmDeviceToken> tokens = fcmDeviceTokenRepository.findByAccount_IdAndIsActiveTrue(recipientId);
+        if (tokens.isEmpty()) {
+            log.debug("No active FCM tokens for user={}", recipientId);
+            return;
+        }
+
+        for (FcmDeviceToken token : tokens) {
+            try {
+                Message message = Message.builder()
+                        .setToken(token.getToken())
+                        .setNotification(com.google.firebase.messaging.Notification.builder()
+                                .setTitle(title)
+                                .setBody(body)
+                                .build())
+                        .putAllData(data)
+                        .build();
+                firebaseMessaging.send(message);
+            } catch (Exception ex) {
+                log.warn("Failed to send FCM notification to user={}, tokenId={}: {}", recipientId, token.getId(), ex.getMessage());
+            }
+        }
+    }
+
+    private void runAfterCommit(Runnable runnable) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    runnable.run();
+                }
+            });
+            return;
+        }
+        runnable.run();
     }
 
     private Notification getNotificationWithAccessCheck(Long notificationId) {

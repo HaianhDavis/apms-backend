@@ -110,7 +110,12 @@ public class GeminiExtractionProvider implements ExtractionProvider {
                     throw new BusinessValidationException("Gemini API call failed: " + e.getStatusCode());
                 }
             } catch (Exception e) {
-                log.error("Gemini Extraction failed or parsing failed. Raw Output: {}", rawAiOutput, e);
+                log.warn("Gemini extraction parsing failed. Attempt {} of {}. Raw Output excerpt: {}",
+                        attempt, maxRetries, rawOutputExcerpt(rawAiOutput), e);
+                if (attempt < maxRetries) {
+                    continue;
+                }
+                log.error("Gemini extraction failed after {} attempt(s). Raw Output: {}", maxRetries, rawAiOutput, e);
                 throw new BusinessValidationException("Failed to parse Gemini extraction output. Invalid JSON or mismatch.");
             }
         }
@@ -128,5 +133,13 @@ public class GeminiExtractionProvider implements ExtractionProvider {
             clean = clean.substring(0, clean.length() - 3);
         }
         return clean.trim();
+    }
+
+    private String rawOutputExcerpt(String rawOutput) {
+        if (rawOutput == null) {
+            return "";
+        }
+        String normalized = rawOutput.replaceAll("\\s+", " ").trim();
+        return normalized.length() <= 1000 ? normalized : normalized.substring(0, 1000) + "...";
     }
 }

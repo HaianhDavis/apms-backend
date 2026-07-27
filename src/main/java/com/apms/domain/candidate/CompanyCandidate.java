@@ -81,6 +81,7 @@ public class CompanyCandidate {
     private CompanySize companySize;
     private Contact contact;
     private Insights insights;
+    private java.util.List<String> keyPeople;
 
     private com.apms.domain.company.model.FinancialInfo financial;
     private com.apms.domain.company.model.MarketInfo market;

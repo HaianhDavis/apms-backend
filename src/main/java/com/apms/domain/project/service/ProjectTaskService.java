@@ -34,6 +34,7 @@ import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.project.repository.sql.ProjectTaskRepository;
 import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
+import com.apms.domain.notification.service.NotificationService;
 import com.apms.security.UserDetailsImpl;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
@@ -65,6 +66,7 @@ public class ProjectTaskService {
     private final CompanyCandidateRepository candidateRepository;
     private final CompanyProfileUpdateProposalRepository proposalRepository;
     private final ProjectTaskSubmissionRepository submissionRepository;
+    private final NotificationService notificationService;
 
     @Transactional
     public ProjectTaskResponse createTask(Long projectId, CreateProjectTaskRequest request) {
@@ -105,6 +107,7 @@ public class ProjectTaskService {
         auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_CREATED, "ProjectTask", String.valueOf(task.getId()), "Task created");
         if (assignedTo != null) {
             auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_ASSIGNED, "ProjectTask", String.valueOf(task.getId()), "Task assigned to user: " + assignedTo.getId());
+            notificationService.notifyTaskAssigned(task, assignedTo, createdBy);
         }
 
         return toResponse(task);
@@ -112,6 +115,12 @@ public class ProjectTaskService {
 
     @Transactional(readOnly = true)
     public Page<ProjectTaskResponse> getTasks(Long projectId, TaskStatus status, Long assignedToUserId, Pageable pageable) {
+        return getTasks(projectId, status, assignedToUserId, pageable, null, false);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ProjectTaskResponse> getTasks(Long projectId, TaskStatus status, Long assignedToUserId, Pageable pageable, Long currentUserId, boolean restrictToAssignedUser) {
+        Long effectiveAssignedToUserId = restrictToAssignedUser ? currentUserId : assignedToUserId;
         Specification<ProjectTask> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.equal(root.get("project").get("id"), projectId));
@@ -119,8 +128,8 @@ public class ProjectTaskService {
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
-            if (assignedToUserId != null) {
-                predicates.add(cb.equal(root.get("assignedToAccount").get("id"), assignedToUserId));
+            if (effectiveAssignedToUserId != null) {
+                predicates.add(cb.equal(root.get("assignedToAccount").get("id"), effectiveAssignedToUserId));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));
@@ -179,6 +188,8 @@ public class ProjectTaskService {
             statusChanged = true;
         }
 
+        Account newlyAssignedTo = null;
+
         if (!isStaff || isAdminOrManager) {
             if (request.getTitle() != null) task.setTitle(request.getTitle());
             if (request.getDescription() != null) task.setDescription(request.getDescription());
@@ -197,6 +208,7 @@ public class ProjectTaskService {
                     Account newAssignedTo = accountRepository.findById(request.getAssignedToUserId())
                             .orElseThrow(() -> new ResourceNotFoundException("Assigned account not found"));
                     task.setAssignedToAccount(newAssignedTo);
+                    newlyAssignedTo = newAssignedTo;
                     auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_ASSIGNED, "ProjectTask", String.valueOf(task.getId()), "Task reassigned to user: " + newAssignedTo.getId());
                 }
             }
@@ -208,8 +220,35 @@ public class ProjectTaskService {
         if (statusChanged) {
             auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_STATUS_CHANGED, "ProjectTask", String.valueOf(task.getId()), "Task status changed to " + task.getStatus());
         }
+        if (newlyAssignedTo != null) {
+            Account sender = accountRepository.findById(currentUser.getId()).orElse(null);
+            notificationService.notifyTaskAssigned(task, newlyAssignedTo, sender);
+        }
 
         return toResponse(task);
+    }
+
+    @Transactional
+    public void deleteTask(Long projectId, Long taskId) {
+        ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
+
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new IllegalArgumentException("Task does not belong to the specified project");
+        }
+
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) {
+            throw new AccessDeniedException("Unauthorized");
+        }
+
+        List<ProjectTaskSubmission> submissions = submissionRepository.findByProjectTask_Id(taskId);
+        if (!submissions.isEmpty()) {
+            submissionRepository.deleteAll(submissions);
+        }
+
+        projectTaskRepository.delete(task);
+        auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_UPDATED, "ProjectTask", String.valueOf(taskId), "Task deleted");
     }
 
     @Transactional(readOnly = true)
@@ -233,7 +272,7 @@ public class ProjectTaskService {
         List<TaskAction> actions = evaluateAvailableActions(currentUser, task, project, tType);
 
         // 2. Fetch documents (only metadata/import jobs)
-        List<ImportJobResponse> rawDocuments = documentService.getProjectImportJobs(projectId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
+        List<ImportJobResponse> rawDocuments = documentService.getTaskImportJobs(projectId, taskId);
         
         List<WorkbenchDocumentResponse> documents = new ArrayList<>();
         for (ImportJobResponse doc : rawDocuments) {
@@ -300,6 +339,8 @@ public class ProjectTaskService {
                         .findFirst().orElse(null);
                 return CandidateDraftSummary.builder()
                         .candidateId(c.getId())
+                        .candidateName(candidateDisplayName(c))
+                        .candidateIndustry(candidateIndustry(c))
                         .status(c.getStatus())
                         .taskId(c.getTaskId())
                         .extractionIds(c.getExtractionIds())
@@ -374,6 +415,28 @@ public class ProjectTaskService {
                 .profileUpdateProposalDrafts(proposalSummaries)
                 .submissions(submissions)
                 .build();
+    }
+
+    private String candidateDisplayName(CompanyCandidate candidate) {
+        if (candidate.getIdentity() == null) {
+            return "Candidate " + candidate.getId().substring(Math.max(0, candidate.getId().length() - 8));
+        }
+        if (candidate.getIdentity().getTradeName() != null && !candidate.getIdentity().getTradeName().isBlank()) {
+            return candidate.getIdentity().getTradeName();
+        }
+        if (candidate.getIdentity().getLegalName() != null && !candidate.getIdentity().getLegalName().isBlank()) {
+            return candidate.getIdentity().getLegalName();
+        }
+        return "Candidate " + candidate.getId().substring(Math.max(0, candidate.getId().length() - 8));
+    }
+
+    private String candidateIndustry(CompanyCandidate candidate) {
+        if (candidate.getBusiness() == null
+                || candidate.getBusiness().getIndustries() == null
+                || candidate.getBusiness().getIndustries().isEmpty()) {
+            return null;
+        }
+        return String.join(", ", candidate.getBusiness().getIndustries());
     }
 
     private List<TaskAction> evaluateAvailableActions(UserDetailsImpl user, ProjectTask task, Project project, TaskType taskType) {

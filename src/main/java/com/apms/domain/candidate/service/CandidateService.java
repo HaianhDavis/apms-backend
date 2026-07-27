@@ -5,8 +5,10 @@ import com.apms.common.enums.RelationshipType;
 import com.apms.common.event.CandidateApprovedEvent;
 import com.apms.common.exception.BusinessValidationException;
 import com.apms.common.exception.ResourceNotFoundException;
+import com.apms.domain.ai.AiExtractionCache;
 import com.apms.domain.ai.dto.AiExtractionResult;
 import com.apms.domain.ai.dto.ExtractedCompanyData;
+import com.apms.domain.ai.dto.ExtractionFieldResult;
 import com.apms.domain.ai.service.AiExtractionService;
 import com.apms.domain.candidate.CompanyCandidate;
 import com.apms.domain.candidate.dto.ApproveCandidateRequest;
@@ -27,6 +29,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 @Slf4j
@@ -90,10 +93,16 @@ public class CandidateService {
                 
         CompanyCandidate.CompanySize size = CompanyCandidate.CompanySize.builder()
                 .employeeTier(extractedData.getEmployeeTier())
+                .revenueTier(extractedData.getCompanySize())
                 .build();
 
         CompanyCandidate.Contact contact = CompanyCandidate.Contact.builder()
                 .website(extractedData.getWebsite())
+                .emails(extractedData.getEmail())
+                .phones(extractedData.getPhone())
+                .addresses(extractedData.getAddress() != null ? java.util.List.of(CompanyCandidate.Address.builder()
+                        .fullAddress(extractedData.getAddress())
+                        .build()) : null)
                 .build();
                 
         CompanyCandidate.Insights insights = CompanyCandidate.Insights.builder()
@@ -132,6 +141,7 @@ public class CandidateService {
                 .companySize(size)
                 .contact(contact)
                 .insights(insights)
+                .keyPeople(extractedData.getKeyPeople())
                 .financial(extractedData.getFinancial())
                 .market(extractedData.getMarket())
                 .innovation(extractedData.getInnovation())
@@ -167,6 +177,16 @@ public class CandidateService {
     // ─────────────────────────────────────────────
 
     @Transactional
+    public void deleteDraftCandidate(String candidateId) {
+        CompanyCandidate candidate = findCandidateOrThrow(candidateId);
+        if (candidate.getStatus() != CandidateStatus.DRAFT && candidate.getStatus() != CandidateStatus.REJECTED) {
+            throw new BusinessValidationException("Only DRAFT or REJECTED candidates can be deleted");
+        }
+        candidateRepository.delete(candidate);
+        log.info("Candidate draft deleted: id={}, status={}", candidateId, candidate.getStatus());
+    }
+
+    @Transactional
     public CandidateResponse updateCandidate(String candidateId, UpdateCandidateRequest request, Long userId) {
         CompanyCandidate candidate = findCandidateOrThrow(candidateId);
 
@@ -174,11 +194,17 @@ public class CandidateService {
             throw new BusinessValidationException("Cannot edit candidate in status: " + candidate.getStatus());
         }
 
-        if (request.getIdentity() != null) candidate.setIdentity(request.getIdentity());
-        if (request.getBusiness() != null) candidate.setBusiness(request.getBusiness());
-        if (request.getCompanySize() != null) candidate.setCompanySize(request.getCompanySize());
-        if (request.getContact() != null) candidate.setContact(request.getContact());
-        if (request.getInsights() != null) candidate.setInsights(request.getInsights());
+        if (request.getIdentity() != null) candidate.setIdentity(mergeIdentity(candidate.getIdentity(), request.getIdentity()));
+        if (request.getBusiness() != null) candidate.setBusiness(mergeBusiness(candidate.getBusiness(), request.getBusiness()));
+        if (request.getCompanySize() != null) candidate.setCompanySize(mergeCompanySize(candidate.getCompanySize(), request.getCompanySize()));
+        if (request.getContact() != null) candidate.setContact(mergeContact(candidate.getContact(), request.getContact()));
+        if (request.getInsights() != null) candidate.setInsights(mergeInsights(candidate.getInsights(), request.getInsights()));
+        if (request.getFinancial() != null) candidate.setFinancial(request.getFinancial());
+        if (request.getMarket() != null) candidate.setMarket(request.getMarket());
+        if (request.getInnovation() != null) candidate.setInnovation(request.getInnovation());
+        if (request.getRisk() != null) candidate.setRisk(request.getRisk());
+        if (request.getCompliance() != null) candidate.setCompliance(request.getCompliance());
+        if (request.getValidation() != null) candidate.setValidation(request.getValidation());
 
         if (request.getSuggestedRelationshipType() != null) {
             candidate.setSuggestedRelationshipType(request.getSuggestedRelationshipType());
@@ -195,6 +221,56 @@ public class CandidateService {
         log.info("Candidate updated manually: id={}, newRevision={}", candidateId, candidate.getRevisionNumber());
         
         return toResponse(candidate);
+    }
+
+    private CompanyCandidate.Identity mergeIdentity(CompanyCandidate.Identity current, CompanyCandidate.Identity incoming) {
+        if (current == null) return incoming;
+        return CompanyCandidate.Identity.builder()
+                .legalName(incoming.getLegalName())
+                .tradeName(incoming.getTradeName())
+                .taxCode(incoming.getTaxCode())
+                .registrationNumber(incoming.getRegistrationNumber() != null ? incoming.getRegistrationNumber() : current.getRegistrationNumber())
+                .build();
+    }
+
+    private CompanyCandidate.Business mergeBusiness(CompanyCandidate.Business current, CompanyCandidate.Business incoming) {
+        if (current == null) return incoming;
+        return CompanyCandidate.Business.builder()
+                .industries(incoming.getIndustries())
+                .businessModel(incoming.getBusinessModel())
+                .products(incoming.getProducts() != null ? incoming.getProducts() : current.getProducts())
+                .markets(incoming.getMarkets() != null ? incoming.getMarkets() : current.getMarkets())
+                .targetCustomers(incoming.getTargetCustomers() != null ? incoming.getTargetCustomers() : current.getTargetCustomers())
+                .build();
+    }
+
+    private CompanyCandidate.CompanySize mergeCompanySize(CompanyCandidate.CompanySize current, CompanyCandidate.CompanySize incoming) {
+        if (current == null) return incoming;
+        return CompanyCandidate.CompanySize.builder()
+                .employeeTier(incoming.getEmployeeTier() != null ? incoming.getEmployeeTier() : current.getEmployeeTier())
+                .employeeCount(incoming.getEmployeeCount() != null ? incoming.getEmployeeCount() : current.getEmployeeCount())
+                .revenueTier(incoming.getRevenueTier() != null ? incoming.getRevenueTier() : current.getRevenueTier())
+                .build();
+    }
+
+    private CompanyCandidate.Contact mergeContact(CompanyCandidate.Contact current, CompanyCandidate.Contact incoming) {
+        if (current == null) return incoming;
+        return CompanyCandidate.Contact.builder()
+                .website(incoming.getWebsite())
+                .emails(incoming.getEmails())
+                .phones(incoming.getPhones())
+                .addresses(incoming.getAddresses() != null ? incoming.getAddresses() : current.getAddresses())
+                .build();
+    }
+
+    private CompanyCandidate.Insights mergeInsights(CompanyCandidate.Insights current, CompanyCandidate.Insights incoming) {
+        if (current == null) return incoming;
+        return CompanyCandidate.Insights.builder()
+                .strengths(incoming.getStrengths())
+                .weaknesses(incoming.getWeaknesses())
+                .opportunities(incoming.getOpportunities())
+                .threats(incoming.getThreats())
+                .build();
     }
 
     @Transactional
@@ -326,6 +402,8 @@ public class CandidateService {
     }
 
     private CandidateResponse toResponse(CompanyCandidate c) {
+        Double confidenceScore = resolveCandidateConfidence(c);
+
         return CandidateResponse.builder()
                 .id(c.getId())
                 .projectId(c.getProjectId())
@@ -335,7 +413,7 @@ public class CandidateService {
                 .revisionNumber(c.getRevisionNumber())
                 .status(c.getStatus())
                 .suggestedRelationshipType(c.getSuggestedRelationshipType())
-                .relationshipConfidenceScore(c.getRelationshipConfidenceScore())
+                .relationshipConfidenceScore(confidenceScore)
                 .relationshipTypeOverride(c.getRelationshipTypeOverride())
                 .relationshipSuggestion(c.getRelationshipSuggestion())
                 .lifecycle(c.getLifecycle())
@@ -344,6 +422,7 @@ public class CandidateService {
                 .companySize(c.getCompanySize())
                 .contact(c.getContact())
                 .insights(c.getInsights())
+                .keyPeople(c.getKeyPeople())
                 .financial(c.getFinancial())
                 .market(c.getMarket())
                 .innovation(c.getInnovation())
@@ -358,5 +437,64 @@ public class CandidateService {
                 .aiMetadata(c.getAiMetadata())
                 .metadata(c.getMetadata())
                 .build();
+    }
+
+    private Double resolveCandidateConfidence(CompanyCandidate candidate) {
+        if (candidate.getRelationshipConfidenceScore() != null) {
+            return candidate.getRelationshipConfidenceScore();
+        }
+
+        if (candidate.getRelationshipSuggestion() != null
+                && candidate.getRelationshipSuggestion().getConfidence() != null) {
+            return candidate.getRelationshipSuggestion().getConfidence();
+        }
+
+        List<String> extractionIds = candidate.getExtractionIds();
+        if (extractionIds == null || extractionIds.isEmpty()) {
+            return null;
+        }
+
+        double sum = 0.0;
+        int count = 0;
+        for (String extractionId : extractionIds) {
+            try {
+                Double extractionConfidence = averageExtractionConfidence(aiExtractionService.getExtractionById(extractionId));
+                if (extractionConfidence != null) {
+                    sum += extractionConfidence;
+                    count++;
+                }
+            } catch (RuntimeException ex) {
+                log.warn("Cannot resolve extraction confidence for candidateId={}, extractionId={}: {}",
+                        candidate.getId(), extractionId, ex.getMessage());
+            }
+        }
+
+        return count == 0 ? null : sum / count;
+    }
+
+    private Double averageExtractionConfidence(AiExtractionCache extraction) {
+        if (extraction == null) {
+            return null;
+        }
+
+        if (extraction.getQualityMetrics() != null
+                && extraction.getQualityMetrics().getAverageConfidence() != null) {
+            return extraction.getQualityMetrics().getAverageConfidence();
+        }
+
+        if (extraction.getFieldResults() == null || extraction.getFieldResults().isEmpty()) {
+            return null;
+        }
+
+        double sum = 0.0;
+        int count = 0;
+        for (ExtractionFieldResult field : extraction.getFieldResults().values()) {
+            if (field != null && field.getConfidence() != null) {
+                sum += field.getConfidence();
+                count++;
+            }
+        }
+
+        return count == 0 ? null : sum / count;
     }
 }

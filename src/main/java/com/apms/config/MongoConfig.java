@@ -16,7 +16,8 @@ import org.springframework.context.annotation.FilterType;
         "com.apms.domain.assistant.repository.mongo",
         "com.apms.domain.externaldata.repository.mongo",
         "com.apms.domain.score.repository.mongo",
-        "com.apms.domain.contract.repository.mongo"
+        "com.apms.domain.contract.repository.mongo",
+        "com.apms.domain.crawler.repository"
     },
     includeFilters = @Filter(type = FilterType.ASSIGNABLE_TYPE, classes = MongoRepository.class)
 )

@@ -4,6 +4,7 @@ import com.apms.common.enums.NotificationType;
 import com.apms.common.response.ApiResponse;
 import com.apms.common.response.PageResponse;
 import com.apms.domain.notification.dto.NotificationResponse;
+import com.apms.domain.notification.dto.RegisterFcmTokenRequest;
 import com.apms.domain.notification.dto.SendNotificationRequest;
 import com.apms.domain.notification.service.NotificationService;
 import jakarta.validation.Valid;
@@ -60,5 +61,21 @@ public class NotificationController {
             @Valid @RequestBody SendNotificationRequest request) {
 
         return ResponseEntity.ok(ApiResponse.success(notificationService.sendNotification(request), "Notification sent"));
+    }
+
+    @PostMapping("/fcm-token")
+    public ResponseEntity<ApiResponse<Void>> registerFcmToken(
+            @Valid @RequestBody RegisterFcmTokenRequest request) {
+
+        notificationService.registerFcmToken(request);
+        return ResponseEntity.ok(ApiResponse.success(null, "FCM token registered"));
+    }
+
+    @DeleteMapping("/fcm-token")
+    public ResponseEntity<ApiResponse<Void>> unregisterFcmToken(
+            @RequestParam String token) {
+
+        notificationService.unregisterFcmToken(token);
+        return ResponseEntity.ok(ApiResponse.success(null, "FCM token removed"));
     }
 }

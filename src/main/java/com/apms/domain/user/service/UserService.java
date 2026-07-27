@@ -113,6 +113,14 @@ public class UserService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public List<UserProfileResponse> searchActiveUsersByEmail(String email) {
+        String term = email == null ? "" : email.trim();
+        return accountRepository.findTop10ByEmailContainingIgnoreCaseAndIsActiveTrue(term).stream()
+                .map(this::mapAccountToResponse)
+                .collect(Collectors.toList());
+    }
+
     private UserProfileResponse getProfileResponse(Long userId) {
         Account account = accountRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
@@ -127,6 +135,22 @@ public class UserService {
                 .id(account.getId())
                 .email(account.getEmail())
                 .fullName((profile.getFirstName() + " " + profile.getLastName()).trim())
+                .roles(account.getRoles())
+                .enabled(account.getIsActive())
+                .createdAt(account.getCreatedAt())
+                .build();
+    }
+
+    private UserProfileResponse mapAccountToResponse(Account account) {
+        String fullName = userProfileRepository.findByAccountId(account.getId())
+                .map(profile -> (profile.getFirstName() + " " + profile.getLastName()).trim())
+                .filter(name -> !name.isBlank())
+                .orElse(account.getEmail());
+
+        return UserProfileResponse.builder()
+                .id(account.getId())
+                .email(account.getEmail())
+                .fullName(fullName)
                 .roles(account.getRoles())
                 .enabled(account.getIsActive())
                 .createdAt(account.getCreatedAt())
