@@ -55,14 +55,14 @@ public class CandidateService {
 
         // 1. Load extraction from cache (set by /ai/extract), or run if not yet cached
         AiExtractionResult aiResult = aiExtractionService.getOrExtractCompanyData(importJobId);
-        
+
         return buildAndSaveCandidate(String.valueOf(importJob.getProjectId()), String.valueOf(importJobId), importJob.getRawDocumentId(), aiResult.getExtractedData(), creatorId);
     }
 
     @Transactional
     public CandidateResponse createFromExtractionId(String extractionId, Long creatorId) {
         com.apms.domain.ai.AiExtractionCache cache = aiExtractionService.getExtractionById(extractionId);
-        
+
         ImportJob importJob = importJobRepository.findById(cache.getImportJobId())
                 .orElseThrow(() -> new ResourceNotFoundException("ImportJob not found: " + cache.getImportJobId()));
 
@@ -90,7 +90,7 @@ public class CandidateService {
                 .markets(extractedData.getMarkets())
                 .targetCustomers(extractedData.getTargetCustomers())
                 .build();
-                
+
         CompanyCandidate.CompanySize size = CompanyCandidate.CompanySize.builder()
                 .employeeTier(extractedData.getEmployeeTier())
                 .revenueTier(extractedData.getCompanySize())
@@ -104,7 +104,7 @@ public class CandidateService {
                         .fullAddress(extractedData.getAddress())
                         .build()) : null)
                 .build();
-                
+
         CompanyCandidate.Insights insights = CompanyCandidate.Insights.builder()
                 .strengths(extractedData.getStrengths())
                 .weaknesses(extractedData.getWeaknesses())
@@ -120,7 +120,7 @@ public class CandidateService {
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
-                
+
         CompanyCandidate.Lifecycle lifecycle = CompanyCandidate.Lifecycle.builder()
                 .status(CandidateStatus.DRAFT)
                 .build();
@@ -211,7 +211,7 @@ public class CandidateService {
         }
 
         candidate.setRevisionNumber(candidate.getRevisionNumber() + 1);
-        
+
         if (candidate.getMetadata() != null) {
             candidate.getMetadata().setLastModifiedBy(String.valueOf(userId));
             candidate.getMetadata().setUpdatedAt(LocalDateTime.now());
@@ -219,7 +219,7 @@ public class CandidateService {
 
         candidate = candidateRepository.save(candidate);
         log.info("Candidate updated manually: id={}, newRevision={}", candidateId, candidate.getRevisionNumber());
-        
+
         return toResponse(candidate);
     }
 
@@ -381,8 +381,8 @@ public class CandidateService {
             throw new BusinessValidationException("targetRelationshipType is required. Project must define relationship type before approving candidate.");
         }
 
-        Double confidence = candidate.getRelationshipConfidenceScore() != null 
-                ? candidate.getRelationshipConfidenceScore() 
+        Double confidence = candidate.getRelationshipConfidenceScore() != null
+                ? candidate.getRelationshipConfidenceScore()
                 : 1.0;
 
         // Publish event for Profile & Graph downstream handling

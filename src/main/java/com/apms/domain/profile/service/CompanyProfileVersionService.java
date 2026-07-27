@@ -53,13 +53,13 @@ public class CompanyProfileVersionService {
     private void checkAccess() {
         UserDetailsImpl currentUser = getCurrentUser();
         if (currentUser == null) throw new AccessDeniedException("Unauthorized");
-        
+
         // Allowed roles according to design: SYSTEM_ADMIN, BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
         boolean isAllowed = hasRole(currentUser, SystemRole.SYSTEM_ADMIN) ||
                             hasRole(currentUser, SystemRole.BUSINESS_OWNER) ||
                             hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER) ||
                             hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_STAFF);
-                            
+
         if (!isAllowed) {
             throw new AccessDeniedException("Access denied to view profile versions");
         }

@@ -9,18 +9,18 @@ import java.util.List;
 
 @Data
 public class RoleEvaluationPreviewResponse {
-    
+
     private final String label = "PREVIEW";
-    
+
     private LinkedHashMap<String, BigDecimal> criterionScores;
-    
+
     private LinkedHashMap<String, BigDecimal> normalizedCriterionScores;
-    
+
     private EvaluationCompletenessStatus completenessStatus;
-    
+
     private List<String> missingCriteria;
-    
+
     private BigDecimal previewOverallScore;
-    
+
     private List<String> warnings;
 }

@@ -53,19 +53,25 @@ public class CanonicalScoreSnapshotService {
         }
 
         // 2. Validate target profile version exists
-        versionRepository.findByCompanyProfileIdAndVersion(
-                request.getTargetCompanyProfileId(), request.getTargetProfileVersion())
-                .orElseThrow(() -> new IllegalArgumentException("Target CompanyProfile version snapshot was not found."));
-
-        // 3. Validate reference equals configured owner
-        if (!ownerId.equals(request.getReferenceCompanyProfileId())) {
-            throw new IllegalArgumentException("Reference company must be the configured Owner Organization.");
+        if (request.getTargetProfileVersion() != null) {
+            versionRepository.findByCompanyProfileIdAndVersion(
+                    request.getTargetCompanyProfileId(), request.getTargetProfileVersion())
+                    .orElseThrow(() -> new IllegalArgumentException("Target CompanyProfile version snapshot was not found."));
         }
 
-        // 4. Validate reference profile version exists
-        versionRepository.findByCompanyProfileIdAndVersion(
-                request.getReferenceCompanyProfileId(), request.getReferenceProfileVersion())
-                .orElseThrow(() -> new IllegalArgumentException("Reference CompanyProfile version snapshot was not found."));
+        // 3. Validate reference equals configured owner (if required)
+        if (request.getEvaluatedRole() != com.apms.domain.company.enums.CompanyRole.POTENTIAL_PARTNER) {
+            if (!ownerId.equals(request.getReferenceCompanyProfileId())) {
+                throw new IllegalArgumentException("Reference company must be the configured Owner Organization.");
+            }
+
+            // 4. Validate reference profile version exists
+            if (request.getReferenceProfileVersion() != null) {
+                versionRepository.findByCompanyProfileIdAndVersion(
+                        request.getReferenceCompanyProfileId(), request.getReferenceProfileVersion())
+                        .orElseThrow(() -> new IllegalArgumentException("Reference CompanyProfile version snapshot was not found."));
+            }
+        }
 
         // 5. Calculate
         RoleEvaluationCalculationResult result = scoringEngine.calculate(request);
@@ -99,10 +105,13 @@ public class CanonicalScoreSnapshotService {
         snapshot.setOverallScore(result.getOverallScore());
         snapshot.setCompletenessStatus(result.getCompletenessStatus());
         snapshot.setMissingCriteriaJson(jsonMapper.serializeList(result.getMissingCriteria()));
+        snapshot.setEvidenceRefsJson(jsonMapper.serializeEvidenceMap(request.getCriterionEvidenceRefs()));
         snapshot.setCalculatedByAccount(calculatedBy);
         snapshot.setCalculatedAt(Instant.now());
         snapshot.setSourceEvaluationDraftId(request.getSourceEvaluationDraftId());
         snapshot.setApprovalIdempotencyKey(request.getApprovalIdempotencyKey());
+        snapshot.setApprovedRoleEvaluationVersionId(request.getApprovedRoleEvaluationVersionId());
+        snapshot.setApprovedRoleEvaluationVersionNumber(request.getApprovedRoleEvaluationVersionNumber());
 
         // Legacy structural fields (companyId, project, candidateId, ruleVersion) are left null.
         // Legacy score fields (partnerFitScore, competitionLevel, etc.) are left null.

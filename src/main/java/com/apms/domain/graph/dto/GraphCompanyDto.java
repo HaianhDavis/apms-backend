@@ -14,6 +14,6 @@ public class GraphCompanyDto {
     private String industry;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    
+
     private List<CompanyRelationshipDto> relationships;
 }

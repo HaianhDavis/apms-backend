@@ -1,9 +1,11 @@
 package com.apms.domain.ai.service.provider;
 
+import com.apms.domain.ai.dto.AiFieldResponse;
 import com.apms.domain.ai.dto.ExtractedCompanyData;
 import com.apms.domain.ai.dto.ExtractionFieldResult;
 import com.apms.domain.ai.dto.RawExtractionOutput;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,7 @@ public class AiExtractionResponseMapper {
     }
 
     public RawExtractionOutput mapResponse(String rawAiOutput) throws Exception {
+        Map<String, AiFieldResponse> rawMap = new HashMap<>();
         Map<String, ExtractionFieldResult> fieldResults = new HashMap<>();
 
         try {

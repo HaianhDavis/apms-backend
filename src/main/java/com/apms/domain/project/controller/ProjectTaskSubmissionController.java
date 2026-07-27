@@ -41,7 +41,7 @@ public class ProjectTaskSubmissionController {
             @RequestParam(defaultValue = "10") int size) {
         Pageable pageable = PageRequest.of(page, size);
         Page<ProjectTaskSubmissionResponse> pageResult = submissionService.getSubmissions(projectId, taskId, pageable);
-        
+
         PageResponse<ProjectTaskSubmissionResponse> response = new PageResponse<>(
                 pageResult.getContent(),
                 pageResult.getNumber(),

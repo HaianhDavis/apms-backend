@@ -1,5 +1,7 @@
 # Phase 2C Implementation Plan
 
+**Status**: COMPLETED
+
 ## Purpose
 
 This plan divides the work identified in the Phase 2C.0 data-model audit into small, safe implementation phases. Each phase is designed to be independently deployable and backward-compatible.
@@ -7,6 +9,8 @@ This plan divides the work identified in the Phase 2C.0 data-model audit into sm
 ---
 
 ## Phase 2C.1 — Correct CompanyProfile Semantic Boundaries
+
+**Status**: COMPLETED
 
 ### Goal
 Clearly document and label the semantic boundary between factual company data and AI-generated insights within CompanyProfile, without destructive migration.
@@ -41,6 +45,8 @@ No behavioral changes. Existing `insights` SWOT field remains in CompanyProfile.
 ---
 
 ## Phase 2C.2 — Establish Relationship Source of Truth
+
+**Status**: COMPLETED
 
 ### Goal
 Establish distinct relationship source-of-truth semantics:
@@ -107,18 +113,28 @@ No contract scores or KPI actuals in this phase.
 - `SqlServerConfig.java` — Add new repository package
 - `AuditAction.java` — Add new contract actions
 
+---
+
+## Phase 2C.4 — RoleMetricRecord Foundation
+
+**Status**: COMPLETED
+
+### Goal
+Design the factual metric-record layer required for later PARTNER evaluation. `RoleMetricRecord` must store approved business measurements (targets, actuals, measurement periods) as factual input without calculating score properties.
+
 ### Database changes
-- SQL Server: New `partner_contracts` table with constraints and project/company relations.
-- SQL Server: New `partner_contract_versions` table with unique constraint on contract_id + version_number.
-- Database migration strategy: Uses standard Spring Data JPA `spring.jpa.hibernate.ddl-auto` (update in dev, validate in prod).
+- SQL Server: New `role_metric_records` and `role_metric_record_versions` tables.
+- SQL Server: New `role_metric_evidences` and `role_metric_evidence_versions` tables.
+- Foreign keys handling circular references (working copy vs approved version).
 
 ### API changes
-- New CRUD endpoints under `/api/v1/projects/{projectId}/partner-contracts` and `/api/v1/partner-contracts`
-- New approval, revision, and lifecycle workflows
-- New version history endpoints
+- New CRUD endpoints under `/api/v1/projects/{projectId}/role-metrics`
+- PATCH endpoints for draft modifications.
+- Approval, revision, and evidence attachment workflows.
+- Immutable version history endpoints.
 
 ### Migration risks
-Low — new entities with no dependency on existing data.
+Low — new entities with no dependency on existing scoring tables.
 
 ### Backward-compatibility strategy
 Additive only. No existing entities modified.
@@ -175,7 +191,8 @@ Additive only. Scoring services optionally consume metrics when available.
 
 ## Phase 2C.5 — Scoring-Specific AI Suggestion Quality Model
 
-### Phase 2C.5A — Scoring-Specific AI Suggestion Quality Foundation [x] COMPLETED
+### Phase 2C.5A — Scoring-Specific AI Suggestion Quality Foundation
+**Status**: COMPLETED
 
 ### Goal
 Design and implement an AI criterion suggestion quality model with evidence, confidence, validation, and review status — separate from the extraction quality system.
@@ -262,6 +279,7 @@ Suggestions are optional. Manual-only workflow remains functional. AI suggestion
 
 ## Phase 2C.7 — PARTNER Relationship Data and Scoring
 
+**Status**: COMPLETED
 ### Goal
 Enable the PARTNER evaluation workflow with relationship-specific data (contracts, KPIs, SLAs) and AI-assisted criterion suggestions for the six PARTNER criteria.
 
@@ -329,3 +347,98 @@ Both `/api/v1/role-evaluations/{evaluationId}/product-market-overlap/suggest` an
 - Missing components are not treated as 0 and not treated as 50. Missing components are NOT silently renormalized. They simply contribute 0 to the un-normalized sum, maintaining the natural score penalty.
 - The unified canonical route returns `NEEDS_MORE_DATA` when required dimensions (productNameOverlap and at least two other dimensions) are incomplete.
 - Tests proving this behavior have been added in `CompetitorComparisonLegacyBehaviorTest`.
+
+---
+
+## Phase 2C.5 — PARTNER Role Evaluation Drafts & Feedback
+
+### Goal
+Design the criterion-level evaluation layer for PARTNER companies to consume approved factual and documentary data and produce reviewable criterion evaluation drafts without calculating weights, numerical scores, or creating ScoreSnapshots.
+
+### Architecture & Persistence
+- Reuse existing MongoDB `RoleEvaluationDraft` for working draft state.
+- Create a new immutable `RoleEvaluationVersion` in MongoDB to represent the approved state, bypassing `ScoreSnapshot` which is tightly coupled to `RoleScoringEngine` numeric outputs. No update or delete APIs for approved versions.
+- Pointers (`currentApprovedVersionId`) are stored on the Draft, not the Version. `isCurrentApproved` is completely removed from the immutable schema.
+- Data sources are pinned to their explicit *Approved Version* using typed `ApprovedSourceReference` objects (`sqlSourceId` vs `mongoSourceId` exclusivity enforced). Immutable `CompanyProfileVersion` replaces mutable profile usage.
+- Use explicit `EvaluationPeriod` (type, asOfDate, start, end). PERIOD metrics must be *fully contained*; POINT_IN_TIME must be exact. Highest-approved deduplication is enforced.
+
+### AI Suggestions Constraints
+- Output must be purely qualitative (`criterionKey`, `rationale`, `missingDataNotes`, `confidence`, `evidenceReferenceIds`).
+- Explicitly forbidden from outputting `overallScore`, `weights`, or numeric criterion scores (`criterionScore`, `suggestedRawScore`, etc.) for hybrid/ai-assisted criteria. Recursive nested AI tree validation rejects ANY numerical scores or unknown fields.
+- Unrestricted maps like `calculationDetails` are forbidden for PARTNER evaluations; use typed provider metadata instead.
+- `evidenceReferenceIds` must strictly be a subset of the server-pinned `sourceReferences`.
+
+### Compatibility-First Criterion Key Fix
+- `CanonicalRoleCriteria` currently has a mismatch (`capabilityComplementarityScore` vs `capabilityAndComplementarityScore`, and `governanceComplianceScore` vs `governanceAndRiskScore`).
+- Implement read-time alias normalization, strict writes for new canonical keys, and idempotent SQL/Mongo migrations. Add typed collision detection (`BusinessValidationException`) for conflicting keys.
+
+### Data Sufficiency & Workflow
+- Implements strict typed evaluation completeness (SUFFICIENT, PARTIAL, INSUFFICIENT) per criterion matching exact `PartnerMetricDefinition` possibilities.
+- Missing data remains `null`, with no 0 or 50 substitution.
+- Manager approval allows PARTIAL data if a `partialApprovalJustification` is supplied; INSUFFICIENT blocks submission.
+
+### Cross-Database Consistency & Strategies
+- Implement `RoleEvaluationApprovalStrategy` pattern to separate Competitor (SQL Snapshot) and Partner (Mongo Immutable Version) flows.
+- Partner approval uses an Outbox pattern (`RoleEvaluationApprovalOutbox` in Mongo) for idempotent SQL task sync to prevent cross-database partial failures.
+- Uses `MongoTransactionManager` to atomically commit the Version, Pointer, and Outbox. Outbox worker processes `PENDING` states with atomic lease claiming (`lockedBy`, `leaseUntil`) and crash recovery logic.
+
+### Permissions & APIs
+- Strict path parameter validation: `record.projectId == path projectId` and strict task validation on every route.
+- Assigned Staff: create draft, generate AI, edit criterion, attach evidence, submit, revisions.
+- Manager: read working draft, approve, reject, request changes.
+- Owner: read approved versions only via `/api/v1/projects/{projectId}/role-evaluations/{evaluationId}/current-approved` and exact version lists. No global `/approved/current`.
+
+For detailed breakdown, refer to the active [Implementation Plan](file:///Users/davisiukem/.gemini/antigravity-ide/brain/0976f325-782b-44bd-808c-4a2af3cd4894/implementation_plan.md).
+
+### Phase 2C.5: Evaluation Approval Data Isolation (Mongo outbox)
+
+**Status:** COMPLETED (Superseded by 2C.5A–D)
+- Replaced by Phase 2C.5A, 2C.5B, 2C.5C, and 2C.5D breakdowns.
+
+### Phase 2C.5A: Canonical Keys, Evaluation Period, Approved Sources and Immutable Version Foundation
+
+**Status:** COMPLETED
+
+### Phase 2C.5B: PARTNER Context, Strict AI Suggestions and Data Sufficiency
+**Status:** COMPLETED
+- Implemented `CanonicalRoleCriteria` keys and Legacy Mapping normalization.
+- Implemented `EvaluationPeriodType` & `EvaluationPeriod` with strict validation.
+- Implemented `ApprovedSourceType` & `ApprovedSourceReference` with type-specific cross-source exclusions and missing fields checking.
+- Implemented `RoleEvaluationVersion` immutable MongoDB foundation with `evaluationId` + `versionNumber` unique indexing.
+- Established Migration Artifacts mapping `capabilityComplementarityScore` and `governanceComplianceScore` to canonical forms.
+- Restricted AI and Calculation Details (Ensure purely qualitative schema).
+- Data Sufficiency Definitions (Sufficient, Partial, Insufficient data states).
+
+### Phase 2C.5C: PARTNER Submission, Manager Approval, Immutable Evaluation Version and Outbox Synchronization
+**Status:** COMPLETED
+- PARTNER submit/approve/request-revision workflow
+- Immutable `RoleEvaluationVersion`
+- Mongo transactional outbox
+- SQL durable receipt and idempotent processing
+- Retry/dead-letter/batch/ownership behavior
+- COMPETITOR behavior unchanged
+- PARTNER approval performs no scoring/AHP/ScoreSnapshot
+- Mongo and SQL are not a distributed/XA transaction
+
+### Phase 2C.5D: PARTNER Outbox Payload Integrity and Durable Hash Provenance
+**Status:** COMPLETED
+- Deterministic canonical SHA-256 hashing for `RoleEvaluationOutboxPayload`.
+- `payloadHash` added to `RoleEvaluationOutboxEvent` (format `v1:sha256:<lowercase-hex>`).
+- Hash verified post-claim before SQL processing.
+- Missing/mismatched hash routed to DEAD_LETTER (no retry, safe ownership loss).
+- SQL receipt includes `payload_hash` in `processed_outbox_events`.
+
+## Phase 2C.8 — POTENTIAL_PARTNER Scoring
+
+**Status:** COMPLETED
+
+## Phase 2C.9 — CUSTOMER Scoring
+
+**Status:** COMPLETED
+
+## Phase 2C.8 — SUPPLIER Scoring
+**STATUS: COMPLETED**
+Implemented exact 6 criteria, AI prompts, and scoring workflow.
+
+## Phase 2C.9A — Cross-Role Scoring Traceability Hardening
+**Status:** COMPLETED

@@ -33,44 +33,47 @@ public class RoleEvaluationDraft {
     // Stable business identifier (UUID)
     @Indexed
     private String targetCompanyId;
-    
+
     // MongoDB _id of the target company profile
     private String targetProfileDocumentId;
-    
+
     private Integer targetProfileVersion;
 
     // Stable business identifier (UUID) of FPT
     @Indexed
     private String referenceCompanyId;
-    
+
     // MongoDB _id of the FPT company profile
     private String referenceProfileDocumentId;
-    
+
     private Integer referenceProfileVersion;
 
     private CompanyRole evaluatedRole;
-    
+
     private String ruleSetVersion;
-    
+
     private String weightVersion;
-    
+
     private RoleEvaluationStatus status;
 
     @Builder.Default
     private LinkedHashMap<String, CriterionInput> criterionInputs = new LinkedHashMap<>();
-    
+
     @Builder.Default
     private LinkedHashMap<String, AutomaticSuggestion> automaticSuggestions = new LinkedHashMap<>();
-    
+
     @Builder.Default
     private LinkedHashMap<String, List<EvidenceRecord>> criterionEvidence = new LinkedHashMap<>();
 
     @Builder.Default
+    private LinkedHashMap<String, List<PartnerSuggestionGenerationMetadata>> generationIdempotency = new LinkedHashMap<>();
+
+    @Builder.Default
     private Boolean staleTargetProfile = false;
-    
+
     @Builder.Default
     private Boolean staleReferenceProfile = false;
-    
+
     @Builder.Default
     private Boolean staleRuleSet = false;
 
@@ -82,8 +85,24 @@ public class RoleEvaluationDraft {
     @Indexed(unique = true, sparse = true)
     private String activeDraftKey;
 
-    private Long approvedSnapshotId;
-    
+    private Long approvedSnapshotId; // Used for COMPETITOR
+
+    // PARTNER specific fields
+    private EvaluationPeriod evaluationPeriod;
+    private String currentApprovedVersionId;
+    private Integer currentApprovedVersionNumber;
+
+    @Builder.Default
+    private List<ApprovedSourceReference> pinnedSourceReferences = new java.util.ArrayList<>();
+
+    private String sourceSnapshotHash;
+
+    @Builder.Default
+    private Integer workingRevisionNumber = 1;
+
+    @org.springframework.data.annotation.Version
+    private Long optimisticVersion;
+
     @Indexed
     private String approvalIdempotencyKey;
 
@@ -93,6 +112,8 @@ public class RoleEvaluationDraft {
 
     private Long submittedByAccountId;
     private LocalDateTime submittedAt;
+    private Integer submittedRevisionNumber;
+    private String submittedSourceSnapshotHash;
 
     private Long reviewedByAccountId;
     private LocalDateTime reviewedAt;

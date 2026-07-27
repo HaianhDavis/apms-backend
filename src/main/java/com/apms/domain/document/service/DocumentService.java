@@ -205,7 +205,7 @@ public class DocumentService {
                     .stream()
                     .map(RawDocument::getId)
                     .toList();
-            
+
             if (!hiddenRawDocIds.isEmpty()) {
                 return importJobRepository.findByProject_IdAndRawDocumentIdNotIn(projectId, hiddenRawDocIds, pageable)
                         .map(this::toImportJobResponse);

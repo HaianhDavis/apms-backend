@@ -25,7 +25,7 @@ public class UserController {
     @GetMapping("/users/me")
     public ResponseEntity<ApiResponse<UserProfileResponse>> getCurrentUser(
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-        
+
         UserProfileResponse response = userService.getCurrentUserProfile(currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
@@ -43,7 +43,7 @@ public class UserController {
     public ResponseEntity<ApiResponse<UserProfileResponse>> createUser(
             @Valid @RequestBody CreateUserRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-        
+
         UserProfileResponse response = userService.createUser(request, currentUser.getId());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(response, "User created successfully"));
@@ -55,7 +55,7 @@ public class UserController {
             @PathVariable Long userId,
             @Valid @RequestBody UpdateUserRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-        
+
         UserProfileResponse response = userService.updateUser(userId, request, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(response, "User updated successfully"));
     }
@@ -66,7 +66,7 @@ public class UserController {
             @PathVariable Long userId,
             @Valid @RequestBody UpdateUserStatusRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-        
+
         userService.updateUserStatus(userId, request, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(null, "User status updated"));
     }
@@ -83,7 +83,7 @@ public class UserController {
             @PathVariable Long userId,
             @Valid @RequestBody AssignUserRolesRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-        
+
         userService.assignUserRoles(userId, request, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(null, "User roles updated"));
     }

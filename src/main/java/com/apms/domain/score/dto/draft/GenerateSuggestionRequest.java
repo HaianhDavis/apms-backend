@@ -9,4 +9,5 @@ public class GenerateSuggestionRequest {
     private LocalDate periodEnd;
     private Boolean force;
     private String reviewComment;
+    private String generationId;
 }

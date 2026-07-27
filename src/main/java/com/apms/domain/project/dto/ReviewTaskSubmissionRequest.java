@@ -8,6 +8,6 @@ import lombok.Data;
 public class ReviewTaskSubmissionRequest {
     @NotNull
     private ReviewDecision decision;
-    
+
     private String comment;
 }

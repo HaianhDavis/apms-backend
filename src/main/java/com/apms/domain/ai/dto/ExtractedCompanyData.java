@@ -8,6 +8,18 @@ import lombok.NoArgsConstructor;
 
 import java.util.List;
 
+/**
+ * Raw data structure produced by AI extraction from uploaded documents.
+ *
+ * <h3>Semantic Boundary: AI Output vs Authoritative Data</h3>
+ * <p>All fields in this DTO are <b>AI-generated extraction output</b> and are not
+ * authoritative business data. This data is used to populate a
+ * {@code CompanyCandidate} for human review. It becomes authoritative only after
+ * the candidate review/approval workflow promotes it into {@code CompanyProfile}.</p>
+ * <p>SWOT fields ({@code strengths}, {@code weaknesses}, {@code opportunities},
+ * {@code threats}) are advisory AI observations and must not silently overwrite
+ * verified factual data in the approved profile.</p>
+ */
 @Data
 @Builder
 @NoArgsConstructor

@@ -44,6 +44,15 @@ public class CanonicalScoreJsonMapper {
         }
     }
 
+    public String serializeEvidenceMap(java.util.Map<String, List<String>> map) {
+        if (map == null || map.isEmpty()) return null;
+        try {
+            return objectMapper.writeValueAsString(map);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize evidence map to JSON", e);
+        }
+    }
+
     public List<String> deserializeList(String json) {
         if (json == null || json.isBlank()) return List.of();
         try {

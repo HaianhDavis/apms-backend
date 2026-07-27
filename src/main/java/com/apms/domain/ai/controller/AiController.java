@@ -77,7 +77,7 @@ public class AiController {
     @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<com.apms.domain.ai.AiExtractionCache>> getExtractionQuality(
             @PathVariable String extractionId) {
-        
+
         com.apms.domain.ai.AiExtractionCache result = aiExtractionService.getExtractionById(extractionId);
         return ResponseEntity.ok(ApiResponse.success(result));
     }

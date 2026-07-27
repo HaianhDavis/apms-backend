@@ -19,6 +19,22 @@ import java.util.Set;
  * MongoDB document representing the official, factual company profile.
  * Does NOT contain classification/relationship data (that lives in Neo4j).
  *
+ * <h3>Semantic Boundary: Factual vs AI-Generated Data</h3>
+ * <p>This document contains two distinct categories of data:</p>
+ * <ul>
+ *   <li><b>Factual fields</b> ({@code identity}, {@code business}, {@code companySize},
+ *       {@code contact}, {@code financial}, {@code market}, {@code innovation},
+ *       {@code risk}, {@code compliance}): Authoritative business data sourced from
+ *       verified documents and human review. Changes to these fields require the
+ *       established review/approval workflow (candidate review → profile apply).</li>
+ *   <li><b>AI-generated/advisory fields</b> ({@code insights}): SWOT analysis produced
+ *       by AI extraction. These are advisory outputs that assist human evaluation but
+ *       are not authoritative business facts. AI output must not silently overwrite
+ *       factual fields.</li>
+ * </ul>
+ * <p>Immutable snapshots for evaluation purposes are stored separately in
+ * {@code CompanyProfileVersion}.</p>
+ *
  * Collection: company_profiles
  */
 @Document(collection = "company_profiles")
@@ -39,13 +55,23 @@ public class CompanyProfile {
     private String companyId;
 
     // ─────────────────────────────────────────────────────────────
-    // Factual Company Data
+    // Factual Company Data — authoritative business information
+    // sourced from verified documents. Changes require the
+    // established candidate review/approval workflow.
     // ─────────────────────────────────────────────────────────────
 
     private Identity identity;
     private Business business;
     private CompanySize companySize;
     private Contact contact;
+
+    /**
+     * AI-generated SWOT analysis (strengths, weaknesses, opportunities, threats).
+     * <p>This field is <b>advisory</b>, not authoritative business data. It is
+     * populated during AI extraction and must not be used to silently overwrite
+     * any factual profile fields. Consumers should treat this as supplementary
+     * context for human decision-making.</p>
+     */
     private Insights insights;
 
     private com.apms.domain.company.model.FinancialInfo financial;
@@ -144,6 +170,13 @@ public class CompanyProfile {
         private String country;
     }
 
+    /**
+     * AI-generated SWOT analysis. This is an advisory output produced by the
+     * AI extraction pipeline and is not authoritative business data.
+     * <p>Each list contains qualitative observations. These should inform
+     * human evaluation but must not be treated as verified facts or used to
+     * derive official scores without human review.</p>
+     */
     @Data
     @Builder
     @NoArgsConstructor

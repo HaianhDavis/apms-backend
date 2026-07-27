@@ -63,7 +63,7 @@ public class OwnerCompanyProfileController {
         String ownerId = ownerOrganizationService.getOwnerCompanyId();
         Pageable pageable = PageRequest.of(page, size);
         Page<CompanyProfileVersionResponse> pageResult = versionService.getVersions(ownerId, pageable);
-        
+
         PageResponse<CompanyProfileVersionResponse> response = new PageResponse<>(
                 pageResult.getContent(),
                 pageResult.getNumber(),

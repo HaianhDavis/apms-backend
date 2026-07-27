@@ -16,19 +16,37 @@ public final class CanonicalRoleCriteria {
             "businessValueContributionScore",
             "strategicAlignmentScore",
             "operationalPerformanceScore",
-            "capabilityComplementarityScore",
+            "capabilityAndComplementarityScore",
             "relationshipQualityScore",
-            "governanceComplianceScore"
+            "governanceAndRiskScore"
     );
 
     public static final Map<String, ScoreDirection> PARTNER_DIRECTIONS = Map.of(
             "businessValueContributionScore", ScoreDirection.BENEFIT,
             "strategicAlignmentScore", ScoreDirection.BENEFIT,
             "operationalPerformanceScore", ScoreDirection.BENEFIT,
-            "capabilityComplementarityScore", ScoreDirection.BENEFIT,
+            "capabilityAndComplementarityScore", ScoreDirection.BENEFIT,
             "relationshipQualityScore", ScoreDirection.BENEFIT,
-            "governanceComplianceScore", ScoreDirection.BENEFIT
+            "governanceAndRiskScore", ScoreDirection.BENEFIT
     );
+
+    public static final Map<String, com.apms.domain.score.enums.PartnerEvaluationMode> PARTNER_MODES = Map.of(
+            "businessValueContributionScore", com.apms.domain.score.enums.PartnerEvaluationMode.HYBRID,
+            "strategicAlignmentScore", com.apms.domain.score.enums.PartnerEvaluationMode.AI_ASSISTED,
+            "operationalPerformanceScore", com.apms.domain.score.enums.PartnerEvaluationMode.DETERMINISTIC_CORE,
+            "capabilityAndComplementarityScore", com.apms.domain.score.enums.PartnerEvaluationMode.AI_ASSISTED,
+            "relationshipQualityScore", com.apms.domain.score.enums.PartnerEvaluationMode.HYBRID,
+            "governanceAndRiskScore", com.apms.domain.score.enums.PartnerEvaluationMode.HYBRID
+    );
+
+    public static final Map<String, String> LEGACY_CRITERIA_MAPPING = Map.of(
+            "capabilityComplementarityScore", "capabilityAndComplementarityScore",
+            "governanceComplianceScore", "governanceAndRiskScore"
+    );
+
+    public static String normalizeCriterionKey(String key) {
+        return LEGACY_CRITERIA_MAPPING.getOrDefault(key, key);
+    }
 
     // POTENTIAL_PARTNER
     public static final List<String> POTENTIAL_PARTNER_CRITERIA = List.of(
@@ -46,7 +64,7 @@ public final class CanonicalRoleCriteria {
             "trustReputationScore", ScoreDirection.BENEFIT,
             "financialAttractivenessScore", ScoreDirection.BENEFIT,
             "collaborationPotentialScore", ScoreDirection.BENEFIT,
-            "partnershipRiskScore", ScoreDirection.COST
+            "partnershipRiskScore", ScoreDirection.BENEFIT
     );
 
     // COMPETITOR
@@ -84,7 +102,7 @@ public final class CanonicalRoleCriteria {
             "customerLifetimeValueScore", ScoreDirection.BENEFIT,
             "retentionLoyaltyScore", ScoreDirection.BENEFIT,
             "growthPotentialScore", ScoreDirection.BENEFIT,
-            "paymentChurnRiskScore", ScoreDirection.COST
+            "paymentChurnRiskScore", ScoreDirection.BENEFIT
     );
 
     // SUPPLIER

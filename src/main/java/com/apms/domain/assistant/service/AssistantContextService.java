@@ -87,13 +87,13 @@ public class AssistantContextService {
                         var records = neo4jClient.query(cypher)
                                 .bindAll(java.util.Map.of("companyId", profile.getCompanyId(), "projectId", String.valueOf(projectId)))
                                 .fetch().all();
-                                
+
                         for (var record : records) {
                             String cName = (String) record.get("cName");
                             String relType = (String) record.get("relType");
                             String otherName = (String) record.get("otherName");
                             boolean isOutgoing = (Boolean) record.get("isOutgoing");
-                            
+
                             if (isOutgoing) {
                                 formattedRelationships.add(cName + " " + relType + " " + otherName);
                             } else {

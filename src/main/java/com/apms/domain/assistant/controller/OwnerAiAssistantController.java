@@ -24,7 +24,7 @@ public class OwnerAiAssistantController {
     @PreAuthorize("hasRole('BUSINESS_OWNER')")
     public ResponseEntity<ApiResponse<AiChatResponse>> ownerChat(
             @Valid @RequestBody OwnerAiChatRequest request) {
-        
+
         AiChatResponse response = ownerAiAssistantService.chat(request);
         return ResponseEntity.ok(ApiResponse.success(response));
     }

@@ -12,13 +12,13 @@ import java.time.LocalDateTime;
 public class CreateProjectTaskRequest {
     @NotBlank
     private String title;
-    
+
     private String description;
-    
+
     private Long assignedToUserId;
-    
+
     private TaskPriority priority;
-    
+
     private LocalDateTime dueDate;
 
     @Schema(description = "Type of task (DOCUMENT_COLLECTION, COMPANY_DATA_PREPARATION, GENERAL_TASK)")

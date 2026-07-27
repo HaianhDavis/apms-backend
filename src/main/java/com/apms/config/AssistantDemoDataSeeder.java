@@ -49,7 +49,7 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
     private final ObjectMapper objectMapper;
 
     private static final String PROJECT_ID = "1";
-    
+
     private static final String FPT_ID = "6a31a0000000000000000001";
     private static final String CMC_ID = "6a31a0000000000000000002";
     private static final String VIETTEL_ID = "6a31a0000000000000000003";
@@ -66,7 +66,7 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
         log.info("Running AssistantDemoDataSeeder to seed approved data...");
 
         Project project = ensureProjectExists();
-        
+
         seedCompanyProfiles();
         seedNeo4jGraph();
         seedScoreSnapshots(project);
@@ -498,7 +498,7 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
         ensureScore(project, MICROSOFT_ID, 90, 18, 38, 76);
         ensureScore(project, RETAILPLUS_ID, 65, 25, 55, 58);
     }
-    
+
     private void ensureScore(Project project, String companyId, int fit, int comp, int risk, int rel) {
         if (!scoreSnapshotRepository.findByCompanyIdAndEvaluatedRoleIsNullOrderByCreatedAtDesc(companyId).isEmpty()) {
             return;

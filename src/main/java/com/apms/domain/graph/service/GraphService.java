@@ -20,18 +20,16 @@ import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 
-import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 
 @Slf4j
 @Service
@@ -44,6 +42,7 @@ public class GraphService {
     private final CompanyProfileRepository profileRepository;
     private final ProjectRepository projectRepository;
     private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER
@@ -67,14 +66,14 @@ public class GraphService {
         // For now, we attempt to find the newly created/updated profile.
         CompanyProfile profile = profileRepository.findByCandidateId(event.getCandidateId())
                 .orElse(null);
-        
+
         if (profile == null) {
             log.error("CompanyProfile not found for candidateId: {}. Ensure ProfileService runs first.", event.getCandidateId());
             return;
         }
 
         RelationshipType finalRelType = event.getFinalRelationshipType();
-        
+
         // 1. Create or merge CompanyNode for the approved CompanyProfile
         mergeCompanyNode(profile);
 
@@ -97,7 +96,7 @@ public class GraphService {
 
     private void mergeCompanyNode(CompanyProfile profile) {
         String name = profile.getIdentity() != null && profile.getIdentity().getLegalName() != null ? profile.getIdentity().getLegalName() : "Unknown";
-        String industry = profile.getBusiness() != null && profile.getBusiness().getIndustries() != null && !profile.getBusiness().getIndustries().isEmpty() 
+        String industry = profile.getBusiness() != null && profile.getBusiness().getIndustries() != null && !profile.getBusiness().getIndustries().isEmpty()
                 ? profile.getBusiness().getIndustries().get(0) : "Unknown";
 
         String cypher = """
@@ -113,15 +112,38 @@ public class GraphService {
                         "industry", industry
                 ))
                 .run();
-                
+
         log.info("Merged CompanyNode: companyId={}, name={}", profile.getCompanyId(), name);
     }
 
-    private void createRelationship(String sourceCompanyId, String targetCompanyId, String relType, String confirmedBy, String projectId, String candidateId, double confidenceScore) {
-        // Cypher requires relationship types to be static in the query string.
-        // We dynamically build the query string with the enum name safely.
-        if (!relType.matches("^[A-Z_]+$")) {
-            throw new IllegalArgumentException("Invalid relationship type: " + relType);
+    public void createRelationship(String sourceCompanyId, String targetCompanyId, String relType, String confirmedBy, String projectId, String candidateId, double confidenceScore) {
+        createRelationship(CompanyRelationshipDto.builder()
+                .sourceCompanyId(sourceCompanyId)
+                .targetCompanyId(targetCompanyId)
+                .relationshipType(relType)
+                .confirmedBy(confirmedBy)
+                .projectId(projectId)
+                .candidateId(candidateId)
+                .confidenceScore(confidenceScore)
+                .build());
+    }
+
+    public void createRelationship(CompanyRelationshipDto dto) {
+        if (!dto.getRelationshipType().matches("^[A-Z_]+$")) {
+            throw new IllegalArgumentException("Invalid relationship type: " + dto.getRelationshipType());
+        }
+
+        if (dto.getStartDate() != null && dto.getEndDate() != null && dto.getEndDate().isBefore(dto.getStartDate())) {
+            throw new IllegalArgumentException("endDate cannot be before startDate");
+        }
+
+        String metadataJson = null;
+        if (dto.getMetadata() != null) {
+            try {
+                metadataJson = objectMapper.writeValueAsString(dto.getMetadata());
+            } catch (JsonProcessingException e) {
+                log.error("Failed to serialize metadata", e);
+            }
         }
 
         String cypher = String.format("""
@@ -130,23 +152,71 @@ public class GraphService {
             MERGE (c1)-[r:%s]->(c2)
             SET r.confidenceScore = $confidenceScore,
                 r.confirmedBy = $confirmedBy,
-                r.confirmedAt = datetime(),
+                r.confirmedAt = coalesce(r.confirmedAt, datetime()),
                 r.projectId = $projectId,
-                r.candidateId = $candidateId
+                r.candidateId = $candidateId,
+                r.startDate = $startDate,
+                r.endDate = $endDate,
+                r.status = $status,
+                r.metadata = $metadata
+            """, dto.getRelationshipType());
+
+        neo4jClient.query(cypher)
+                .bindAll(Map.of(
+                        "sourceCompanyId", dto.getSourceCompanyId(),
+                        "targetCompanyId", dto.getTargetCompanyId(),
+                        "confirmedBy", dto.getConfirmedBy() != null ? dto.getConfirmedBy() : "SYSTEM",
+                        "projectId", dto.getProjectId() != null ? dto.getProjectId() : "",
+                        "candidateId", dto.getCandidateId() != null ? dto.getCandidateId() : "",
+                        "confidenceScore", dto.getConfidenceScore() != null ? dto.getConfidenceScore() : 1.0,
+                        "startDate", dto.getStartDate() != null ? dto.getStartDate().toString() : "",
+                        "endDate", dto.getEndDate() != null ? dto.getEndDate().toString() : "",
+                        "status", dto.getStatus() != null ? dto.getStatus() : "",
+                        "metadata", metadataJson != null ? metadataJson : ""
+                ))
+                .run();
+
+        log.info("Created/Updated relationship ({})-[:{}]->({})", dto.getSourceCompanyId(), dto.getRelationshipType(), dto.getTargetCompanyId());
+    }
+
+    public void updateRelationshipMetadata(String sourceCompanyId, String targetCompanyId, String relType, CompanyRelationshipDto metadataDto) {
+        if (!relType.matches("^[A-Z_]+$")) {
+            throw new IllegalArgumentException("Invalid relationship type: " + relType);
+        }
+
+        if (metadataDto.getStartDate() != null && metadataDto.getEndDate() != null && metadataDto.getEndDate().isBefore(metadataDto.getStartDate())) {
+            throw new IllegalArgumentException("endDate cannot be before startDate");
+        }
+
+        String metadataJson = null;
+        if (metadataDto.getMetadata() != null) {
+            try {
+                metadataJson = objectMapper.writeValueAsString(metadataDto.getMetadata());
+            } catch (JsonProcessingException e) {
+                log.error("Failed to serialize metadata", e);
+            }
+        }
+
+        String cypher = String.format("""
+            MATCH (c1:Company {companyId: $sourceCompanyId})-[r:%s]->(c2:Company {companyId: $targetCompanyId})
+            SET r.startDate = CASE WHEN $startDate <> '' THEN $startDate ELSE r.startDate END,
+                r.endDate = CASE WHEN $endDate <> '' THEN $endDate ELSE r.endDate END,
+                r.status = CASE WHEN $status <> '' THEN $status ELSE r.status END,
+                r.metadata = CASE WHEN $metadata <> '' THEN $metadata ELSE r.metadata END
             """, relType);
 
         neo4jClient.query(cypher)
                 .bindAll(Map.of(
                         "sourceCompanyId", sourceCompanyId,
                         "targetCompanyId", targetCompanyId,
-                        "confirmedBy", confirmedBy,
-                        "projectId", projectId,
-                        "candidateId", candidateId,
-                        "confidenceScore", confidenceScore
+                        "startDate", metadataDto.getStartDate() != null ? metadataDto.getStartDate().toString() : "",
+                        "endDate", metadataDto.getEndDate() != null ? metadataDto.getEndDate().toString() : "",
+                        "status", metadataDto.getStatus() != null ? metadataDto.getStatus() : "",
+                        "metadata", metadataJson != null ? metadataJson : ""
                 ))
                 .run();
-                
-        log.info("Created relationship ({})-[:{}]->({})", sourceCompanyId, relType, targetCompanyId);
+
+        log.info("Updated relationship metadata ({})-[:{}]->({})", sourceCompanyId, relType, targetCompanyId);
     }
 
     // ─────────────────────────────────────────────
@@ -159,7 +229,7 @@ public class GraphService {
         if (node == null) return null;
 
         List<CompanyRelationshipDto> relationships = getOutgoingRelationships(companyId);
-        
+
         return GraphCompanyDto.builder()
                 .companyId(node.getCompanyId())
                 .name(node.getName())
@@ -188,7 +258,7 @@ public class GraphService {
         }
 
         String cypher = String.format("MATCH (c:Company)-[:%s]->() RETURN DISTINCT c", relType);
-        
+
         return neo4jClient.query(cypher)
                 .fetchAs(CompanyNode.class)
                 .mappedBy((typeSystem, record) -> {
@@ -211,9 +281,10 @@ public class GraphService {
     private List<CompanyRelationshipDto> getOutgoingRelationships(String companyId) {
         String cypher = """
             MATCH (c1:Company {companyId: $companyId})-[r]->(c2:Company)
-            RETURN type(r) as relType, c2.companyId as targetCompanyId, 
-                   r.confidenceScore as confidenceScore, r.confirmedBy as confirmedBy, 
-                   r.projectId as projectId, r.candidateId as candidateId
+            RETURN type(r) as relType, c2.companyId as targetCompanyId,
+                   r.confidenceScore as confidenceScore, r.confirmedBy as confirmedBy,
+                   r.projectId as projectId, r.candidateId as candidateId,
+                   r.startDate as startDate, r.endDate as endDate, r.status as status, r.metadata as metadata
             """;
 
         return (List<CompanyRelationshipDto>) neo4jClient.query(cypher)
@@ -221,7 +292,21 @@ public class GraphService {
                 .fetch()
                 .all()
                 .stream()
-                .map(record -> CompanyRelationshipDto.builder()
+                .map(record -> {
+                    Map<String, Object> parsedMetadata = null;
+                    String metadataStr = (String) record.get("metadata");
+                    if (StringUtils.hasText(metadataStr)) {
+                        try {
+                            parsedMetadata = objectMapper.readValue(metadataStr, new TypeReference<Map<String, Object>>() {});
+                        } catch (JsonProcessingException e) {
+                            log.error("Failed to parse metadata JSON", e);
+                        }
+                    }
+
+                    String startDateStr = (String) record.get("startDate");
+                    String endDateStr = (String) record.get("endDate");
+
+                    return CompanyRelationshipDto.builder()
                         .sourceCompanyId(companyId)
                         .targetCompanyId((String) record.get("targetCompanyId"))
                         .relationshipType((String) record.get("relType"))
@@ -229,7 +314,12 @@ public class GraphService {
                         .confirmedBy((String) record.get("confirmedBy"))
                         .projectId((String) record.get("projectId"))
                         .candidateId((String) record.get("candidateId"))
-                        .build())
+                        .startDate(StringUtils.hasText(startDateStr) ? LocalDate.parse(startDateStr) : null)
+                        .endDate(StringUtils.hasText(endDateStr) ? LocalDate.parse(endDateStr) : null)
+                        .status((String) record.get("status"))
+                        .metadata(parsedMetadata)
+                        .build();
+                })
                 .toList();
     }
 }

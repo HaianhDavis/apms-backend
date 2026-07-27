@@ -36,13 +36,13 @@ public class ScoreSnapshot {
     private String candidateId;
 
     private Integer partnerFitScore;
-    
+
     private Integer competitionLevel;
-    
+
     private Integer riskLevel;
-    
+
     private Integer relationshipStrength;
-    
+
     private Integer totalScore;
 
     @Column(columnDefinition = "NVARCHAR(MAX)") // or TEXT depending on SQL Server mapping, NVARCHAR(MAX) is standard
@@ -140,4 +140,11 @@ public class ScoreSnapshot {
 
     @Column(name = "approval_idempotency_key")
     private String approvalIdempotencyKey;
+
+    // --- Phase 2C.9A Cross-Role Traceability Hardening ---
+    @Column(name = "approved_role_evaluation_version_id")
+    private String approvedRoleEvaluationVersionId;
+
+    @Column(name = "approved_role_evaluation_version_number")
+    private Integer approvedRoleEvaluationVersionNumber;
 }

@@ -10,21 +10,21 @@ import java.time.LocalDate;
 public class CreateEvidenceRequest {
     private String criterionKey;
     private EvidenceSourceType sourceType;
-    
+
     private String rawDocumentId;
     private String companyId;
     private String profileDocumentId;
     private Integer profileVersion;
-    
+
     private String externalUrl;
     private LocalDate evidenceDate;
-    
+
     private String extractedFieldPath;
     private String evidenceCategory;
     private EvidenceReliability reliability;
-    
+
     private String note;
-    
+
     // For growthMomentumScore
     private LocalDate periodStart;
     private LocalDate periodEnd;

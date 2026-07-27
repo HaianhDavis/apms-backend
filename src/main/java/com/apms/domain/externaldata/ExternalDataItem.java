@@ -17,19 +17,19 @@ public class ExternalDataItem {
 
     @Id
     private String id;
-    
+
     private String title;
     private String summary;
     private String source;
     private String url;
     private LocalDateTime publishedAt;
-    
+
     private ExternalDataCategory category;
-    
+
     private String sentiment;
     private String riskLevel;
     private String opportunityLevel;
-    
+
     private String relatedCompanyName;
     private String relatedCompanyId;
 

@@ -12,6 +12,6 @@ public class CandidateApprovedEvent implements DomainEvent {
     private final String projectId;
     private final RelationshipType finalRelationshipType;
     private final Double confidenceScore;
-    
+
     // Additional candidate details needed by downstream Profile/Graph services can be added here
 }

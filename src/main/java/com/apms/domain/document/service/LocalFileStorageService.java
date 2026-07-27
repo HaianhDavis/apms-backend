@@ -48,7 +48,7 @@ public class LocalFileStorageService implements StorageService {
             if (originalFilename != null && originalFilename.contains(".")) {
                 extension = originalFilename.substring(originalFilename.lastIndexOf("."));
             }
-            
+
             String newFilename = UUID.randomUUID().toString() + extension;
             Path destinationFile = this.rootLocation.resolve(Paths.get(newFilename))
                     .normalize().toAbsolutePath();

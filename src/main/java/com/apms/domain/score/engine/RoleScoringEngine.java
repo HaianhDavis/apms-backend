@@ -31,9 +31,9 @@ public class RoleScoringEngine {
                 .orElseThrow(() -> new IllegalArgumentException("No active score rule set was found for role: " + request.getEvaluatedRole()));
 
         List<RoleCriterionRule> activeRules = criterionRuleRepository.findByRuleSetIdAndActiveTrueOrderByDisplayOrderAsc(ruleSet.getId());
-        
+
         List<String> expectedCriteria = CanonicalRoleCriteria.getCriteriaForRole(request.getEvaluatedRole());
-        
+
         if (activeRules.size() != 6) {
             throw new IllegalStateException("Exactly six active criterion rules must exist for rule set: " + ruleSet.getRuleSetVersion());
         }
@@ -47,7 +47,7 @@ public class RoleScoringEngine {
         if (ruleKeys.stream().distinct().count() != 6) {
             throw new IllegalStateException("No duplicate criterion keys are allowed");
         }
-        
+
         BigDecimal totalWeight = BigDecimal.ZERO;
         for (RoleCriterionRule rule : activeRules) {
             BigDecimal weight = rule.getWeight();
@@ -59,7 +59,7 @@ public class RoleScoringEngine {
             }
             totalWeight = totalWeight.add(weight);
         }
-        
+
         if (totalWeight.compareTo(new BigDecimal("1.00")) != 0) {
             throw new IllegalStateException("Criterion weights must sum to 1.00 for rule set: " + ruleSet.getRuleSetVersion());
         }

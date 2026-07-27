@@ -38,7 +38,7 @@ public class AuditLogController {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "timestamp"));
         PageResponse<AuditLogResponse> response = PageResponse.of(
                 auditLogQueryService.searchAuditLogs(actorUserId, action, entityType, entityId, fromDate, toDate, pageable));
-        
+
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

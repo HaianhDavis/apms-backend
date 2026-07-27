@@ -59,7 +59,7 @@ class AiExtractionResponseMapperTest {
         assertNotNull(output);
         assertNotNull(output.getExtractedData());
         assertEquals("Old Flat Company", output.getExtractedData().getLegalName());
-        
+
         assertNotNull(output.getFieldResults());
         assertTrue(output.getFieldResults().containsKey("legalName"));
         assertEquals("Old Flat Company", output.getFieldResults().get("legalName").getValue());

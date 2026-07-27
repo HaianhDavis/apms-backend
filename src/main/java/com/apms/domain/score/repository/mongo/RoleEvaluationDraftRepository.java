@@ -10,14 +10,14 @@ import java.util.Optional;
 public interface RoleEvaluationDraftRepository extends MongoRepository<RoleEvaluationDraft, String> {
 
     List<RoleEvaluationDraft> findByProjectIdAndTaskIdOrderByCreatedAtDesc(Long projectId, Long taskId);
-    
+
     List<RoleEvaluationDraft> findByTargetCompanyIdAndEvaluatedRoleOrderByCreatedAtDesc(String targetCompanyId, CompanyRole evaluatedRole);
-    
+
     Optional<RoleEvaluationDraft> findByActiveDraftKey(String activeDraftKey);
-    
+
     boolean existsByActiveDraftKey(String activeDraftKey);
-    
+
     Optional<RoleEvaluationDraft> findByApprovedSnapshotId(Long approvedSnapshotId);
-    
+
     Optional<RoleEvaluationDraft> findByApprovalIdempotencyKey(String approvalIdempotencyKey);
 }

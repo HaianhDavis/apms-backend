@@ -23,33 +23,33 @@ import java.util.Set;
 public class ReferenceCompanyContextResponse {
     private String companyProfileId;
     private Integer profileVersion;
-    
+
     private String legalName;
     private String tradeName;
-    
+
     private List<String> industries;
     private String businessModel;
     private List<CompanyProfile.Product> products;
     private List<String> markets;
     private List<String> targetCustomers;
-    
+
     private Integer employeeCount;
     private String employeeTier;
     private String revenueTier;
-    
+
     private List<CompanyProfile.Address> headquarters; // actually List<Address>
     private String website;
-    
+
     private FinancialInfo financial;
     private MarketInfo market;
     private InnovationInfo innovation;
     private RiskInfo risk;
     private ComplianceInfo compliance;
-    
+
     private Set<String> sourceDocumentIds;
-    
+
     private OwnerProfileReadinessResponse readiness;
     private Map<String, ComparisonInputAvailabilityResponse> comparisonInputAvailability;
-    
+
     private LocalDateTime generatedAt;
 }

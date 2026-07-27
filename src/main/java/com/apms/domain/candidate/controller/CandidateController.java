@@ -162,7 +162,7 @@ public class CandidateController {
         if (request == null) {
             request = new ApproveCandidateRequest();
         }
-        
+
         return ResponseEntity.ok(ApiResponse.success(
                 candidateService.approveCandidate(candidateId, request, currentUser.getId()), "Candidate approved"));
     }

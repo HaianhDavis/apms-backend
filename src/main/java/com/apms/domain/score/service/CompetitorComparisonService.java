@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 public class CompetitorComparisonService {
 
     private static final String RUBRIC_VERSION = "COMPETITOR_OVERLAP_RUBRIC_V1";
-    
+
     private static final BigDecimal WEIGHT_PRODUCT_NAME = new BigDecimal("0.30");
     private static final BigDecimal WEIGHT_PRODUCT_CATEGORY = new BigDecimal("0.10");
     private static final BigDecimal WEIGHT_MARKET = new BigDecimal("0.25");
@@ -32,44 +32,44 @@ public class CompetitorComparisonService {
         suggestion.setGeneratedAt(LocalDateTime.now());
         suggestion.setMethod(CriterionSuggestionMethod.DETERMINISTIC);
         suggestion.setReviewStatus(CriterionSuggestionReviewStatus.PENDING);
-        
+
         List<String> missingComponents = new ArrayList<>();
         List<String> calculationWarnings = new ArrayList<>();
         LinkedHashMap<String, BigDecimal> componentScores = new LinkedHashMap<>();
         LinkedHashMap<String, BigDecimal> componentWeights = new LinkedHashMap<>();
-        
+
         // Extract data
         List<CompanyProfile.Product> targetProducts = getProducts(target);
         List<CompanyProfile.Product> referenceProducts = getProducts(reference);
-        
+
         List<String> targetMarkets = getMarkets(target);
         List<String> referenceMarkets = getMarkets(reference);
-        
+
         List<String> targetIndustries = getIndustries(target);
         List<String> referenceIndustries = getIndustries(reference);
-        
+
         List<String> targetCustomers = getTargetCustomers(target);
         List<String> referenceCustomers = getTargetCustomers(reference);
 
         // Calculate components
         BigDecimal productNameOverlap = calculateProductOverlap(targetProducts, referenceProducts, true);
-        processComponent("productNameOverlap", productNameOverlap, WEIGHT_PRODUCT_NAME, 
+        processComponent("productNameOverlap", productNameOverlap, WEIGHT_PRODUCT_NAME,
                 componentScores, componentWeights, missingComponents);
 
         BigDecimal productCategoryOverlap = calculateProductOverlap(targetProducts, referenceProducts, false);
-        processComponent("productCategoryOverlap", productCategoryOverlap, WEIGHT_PRODUCT_CATEGORY, 
+        processComponent("productCategoryOverlap", productCategoryOverlap, WEIGHT_PRODUCT_CATEGORY,
                 componentScores, componentWeights, missingComponents);
 
         BigDecimal marketOverlap = calculateStringListOverlap(targetMarkets, referenceMarkets);
-        processComponent("marketOverlap", marketOverlap, WEIGHT_MARKET, 
+        processComponent("marketOverlap", marketOverlap, WEIGHT_MARKET,
                 componentScores, componentWeights, missingComponents);
 
         BigDecimal industryOverlap = calculateStringListOverlap(targetIndustries, referenceIndustries);
-        processComponent("industryOverlap", industryOverlap, WEIGHT_INDUSTRY, 
+        processComponent("industryOverlap", industryOverlap, WEIGHT_INDUSTRY,
                 componentScores, componentWeights, missingComponents);
 
         BigDecimal targetCustomerOverlap = calculateStringListOverlap(targetCustomers, referenceCustomers);
-        processComponent("targetCustomerOverlap", targetCustomerOverlap, WEIGHT_TARGET_CUSTOMER, 
+        processComponent("targetCustomerOverlap", targetCustomerOverlap, WEIGHT_TARGET_CUSTOMER,
                 componentScores, componentWeights, missingComponents);
 
         suggestion.setComponentScores(componentScores);
@@ -82,7 +82,7 @@ public class CompetitorComparisonService {
         // Check coverage
         boolean hasProductName = componentScores.containsKey("productNameOverlap");
         int additionalComponents = componentScores.size() - (hasProductName ? 1 : 0);
-        
+
         BigDecimal totalCoverage = BigDecimal.ZERO;
         for (BigDecimal weight : componentWeights.values()) {
             totalCoverage = totalCoverage.add(weight);
@@ -117,9 +117,9 @@ public class CompetitorComparisonService {
             // "If minimum coverage is not met: suggestedRawScore = null ... Do not pass a partial suggestion to RoleScoringEngine as an official criterion input."
             // The score is just the sum of score * weight. But since it's an overall overlap out of 100, if they miss a component, should the score be divided by coverage?
             // "missing components are not silently reweighted". If we don't reweight, a missing component just counts as 0 overlap, which penalizes the competitor score. That's what "not silently reweighted" means.
-            
+
             suggestion.setSuggestedRawScore(totalScore.setScale(2, RoundingMode.HALF_UP));
-            
+
             if (missingComponents.isEmpty()) {
                 suggestion.setSuggestionRationale("Automatic suggestion based on full product-market overlap components.");
                 suggestion.setExplanation("Automatic suggestion based on full product-market overlap components.");
@@ -131,11 +131,11 @@ public class CompetitorComparisonService {
                 suggestion.setValidationStatus(CriterionSuggestionValidationStatus.WARNING);
             }
         }
-        
+
         return suggestion;
     }
-    
-    private void processComponent(String name, BigDecimal score, BigDecimal weight, 
+
+    private void processComponent(String name, BigDecimal score, BigDecimal weight,
             LinkedHashMap<String, BigDecimal> scores, LinkedHashMap<String, BigDecimal> weights, List<String> missing) {
         if (score == null) {
             missing.add(name);
@@ -148,17 +148,17 @@ public class CompetitorComparisonService {
     private BigDecimal calculateProductOverlap(List<CompanyProfile.Product> target, List<CompanyProfile.Product> reference, boolean useName) {
         if (target == null && reference == null) return null;
         if (target == null || reference == null) return null; // "one side empty and completeness unknown -> null"
-        
+
         List<String> tStrings = target.stream()
                 .map(p -> useName ? p.getName() : p.getCategory())
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
-                
+
         List<String> rStrings = reference.stream()
                 .map(p -> useName ? p.getName() : p.getCategory())
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
-                
+
         return calculateStringListOverlap(tStrings, rStrings);
     }
 
@@ -166,7 +166,7 @@ public class CompetitorComparisonService {
         if (target == null || reference == null) {
             return null;
         }
-        
+
         // If one side confirmed complete and genuinely empty -> 0
         if (target.isEmpty() || reference.isEmpty()) {
             return BigDecimal.ZERO;
@@ -191,7 +191,7 @@ public class CompetitorComparisonService {
 
         BigDecimal num = new BigDecimal(intersection.size());
         BigDecimal den = new BigDecimal(union.size());
-        
+
         return num.divide(den, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100")).setScale(2, RoundingMode.HALF_UP);
     }
 

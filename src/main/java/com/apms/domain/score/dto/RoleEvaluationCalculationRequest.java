@@ -27,10 +27,14 @@ public class RoleEvaluationCalculationRequest {
     private LinkedHashMap<String, BigDecimal> criterionScores = new LinkedHashMap<>();
     @Builder.Default
     private Map<String, List<String>> criterionEvidenceRefs = new LinkedHashMap<>();
-    
+
     private Long calculatedByAccountId;
-    
+
     // --- Phase 2B Cross-DB Approval Idempotency ---
     private String sourceEvaluationDraftId;
     private String approvalIdempotencyKey;
+
+    // --- Phase 2C.9A Cross-Role Traceability Hardening ---
+    private String approvedRoleEvaluationVersionId;
+    private Integer approvedRoleEvaluationVersionNumber;
 }

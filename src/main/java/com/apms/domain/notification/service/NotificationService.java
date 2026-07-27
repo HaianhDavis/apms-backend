@@ -89,7 +89,7 @@ public class NotificationService {
     @Transactional
     public void markAsRead(Long notificationId) {
         Notification notification = getNotificationWithAccessCheck(notificationId);
-        
+
         if (Boolean.FALSE.equals(notification.getIsRead())) {
             notification.setIsRead(true);
             notification.setReadAt(LocalDateTime.now());
@@ -121,7 +121,7 @@ public class NotificationService {
                 n.setReadAt(now);
             });
             notificationRepository.saveAll(unread);
-            
+
             auditLogService.log(currentUser.getId(), AuditAction.NOTIFICATION_READ, "Notification", "ALL", "All notifications marked as read");
         }
     }
@@ -129,7 +129,7 @@ public class NotificationService {
     @Transactional
     public void deleteNotification(Long notificationId) {
         Notification notification = getNotificationWithAccessCheck(notificationId);
-        
+
         if (Boolean.FALSE.equals(notification.getIsDeleted())) {
             notification.setIsDeleted(true);
             notificationRepository.save(notification);

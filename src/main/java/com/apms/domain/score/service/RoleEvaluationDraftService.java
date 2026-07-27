@@ -28,10 +28,19 @@ import com.apms.domain.score.enums.CriterionSuggestionValidationStatus;
 import com.apms.domain.score.enums.CriterionSuggestionReviewStatus;
 import com.apms.domain.score.repository.sql.RoleScoreRuleSetRepository;
 import com.apms.domain.score.repository.mongo.RoleEvaluationDraftRepository;
+import com.apms.domain.score.dto.draft.SourceSelectionRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.apms.common.exception.BusinessConflictException;
+import com.apms.domain.score.enums.EvaluationCompletenessStatus;
+import com.apms.domain.score.draft.ApprovedSourceReference;
+import com.apms.domain.score.draft.SourceSnapshotHasher;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -46,6 +55,7 @@ public class RoleEvaluationDraftService {
     private final ProjectRepository projectRepository;
     private final ProjectTaskRepository taskRepository;
     private final RoleScoreRuleSetRepository ruleSetRepository;
+    private final MongoTemplate mongoTemplate;
 
     private final CompanyProfileIdentifierResolver identifierResolver;
     private final OwnerOrganizationProperties ownerProperties;
@@ -55,6 +65,7 @@ public class RoleEvaluationDraftService {
     private final RelationshipTypeToCompanyRoleMapper roleMapper;
     private final AuditLogService auditLogService;
     private final CriterionSuggestionValidator suggestionValidator;
+    private final SourcePinningValidator sourcePinningValidator;
 
     @Transactional
     public RoleEvaluationDraftResponse createDraft(Long projectId, Long taskId, CreateRoleEvaluationDraftRequest request, Long accountId) {
@@ -516,5 +527,33 @@ public class RoleEvaluationDraftService {
         response.setReviewComment(draft.getReviewComment());
 
         return response;
+    }
+
+    public void pinSourceReferences(String draftId, List<SourceSelectionRequest> requests, Integer expectedWorkingRevisionNumber, Long expectedOptimisticVersion) {
+        RoleEvaluationDraft draft = draftRepository.findById(draftId)
+                .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+
+        if (draft.getStatus() != RoleEvaluationStatus.DRAFT && draft.getStatus() != RoleEvaluationStatus.REVISION_REQUIRED) {
+            throw new IllegalStateException("Draft cannot be edited in current state");
+        }
+
+        List<ApprovedSourceReference> verifiedReferences = sourcePinningValidator.validateAndBuildReferences(requests, draft);
+        String snapshotHash = SourceSnapshotHasher.hash(verifiedReferences);
+
+        Query query = new Query(Criteria.where("_id").is(draftId)
+                .and("workingRevisionNumber").is(expectedWorkingRevisionNumber)
+                .and("optimisticVersion").is(expectedOptimisticVersion));
+
+        Update update = new Update()
+                .set("pinnedSourceReferences", verifiedReferences)
+                .set("sourceSnapshotHash", snapshotHash)
+                .inc("workingRevisionNumber", 1)
+                .inc("optimisticVersion", 1)
+                .set("updatedAt", LocalDateTime.now());
+
+        var result = mongoTemplate.updateFirst(query, update, RoleEvaluationDraft.class);
+        if (result.getMatchedCount() == 0) {
+            throw new BusinessConflictException("Concurrent modification detected. Draft was modified by another writer.");
+        }
     }
 }

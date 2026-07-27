@@ -49,7 +49,7 @@ public class ProjectTaskController {
                 .anyMatch(authority -> "ROLE_BUSINESS_DEVELOPMENT_STAFF".equals(authority.getAuthority()));
         PageResponse<ProjectTaskResponse> response = PageResponse.of(
                 projectTaskService.getTasks(projectId, status, assignedToUserId, pageable, currentUser.getId(), staffOnly));
-        
+
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
