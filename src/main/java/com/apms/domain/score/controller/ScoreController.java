@@ -4,6 +4,7 @@ import com.apms.common.response.ApiResponse;
 import com.apms.domain.score.dto.ScoreRuleDto;
 import com.apms.domain.score.dto.ScoreSnapshotDto;
 import com.apms.domain.score.service.ScoreService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -24,7 +25,7 @@ public class ScoreController {
     // ─────────────────────────────────────────────
 
     @GetMapping("/profiles/{companyId}/scores")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<List<ScoreSnapshotDto>>> getCompanyScores(@PathVariable String companyId) {
         return ResponseEntity.ok(ApiResponse.success(scoreService.getCompanyScores(companyId)));
     }
@@ -34,21 +35,21 @@ public class ScoreController {
     // ─────────────────────────────────────────────
 
     @GetMapping("/score-rules")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<List<ScoreRuleDto>>> getAllRules() {
         return ResponseEntity.ok(ApiResponse.success(scoreService.getAllRules()));
     }
 
     @PostMapping("/score-rules")
     @PreAuthorize("hasRole('BUSINESS_OWNER')")
-    public ResponseEntity<ApiResponse<ScoreRuleDto>> createRule(@RequestBody ScoreRuleDto request) {
+    public ResponseEntity<ApiResponse<ScoreRuleDto>> createRule(@Valid @RequestBody ScoreRuleDto request) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(scoreService.createRule(request), "Score rule created"));
     }
 
     @PutMapping("/score-rules/{id}")
     @PreAuthorize("hasRole('BUSINESS_OWNER')")
-    public ResponseEntity<ApiResponse<ScoreRuleDto>> updateRule(@PathVariable Long id, @RequestBody ScoreRuleDto request) {
+    public ResponseEntity<ApiResponse<ScoreRuleDto>> updateRule(@PathVariable Long id, @Valid @RequestBody ScoreRuleDto request) {
         return ResponseEntity.ok(ApiResponse.success(scoreService.updateRule(id, request), "Score rule updated"));
     }
 

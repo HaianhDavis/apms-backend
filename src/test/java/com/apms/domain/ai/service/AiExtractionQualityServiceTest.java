@@ -198,6 +198,15 @@ class AiExtractionQualityServiceTest {
 
             assertEquals(ExtractionValidationStatus.PASS, fields.get("industries").getValidationStatus());
         }
+
+        @Test
+        @DisplayName("Null entry in map should not cause NPE")
+        void nullEntryInMap_shouldNotNpe() {
+            Map<String, ExtractionFieldResult> fields = new HashMap<>();
+            fields.put("tradeName", null);
+
+            assertDoesNotThrow(() -> service.validateExtraction(fields));
+        }
     }
 
     // ─────────────────────────────────────────────

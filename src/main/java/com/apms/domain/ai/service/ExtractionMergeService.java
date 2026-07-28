@@ -61,6 +61,17 @@ public class ExtractionMergeService {
             }
         }
 
+        // 1.1 Prevent creating duplicate DRAFT candidates if one already exists for any of these extractionIds in this project
+        org.springframework.data.domain.Page<CompanyCandidate> existingDraftsPage =
+                candidateRepository.findByProjectIdAndStatus(String.valueOf(projectId), CandidateStatus.DRAFT, org.springframework.data.domain.Pageable.unpaged());
+        List<CompanyCandidate> existingDrafts = existingDraftsPage != null ? existingDraftsPage.getContent() : Collections.emptyList();
+        for (CompanyCandidate draft : existingDrafts) {
+            if (draft.getExtractionIds() != null && !Collections.disjoint(draft.getExtractionIds(), extractionIds)) {
+                log.info("Reusing existing candidate DRAFT id={} for project {} matching extractionIds {}", draft.getId(), projectId, extractionIds);
+                return buildResponse(draft, extractions, false);
+            }
+        }
+
         // 2. Collect source refs
         List<String> sourceDocIds = new ArrayList<>();
         List<String> importJobIds = new ArrayList<>();
@@ -638,6 +649,22 @@ public class ExtractionMergeService {
             log.warn("Could not convert section to map", e);
             return Collections.emptyMap();
         }
+    }
+
+    private MergeCandidateResponse buildResponse(CompanyCandidate candidate, List<AiExtractionCache> extractions, boolean isExisting) {
+        return MergeCandidateResponse.builder()
+                .candidateId(candidate.getId())
+                .identity(sectionToMap(candidate.getIdentity()))
+                .business(sectionToMap(candidate.getBusiness()))
+                .contact(sectionToMap(candidate.getContact()))
+                .insights(sectionToMap(candidate.getInsights()))
+                .fieldEvidence(Collections.emptyList())
+                .hasConflicts(false)
+                .conflictCount(0)
+                .sourceDocumentIds(candidate.getSourceDocumentIds() != null ? candidate.getSourceDocumentIds() : Collections.emptyList())
+                .importJobIds(Collections.emptyList())
+                .extractionIds(candidate.getExtractionIds() != null ? candidate.getExtractionIds() : Collections.emptyList())
+                .build();
     }
 
     private static class MergedCandidateData {

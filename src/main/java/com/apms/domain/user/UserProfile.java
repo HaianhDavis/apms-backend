@@ -19,14 +19,17 @@ public class UserProfile {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "account_id", nullable = false, unique = true)
+    // Keep legacy dev databases bootable: older rows in `users` may not have an account yet.
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "account_id", nullable = true)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     private Account account;
 
     private String firstName;
     private String lastName;
+    private String email;
+    private String passwordHash;
     private String phone;
     private String department;
     private String position;

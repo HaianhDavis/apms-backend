@@ -11,6 +11,7 @@ import com.apms.security.UserDetailsImpl;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -48,35 +49,59 @@ public class CandidateController {
     public ResponseEntity<ApiResponse<CandidateResponse>> createFromExtractionId(
             @PathVariable String extractionId,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-
-        CandidateResponse response = candidateService.createFromExtractionId(extractionId, currentUser.getId());
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success(response, "Candidate created from reviewed AI extraction"));
+        try {
+            CandidateResponse response = candidateService.createFromExtractionId(extractionId, currentUser.getId());
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(ApiResponse.success(response, "Candidate created from reviewed AI extraction"));
+        } catch (com.apms.common.exception.ResourceNotFoundException e) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("Không thể tạo Ứng viên: " + e.getMessage() + " (Nếu bạn đang dùng chế độ local, tính năng này tạm thời không khả dụng vì MongoDB đang lỗi)."));
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body(ApiResponse.error("Lỗi hệ thống khi tạo Ứng viên. Vui lòng thử lại sau."));
+        }
     }
 
     // ─────────────────────────────────────────────
-    // GET /api/v1/projects/{projectId}/candidates
-    // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
     // ─────────────────────────────────────────────
-    @GetMapping("/projects/{projectId}/candidates")
-    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.isMemberOrOwner(#projectId == null ? -1 : Long.parseLong(#projectId))")
-    public ResponseEntity<ApiResponse<PageResponse<CandidateResponse>>> getProjectCandidates(
-            @PathVariable String projectId,
+    // GET /api/v1/candidates
+    // Role: All authenticated business roles
+    // ─────────────────────────────────────────────
+    @GetMapping("/candidates")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<PageResponse<CandidateResponse>>> getAllCandidates(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "candidateOrder"));
         PageResponse<CandidateResponse> response = PageResponse.of(
-                candidateService.getProjectCandidates(projectId, pageable));
+                candidateService.getAllCandidates(pageable));
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    // ─────────────────────────────────────────────
+    // GET /api/v1/projects/{projectId}/candidates
+    // Role: BUSINESS_DEVELOPMENT_STAFF, KEY_MEMBER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
+    // ─────────────────────────────────────────────
+    @GetMapping("/projects/{projectId}/candidates")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<PageResponse<CandidateResponse>>> getProjectCandidates(
+            @PathVariable Long projectId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "candidateOrder"));
+        PageResponse<CandidateResponse> response = PageResponse.of(
+                candidateService.getProjectCandidates(String.valueOf(projectId), pageable));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     // ─────────────────────────────────────────────
     // GET /api/v1/candidates/{candidateId}
-    // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
+    // Role: BUSINESS_DEVELOPMENT_STAFF, KEY_MEMBER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
     // ─────────────────────────────────────────────
     @GetMapping("/candidates/{candidateId}")
-    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.canAccessCandidate(#candidateId)")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.canAccessCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> getCandidate(
             @PathVariable String candidateId) {
 
@@ -85,25 +110,28 @@ public class CandidateController {
 
     // ─────────────────────────────────────────────
     // PATCH /api/v1/candidates/{candidateId}
-    // Role: BUSINESS_DEVELOPMENT_STAFF
+    // Role: BUSINESS_DEVELOPMENT_STAFF, KEY_MEMBER
     // ─────────────────────────────────────────────
     @PatchMapping("/candidates/{candidateId}")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> updateCandidate(
             @PathVariable String candidateId,
-            @RequestBody UpdateCandidateRequest request,
+            @Valid @RequestBody UpdateCandidateRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
+        if (currentUser == null) {
+            throw new AccessDeniedException("Authentication required");
+        }
         return ResponseEntity.ok(ApiResponse.success(
                 candidateService.updateCandidate(candidateId, request, currentUser.getId()), "Candidate updated successfully"));
     }
 
     // ─────────────────────────────────────────────
     // POST /api/v1/candidates/{candidateId}/submit
-    // Role: BUSINESS_DEVELOPMENT_STAFF
+    // Role: BUSINESS_DEVELOPMENT_STAFF, KEY_MEMBER
     // ─────────────────────────────────────────────
     @PostMapping("/candidates/{candidateId}/submit")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> submitCandidate(
             @PathVariable String candidateId) {
 
@@ -113,10 +141,10 @@ public class CandidateController {
 
     // ─────────────────────────────────────────────
     // POST /api/v1/candidates/{candidateId}/correct
-    // Role: BUSINESS_DEVELOPMENT_STAFF
+    // Role: BUSINESS_DEVELOPMENT_STAFF, KEY_MEMBER
     // ─────────────────────────────────────────────
     @PostMapping("/candidates/{candidateId}/correct")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> correctCandidate(
             @PathVariable String candidateId) {
 
@@ -147,7 +175,7 @@ public class CandidateController {
     @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<CandidateResponse>> approveCandidate(
             @PathVariable String candidateId,
-            @RequestBody(required = false) ApproveCandidateRequest request,
+            @Valid @RequestBody(required = false) ApproveCandidateRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         if (request == null) {

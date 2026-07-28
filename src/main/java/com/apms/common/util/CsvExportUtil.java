@@ -8,11 +8,17 @@ public class CsvExportUtil {
         if (field == null) {
             return "";
         }
-        // If the field contains a comma, quote, or newline, we must wrap it in quotes and escape internal quotes
-        if (field.contains(",") || field.contains("\"") || field.contains("\n") || field.contains(";")) {
-            return "\"" + field.replace("\"", "\"\"") + "\"";
+        String sanitized = field;
+        if (sanitized.startsWith("=") || sanitized.startsWith("+") || 
+            sanitized.startsWith("-") || sanitized.startsWith("@") || 
+            sanitized.startsWith("\t") || sanitized.startsWith("\r")) {
+            sanitized = "'" + sanitized;
         }
-        return field;
+        // If the field contains a comma, quote, or newline, we must wrap it in quotes and escape internal quotes
+        if (sanitized.contains(",") || sanitized.contains("\"") || sanitized.contains("\n") || sanitized.contains("\r") || sanitized.contains(";")) {
+            return "\"" + sanitized.replace("\"", "\"\"") + "\"";
+        }
+        return sanitized;
     }
 
     public static String escapeList(List<String> list) {

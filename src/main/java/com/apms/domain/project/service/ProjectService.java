@@ -11,6 +11,7 @@ import com.apms.domain.project.dto.*;
 import com.apms.domain.project.repository.sql.ProjectMemberRepository;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.user.repository.sql.AccountRepository;
+import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -125,17 +126,23 @@ public class ProjectService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ProjectResponse> getAllProjects(ProjectStatus status, ProjectType type, Pageable pageable) {
+    public Page<ProjectResponse> getAllProjects(ProjectStatus status, ProjectType type, Pageable pageable, UserDetailsImpl currentUser) {
         Page<Project> page;
+        boolean isStaff = currentUser != null && currentUser.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DEVELOPMENT_STAFF"));
 
-        if (status != null && type != null) {
-            page = projectRepository.findByStatusAndProjectType(status, type, pageable);
-        } else if (status != null) {
-            page = projectRepository.findByStatus(status, pageable);
-        } else if (type != null) {
-            page = projectRepository.findByProjectType(type, pageable);
+        if (isStaff) {
+            page = projectRepository.findByMemberAccountId(currentUser.getId(), pageable);
         } else {
-            page = projectRepository.findAll(pageable);
+            if (status != null && type != null) {
+                page = projectRepository.findByStatusAndProjectType(status, type, pageable);
+            } else if (status != null) {
+                page = projectRepository.findByStatus(status, pageable);
+            } else if (type != null) {
+                page = projectRepository.findByProjectType(type, pageable);
+            } else {
+                page = projectRepository.findAll(pageable);
+            }
         }
 
         return page.map(p -> {

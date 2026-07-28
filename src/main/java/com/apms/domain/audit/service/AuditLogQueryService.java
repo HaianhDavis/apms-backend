@@ -57,13 +57,14 @@ public class AuditLogQueryService {
         List<AuditLog> logs = auditLogRepository.findAll(spec);
 
         StringBuilder csv = new StringBuilder();
-        csv.append("ID,Actor User ID,Action,Entity Type,Entity ID,Details,Created At\n");
+        csv.append("ID,Actor User ID,Actor Email,Action,Entity Type,Entity ID,Details,Created At\n");
         DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
         for (AuditLog logItem : logs) {
             csv.append(logItem.getId()).append(",");
             csv.append(logItem.getActorAccountId() != null ? logItem.getActorAccountId() : "").append(",");
-            csv.append(CsvExportUtil.escapeField(logItem.getAction().name())).append(",");
+            csv.append(CsvExportUtil.escapeField(logItem.getActorAccount() != null ? logItem.getActorAccount().getEmail() : "")).append(",");
+            csv.append(CsvExportUtil.escapeField(logItem.getAction() != null ? logItem.getAction().name() : "")).append(",");
             csv.append(CsvExportUtil.escapeField(logItem.getEntityType())).append(",");
             csv.append(CsvExportUtil.escapeField(logItem.getEntityId())).append(",");
             csv.append(CsvExportUtil.escapeField(logItem.getDetail())).append(",");

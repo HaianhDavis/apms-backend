@@ -8,6 +8,7 @@ import com.apms.domain.contract.entity.PartnerContractClauseVersion;
 import com.apms.domain.contract.service.PartnerContractExtractionService;
 import com.apms.domain.contract.service.PartnerContractService;
 import com.apms.security.UserDetailsImpl;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -39,7 +40,7 @@ public class PartnerContractExtractionController {
             @PathVariable Long contractId,
             @PathVariable String extractionId,
             @PathVariable String fieldKey,
-            @RequestBody ReviewExtractionFieldRequest request,
+            @Valid @RequestBody ReviewExtractionFieldRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
         return extractionService.reviewField(contractId, extractionId, fieldKey, request, currentUser.getId());
     }
@@ -50,7 +51,7 @@ public class PartnerContractExtractionController {
             @PathVariable Long contractId,
             @PathVariable String extractionId,
             @PathVariable String clauseCandidateId,
-            @RequestBody ReviewExtractionClauseRequest request,
+            @Valid @RequestBody ReviewExtractionClauseRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
         return extractionService.reviewClause(contractId, extractionId, clauseCandidateId, request, currentUser.getId());
     }
@@ -61,7 +62,7 @@ public class PartnerContractExtractionController {
     public PartnerContractExtractionDraft applyExtraction(
             @PathVariable Long contractId,
             @PathVariable String extractionId,
-            @RequestBody ApplyExtractionRequest request,
+            @Valid @RequestBody ApplyExtractionRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
         return extractionService.applyExtraction(contractId, extractionId, request, currentUser.getId());
     }

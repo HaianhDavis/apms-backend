@@ -3,6 +3,7 @@ package com.apms.domain.contract.controller;
 import com.apms.domain.contract.dto.*;
 import com.apms.domain.contract.service.PartnerContractService;
 import com.apms.security.UserDetailsImpl;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -23,7 +24,7 @@ public class PartnerContractController {
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public PartnerContractResponse createDraft(
             @PathVariable Long projectId,
-            @RequestBody CreatePartnerContractRequest request,
+            @Valid @RequestBody CreatePartnerContractRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
         return contractService.createDraft(projectId, request, currentUser.getId());
     }
@@ -40,7 +41,7 @@ public class PartnerContractController {
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public PartnerContractResponse updateContract(
             @PathVariable Long contractId,
-            @RequestBody UpdatePartnerContractRequest request,
+            @Valid @RequestBody UpdatePartnerContractRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
         return contractService.updateContract(contractId, request, currentUser.getId());
     }
@@ -59,7 +60,7 @@ public class PartnerContractController {
     @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
     public void reviewContract(
             @PathVariable Long contractId,
-            @RequestBody ReviewPartnerContractRequest request,
+            @Valid @RequestBody ReviewPartnerContractRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
         contractService.reviewContract(contractId, request, currentUser.getId());
     }
@@ -69,7 +70,7 @@ public class PartnerContractController {
     @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
     public PartnerContractResponse updateLifecycle(
             @PathVariable Long contractId,
-            @RequestBody UpdateContractLifecycleRequest request,
+            @Valid @RequestBody UpdateContractLifecycleRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
         return contractService.updateLifecycle(contractId, request, currentUser.getId());
     }

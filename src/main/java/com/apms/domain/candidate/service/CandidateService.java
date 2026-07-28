@@ -162,6 +162,11 @@ public class CandidateService {
         return candidateRepository.findByProjectId(projectId, pageable).map(this::toResponse);
     }
 
+    @Transactional(readOnly = true)
+    public Page<CandidateResponse> getAllCandidates(Pageable pageable) {
+        return candidateRepository.findAll(pageable).map(this::toResponse);
+    }
+
     // ─────────────────────────────────────────────
     // WORKFLOW STATE MACHINE & UPDATES
     // ─────────────────────────────────────────────
@@ -170,8 +175,8 @@ public class CandidateService {
     public CandidateResponse updateCandidate(String candidateId, UpdateCandidateRequest request, Long userId) {
         CompanyCandidate candidate = findCandidateOrThrow(candidateId);
 
-        if (candidate.getStatus() == CandidateStatus.APPROVED || candidate.getStatus() == CandidateStatus.REJECTED) {
-            throw new BusinessValidationException("Cannot edit candidate in status: " + candidate.getStatus());
+        if (candidate.getStatus() != CandidateStatus.DRAFT && candidate.getStatus() != CandidateStatus.CORRECTED) {
+            throw new BusinessValidationException("Cannot edit candidate in status: " + candidate.getStatus() + ". Only DRAFT or CORRECTED candidates can be edited.");
         }
 
         if (request.getIdentity() != null) candidate.setIdentity(request.getIdentity());
@@ -213,6 +218,45 @@ public class CandidateService {
         candidate = candidateRepository.save(candidate);
         log.info("Candidate submitted for review: id={}", candidateId);
         return toResponse(candidate);
+    }
+
+    /**
+     * Manager board transition. These stages intentionally map to the existing
+     * CompanyCandidate workflow instead of introducing recruitment-only states.
+     */
+    @Transactional
+    public CandidateResponse moveCandidateStage(Long projectId, String candidateId, CandidateStatus targetStatus, Long managerId) {
+        CompanyCandidate candidate = findCandidateOrThrow(candidateId);
+        if (!String.valueOf(projectId).equals(candidate.getProjectId())) {
+            throw new BusinessValidationException("Candidate does not belong to this project");
+        }
+        if (candidate.getStatus() == targetStatus) {
+            return toResponse(candidate);
+        }
+
+        if (targetStatus == CandidateStatus.APPROVED) {
+            return approveCandidate(candidateId, new ApproveCandidateRequest(), managerId);
+        }
+        if (targetStatus == CandidateStatus.REJECTED) {
+            RejectCandidateRequest rejection = new RejectCandidateRequest();
+            rejection.setRejectionReason("Moved to rejected from the project board");
+            return rejectCandidate(candidateId, rejection, managerId);
+        }
+        if (candidate.getStatus() == CandidateStatus.APPROVED || candidate.getStatus() == CandidateStatus.REJECTED) {
+            throw new BusinessValidationException("Approved or rejected candidates cannot be moved back on the board");
+        }
+        if (targetStatus == CandidateStatus.PENDING_REVIEW
+                && candidate.getStatus() != CandidateStatus.DRAFT
+                && candidate.getStatus() != CandidateStatus.CORRECTED) {
+            throw new BusinessValidationException("Only new or screening candidates can move to review");
+        }
+
+        candidate.setStatus(targetStatus);
+        if (candidate.getMetadata() != null) {
+            candidate.getMetadata().setLastModifiedBy(String.valueOf(managerId));
+            candidate.getMetadata().setUpdatedAt(LocalDateTime.now());
+        }
+        return toResponse(candidateRepository.save(candidate));
     }
 
     @Transactional
@@ -289,6 +333,9 @@ public class CandidateService {
 
         // Determine final relationship type
         final String projectId = candidate.getProjectId();
+        if (projectId == null || projectId.isBlank()) {
+            throw new BusinessValidationException("Candidate has no associated projectId");
+        }
         Project project = projectRepository.findById(Long.valueOf(projectId))
                 .orElseThrow(() -> new BusinessValidationException("Project not found: " + projectId));
 

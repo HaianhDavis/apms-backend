@@ -36,7 +36,7 @@ public class AiController {
     // POST /api/v1/import-jobs/{importJobId}/ai-extractions
     // ─────────────────────────────────────────────
     @PostMapping("/import-jobs/{importJobId}/ai-extractions")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER')")
     public ResponseEntity<ApiResponse<AiExtractionResult>> extractCompanyData(
             @PathVariable Long importJobId) {
 
@@ -48,10 +48,9 @@ public class AiController {
     // GET /api/v1/import-jobs/{importJobId}/ai-extractions/latest
     // ─────────────────────────────────────────────
     @GetMapping("/import-jobs/{importJobId}/ai-extractions/latest")
-    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER')")
     public ResponseEntity<ApiResponse<com.apms.domain.ai.AiExtractionCache>> getLatestExtraction(
             @PathVariable Long importJobId) {
-
         com.apms.domain.ai.AiExtractionCache result = aiExtractionService.getLatestExtraction(importJobId);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
@@ -60,7 +59,7 @@ public class AiController {
     // PATCH /api/v1/ai-extractions/{extractionId}
     // ─────────────────────────────────────────────
     @PatchMapping("/ai-extractions/{extractionId}")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER')")
     public ResponseEntity<ApiResponse<com.apms.domain.ai.AiExtractionCache>> updateExtraction(
             @PathVariable String extractionId,
             @org.springframework.web.bind.annotation.RequestBody com.apms.domain.ai.dto.ExtractedCompanyData request,
@@ -74,7 +73,7 @@ public class AiController {
     // GET /api/v1/ai-extractions/{extractionId}/quality
     // ─────────────────────────────────────────────
     @GetMapping("/ai-extractions/{extractionId}/quality")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER')")
     public ResponseEntity<ApiResponse<com.apms.domain.ai.AiExtractionCache>> getExtractionQuality(
             @PathVariable String extractionId) {
 
@@ -86,7 +85,7 @@ public class AiController {
     // PATCH /api/v1/ai-extractions/{extractionId}/fields/{fieldName}/review
     // ─────────────────────────────────────────────
     @PatchMapping("/ai-extractions/{extractionId}/fields/{fieldName}/review")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER')")
     public ResponseEntity<ApiResponse<com.apms.domain.ai.AiExtractionCache>> reviewExtractionField(
             @PathVariable String extractionId,
             @PathVariable String fieldName,

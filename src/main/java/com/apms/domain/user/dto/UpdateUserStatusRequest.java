@@ -5,6 +5,11 @@ import lombok.Data;
 
 @Data
 public class UpdateUserStatusRequest {
-    @NotNull
     private Boolean enabled;
+    private Boolean isActive;
+
+    @NotNull
+    public Boolean getEnabled() {
+        return enabled != null ? enabled : isActive;
+    }
 }

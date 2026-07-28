@@ -6,6 +6,8 @@ import com.apms.common.response.PageResponse;
 import com.apms.domain.project.dto.CreateProjectTaskRequest;
 import com.apms.domain.project.dto.ProjectTaskResponse;
 import com.apms.domain.project.dto.ProjectTaskWorkbenchResponse;
+import com.apms.domain.project.dto.ProjectTaskDraftResponse;
+import com.apms.domain.project.dto.SaveProjectTaskDraftRequest;
 import com.apms.domain.project.dto.UpdateProjectTaskRequest;
 import com.apms.domain.project.service.ProjectTaskService;
 import jakarta.validation.Valid;
@@ -29,11 +31,12 @@ public class ProjectTaskController {
             @PathVariable Long projectId,
             @Valid @RequestBody CreateProjectTaskRequest request) {
 
-        return ResponseEntity.ok(ApiResponse.success(projectTaskService.createTask(projectId, request), "Task created"));
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED)
+                .body(ApiResponse.success(projectTaskService.createTask(projectId, request), "Task created"));
     }
 
     @GetMapping
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId))")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER') and @projectSecurity.isMemberOrOwner(#projectId))")
     public ResponseEntity<ApiResponse<PageResponse<ProjectTaskResponse>>> getTasks(
             @PathVariable Long projectId,
             @RequestParam(required = false) TaskStatus status,
@@ -49,7 +52,7 @@ public class ProjectTaskController {
     }
 
     @PatchMapping("/{taskId}")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId))")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER') and @projectSecurity.isMemberOrOwner(#projectId))")
     public ResponseEntity<ApiResponse<ProjectTaskResponse>> updateTask(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
@@ -59,11 +62,28 @@ public class ProjectTaskController {
     }
 
     @GetMapping("/{taskId}/workbench")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId))")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER') and @projectSecurity.isMemberOrOwner(#projectId))")
     public ResponseEntity<ApiResponse<ProjectTaskWorkbenchResponse>> getTaskWorkbench(
             @PathVariable Long projectId,
             @PathVariable Long taskId) {
 
         return ResponseEntity.ok(ApiResponse.success(projectTaskService.getTaskWorkbench(projectId, taskId)));
+    }
+
+    @GetMapping("/{taskId}/draft")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId))")
+    public ResponseEntity<ApiResponse<ProjectTaskDraftResponse>> getDraft(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId) {
+        return ResponseEntity.ok(ApiResponse.success(projectTaskService.getDraft(projectId, taskId)));
+    }
+
+    @PutMapping("/{taskId}/draft")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId))")
+    public ResponseEntity<ApiResponse<ProjectTaskDraftResponse>> saveDraft(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @Valid @RequestBody SaveProjectTaskDraftRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(projectTaskService.saveDraft(projectId, taskId, request), "Draft saved"));
     }
 }

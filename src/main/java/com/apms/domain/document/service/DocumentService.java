@@ -60,39 +60,43 @@ public class DocumentService {
         importJob = importJobRepository.save(importJob);
 
         // Create RawDocument in MongoDB
-        LocalDateTime now = LocalDateTime.now();
-        RawDocument rawDocument = RawDocument.builder()
-                .projectId(String.valueOf(projectId))
-                .importJobId(String.valueOf(importJob.getId()))
-                .source(RawDocument.Source.builder()
-                        .type(sourceType)
-                        .fileName(file.getOriginalFilename())
-                        .build())
-                .storage(RawDocument.Storage.builder()
-                        .provider("LOCAL")
-                        .path(localFilePath)
-                        .mimeType(file.getContentType())
-                        .sizeBytes(file.getSize())
-                        .build())
-                .processing(RawDocument.Processing.builder()
-                        .status("UPLOADED")
-                        .candidateCount(0)
-                        .startedAt(now)
-                        .build())
-                .metadata(RawDocument.Metadata.builder()
-                        .uploadedBy(String.valueOf(uploaderUserId))
-                        .uploadedAt(now)
-                        .updatedAt(now)
-                        .build())
-                .build();
+        try {
+            LocalDateTime now = LocalDateTime.now();
+            RawDocument rawDocument = RawDocument.builder()
+                    .projectId(String.valueOf(projectId))
+                    .importJobId(String.valueOf(importJob.getId()))
+                    .source(RawDocument.Source.builder()
+                            .type(sourceType)
+                            .fileName(file.getOriginalFilename())
+                            .build())
+                    .storage(RawDocument.Storage.builder()
+                            .provider("LOCAL")
+                            .path(localFilePath)
+                            .mimeType(file.getContentType())
+                            .sizeBytes(file.getSize())
+                            .build())
+                    .processing(RawDocument.Processing.builder()
+                            .status("UPLOADED")
+                            .candidateCount(0)
+                            .startedAt(now)
+                            .build())
+                    .metadata(RawDocument.Metadata.builder()
+                            .uploadedBy(String.valueOf(uploaderUserId))
+                            .uploadedAt(now)
+                            .updatedAt(now)
+                            .build())
+                    .build();
 
-        rawDocument = rawDocumentRepository.save(rawDocument);
+            rawDocument = rawDocumentRepository.save(rawDocument);
 
-        // Link ImportJob back to RawDocument
-        importJob.setRawDocumentId(rawDocument.getId());
-        importJobRepository.save(importJob);
+            // Link ImportJob back to RawDocument
+            importJob.setRawDocumentId(rawDocument.getId());
+            importJobRepository.save(importJob);
 
-        log.info("Document uploaded: jobId={}, rawDocId={}, project={}", importJob.getId(), rawDocument.getId(), projectId);
+            log.info("Document uploaded: jobId={}, rawDocId={}, project={}", importJob.getId(), rawDocument.getId(), projectId);
+        } catch (Exception e) {
+            log.warn("Failed to save RawDocument to MongoDB (is MongoDB running?). The file was saved locally at {}. jobId={}", localFilePath, importJob.getId(), e);
+        }
 
         return toImportJobResponse(importJob);
     }

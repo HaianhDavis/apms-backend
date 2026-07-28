@@ -20,7 +20,6 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -61,29 +60,37 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
     private static final String RETAILPLUS_ID = "6a31a0000000000000000009";
 
     @Override
-    @Transactional
     public void run(String... args) {
-        log.info("Running AssistantDemoDataSeeder to seed approved data...");
+        if (!Boolean.parseBoolean(System.getenv().getOrDefault("APMS_ENABLE_ASSISTANT_DEMO_DATA", "false"))) {
+            log.info("AssistantDemoDataSeeder skipped by default to keep dev startup stable.");
+            return;
+        }
 
-        Project project = ensureProjectExists();
+        try {
+            log.info("Running AssistantDemoDataSeeder to seed approved data...");
 
-        seedCompanyProfiles();
-        seedNeo4jGraph();
-        seedScoreSnapshots(project);
+            Project project = ensureProjectExists();
+            
+            seedCompanyProfiles();
+            seedNeo4jGraph();
+            seedScoreSnapshots(project);
 
-        log.info("");
-        log.info("AI Assistant demo data seeded:");
-        log.info("Demo Org: {}", ownerOrganizationService.getOwnerCompanyId());
-        log.info("FPT: {}", FPT_ID);
-        log.info("CMC: {}", CMC_ID);
-        log.info("Viettel: {}", VIETTEL_ID);
-        log.info("VNG: {}", VNG_ID);
-        log.info("MoMo: {}", MOMO_ID);
-        log.info("VNPT: {}", VNPT_ID);
-        log.info("AWS Vietnam: {}", AWS_ID);
-        log.info("Microsoft Vietnam: {}", MICROSOFT_ID);
-        log.info("RetailPlus Vietnam: {}", RETAILPLUS_ID);
-        log.info("");
+            log.info("");
+            log.info("AI Assistant demo data seeded:");
+            log.info("Demo Org: {}", ownerOrganizationService.getOwnerCompanyId());
+            log.info("FPT: {}", FPT_ID);
+            log.info("CMC: {}", CMC_ID);
+            log.info("Viettel: {}", VIETTEL_ID);
+            log.info("VNG: {}", VNG_ID);
+            log.info("MoMo: {}", MOMO_ID);
+            log.info("VNPT: {}", VNPT_ID);
+            log.info("AWS Vietnam: {}", AWS_ID);
+            log.info("Microsoft Vietnam: {}", MICROSOFT_ID);
+            log.info("RetailPlus Vietnam: {}", RETAILPLUS_ID);
+            log.info("");
+        } catch (Exception e) {
+            log.warn("AssistantDemoDataSeeder failed (likely MongoDB is unavailable). Skipping demo data seeding.", e);
+        }
     }
 
     private Project ensureProjectExists() {

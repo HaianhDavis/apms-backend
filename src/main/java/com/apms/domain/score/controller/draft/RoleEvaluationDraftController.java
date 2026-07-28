@@ -28,48 +28,48 @@ public class RoleEvaluationDraftController {
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/role-evaluations")
     @ResponseStatus(HttpStatus.CREATED)
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public RoleEvaluationDraftResponse createDraft(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
-            @RequestBody CreateRoleEvaluationDraftRequest request,
+            @Valid @RequestBody CreateRoleEvaluationDraftRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         Long accountId = currentUser.getId();
         return draftService.createDraft(projectId, taskId, request, accountId);
     }
 
     @GetMapping("/role-evaluations/{evaluationId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF', 'MANAGER')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public RoleEvaluationDraftResponse getDraft(@PathVariable String evaluationId) {
         return draftService.getDraft(evaluationId);
     }
 
     @PatchMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public RoleEvaluationDraftResponse updateCriterionInput(
             @PathVariable String evaluationId,
             @PathVariable String criterionKey,
-            @RequestBody UpdateCriterionInputRequest request,
+            @Valid @RequestBody UpdateCriterionInputRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         Long accountId = currentUser.getId();
         return draftService.updateCriterionInput(evaluationId, criterionKey, request, accountId);
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/evidence")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public RoleEvaluationDraftResponse addEvidence(
             @PathVariable String evaluationId,
-            @RequestBody CreateEvidenceRequest request,
+            @Valid @RequestBody CreateEvidenceRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         Long accountId = currentUser.getId();
         return draftService.addEvidence(evaluationId, request, accountId);
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/suggestions/generate")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public BatchGenerationResponse generateSuggestions(
             @PathVariable String evaluationId,
-            @RequestBody(required = false) GenerateSuggestionRequest request) {
+            @Valid @RequestBody(required = false) GenerateSuggestionRequest request) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
         java.util.Map<String, String> outcomes = suggestionGenerationService.generateAll(draft, request);
         return BatchGenerationResponse.builder()
@@ -79,11 +79,11 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public SingleGenerationResponse generateCriterionSuggestion(
             @PathVariable String evaluationId,
             @PathVariable String criterionKey,
-            @RequestBody(required = false) GenerateSuggestionRequest request) {
+            @Valid @RequestBody(required = false) GenerateSuggestionRequest request) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
 
         String outcome;
@@ -103,7 +103,7 @@ public class RoleEvaluationDraftController {
     }
 
     @GetMapping("/role-evaluations/{evaluationId}/readiness")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF', 'MANAGER')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse checkReadiness(
             @PathVariable String evaluationId) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
@@ -119,28 +119,28 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/product-market-overlap/suggest")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public RoleEvaluationDraftResponse suggestProductMarketOverlap(
             @PathVariable String evaluationId) {
         return draftService.suggestProductMarketOverlap(evaluationId);
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/product-market-overlap/accept")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public RoleEvaluationDraftResponse acceptAutomaticSuggestion(
             @PathVariable String evaluationId,
-            @RequestBody AcceptAutomaticSuggestionRequest request,
+            @Valid @RequestBody AcceptAutomaticSuggestionRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         Long accountId = currentUser.getId();
         return draftService.acceptAutomaticSuggestion(evaluationId, request, accountId);
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/accept")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public RoleEvaluationDraftResponse acceptCriterionSuggestion(
             @PathVariable String evaluationId,
             @PathVariable String criterionKey,
-            @RequestBody AcceptAutomaticSuggestionRequest request,
+            @Valid @RequestBody AcceptAutomaticSuggestionRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
         if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER ||
@@ -154,11 +154,11 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/edit")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public RoleEvaluationDraftResponse editCriterionSuggestion(
             @PathVariable String evaluationId,
             @PathVariable String criterionKey,
-            @RequestBody EditCriterionSuggestionRequest request,
+            @Valid @RequestBody EditCriterionSuggestionRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
         if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER ||
@@ -173,11 +173,11 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/reject")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public RoleEvaluationDraftResponse rejectCriterionSuggestion(
             @PathVariable String evaluationId,
             @PathVariable String criterionKey,
-            @RequestBody RejectCriterionSuggestionRequest request,
+            @Valid @RequestBody RejectCriterionSuggestionRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
         if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER ||
@@ -191,11 +191,11 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/needs-more-data")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public RoleEvaluationDraftResponse markSuggestionNeedsMoreData(
             @PathVariable String evaluationId,
             @PathVariable String criterionKey,
-            @RequestBody NeedsMoreDataCriterionSuggestionRequest request,
+            @Valid @RequestBody NeedsMoreDataCriterionSuggestionRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
         if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.PARTNER ||
@@ -209,7 +209,7 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/calculate-preview")
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public RoleEvaluationPreviewResponse calculatePreview(
             @PathVariable String evaluationId) {
         return draftService.calculatePreview(evaluationId);
@@ -217,20 +217,20 @@ public class RoleEvaluationDraftController {
 
     @PostMapping("/role-evaluations/{evaluationId}/submit")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @PreAuthorize("hasAnyRole('ADMIN', 'STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF')")
     public void submitDraft(
             @PathVariable String evaluationId,
-            @RequestBody SubmitRoleEvaluationRequest request,
+            @Valid @RequestBody SubmitRoleEvaluationRequest request,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         Long accountId = currentUser.getId();
         submissionService.submitDraft(evaluationId, request, accountId);
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/review")
-    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public org.springframework.http.ResponseEntity<?> reviewDraft(
             @PathVariable String evaluationId,
-            @RequestBody ReviewRoleEvaluationRequest request,
+            @Valid @RequestBody ReviewRoleEvaluationRequest request,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
         Long accountId = currentUser.getId();

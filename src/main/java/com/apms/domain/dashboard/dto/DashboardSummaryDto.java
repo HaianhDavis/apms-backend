@@ -16,4 +16,10 @@ public class DashboardSummaryDto {
     private long competitorCount;
     private long supplierCount;
     private long potentialPartnerCount;
+
+    private long securityAlerts;
+    private long newUsers;
+    private long activitiesToday;
+    private String activitiesTrend;
+    private double systemHealth;
 }
