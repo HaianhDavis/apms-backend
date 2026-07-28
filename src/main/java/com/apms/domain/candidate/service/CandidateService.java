@@ -422,7 +422,6 @@ public class CandidateService {
                 .companySize(c.getCompanySize())
                 .contact(c.getContact())
                 .insights(c.getInsights())
-                .keyPeople(c.getKeyPeople())
                 .financial(c.getFinancial())
                 .market(c.getMarket())
                 .innovation(c.getInnovation())
