@@ -24,7 +24,7 @@ public class AuditLogController {
     private final AuditLogQueryService auditLogQueryService;
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<AuditLogResponse>>> getAuditLogs(
             @RequestParam(required = false) Long actorUserId,
             @RequestParam(required = false) String action,
@@ -43,7 +43,7 @@ public class AuditLogController {
     }
 
     @GetMapping("/export")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<byte[]> exportAuditLogs(
             @RequestParam(required = false) Long actorUserId,
             @RequestParam(required = false) String action,

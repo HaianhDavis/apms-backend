@@ -12,7 +12,6 @@ import com.apms.domain.score.repository.sql.ScoreSnapshotRepository;
 import com.apms.domain.score.service.CanonicalScoreJsonMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -30,7 +29,6 @@ public class RoleScoreController {
     private final OwnerOrganizationService ownerOrganizationService;
 
     @GetMapping("/profiles/{companyProfileId}/role-scores")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER')")
     public ResponseEntity<ApiResponse<List<RoleScoreSnapshotResponse>>> getRoleScores(
             @PathVariable String companyProfileId,
             @RequestParam(required = false) CompanyRole role) {
@@ -54,7 +52,6 @@ public class RoleScoreController {
     }
 
     @GetMapping("/role-score-rule-sets")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<List<RoleScoreRuleSetResponse>>> getRoleScoreRuleSets(
             @RequestParam(required = false) CompanyRole role,
             @RequestParam(required = false) Boolean active) {

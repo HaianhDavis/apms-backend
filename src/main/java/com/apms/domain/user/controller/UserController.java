@@ -23,7 +23,6 @@ public class UserController {
     private final UserService userService;
 
     @GetMapping("/users/me")
-    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<UserProfileResponse>> getCurrentUser(
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
@@ -31,18 +30,8 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
-    @PatchMapping("/users/me")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<ApiResponse<UserProfileResponse>> updateSelfProfile(
-            @Valid @RequestBody UpdateUserRequest request,
-            @AuthenticationPrincipal UserDetailsImpl currentUser) {
-
-        UserProfileResponse response = userService.updateSelfProfile(currentUser.getId(), request);
-        return ResponseEntity.ok(ApiResponse.success(response, "Profile updated successfully"));
-    }
-
     @PostMapping("/users")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<UserProfileResponse>> createUser(
             @Valid @RequestBody CreateUserRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
@@ -53,7 +42,7 @@ public class UserController {
     }
 
     @PatchMapping("/users/{userId}")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateUser(
             @PathVariable Long userId,
             @Valid @RequestBody UpdateUserRequest request,
@@ -64,7 +53,7 @@ public class UserController {
     }
 
     @PatchMapping("/users/{userId}/status")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<Void>> updateUserStatus(
             @PathVariable Long userId,
             @Valid @RequestBody UpdateUserStatusRequest request,
@@ -75,13 +64,13 @@ public class UserController {
     }
 
     @GetMapping("/roles")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<List<SystemRole>>> getRoles() {
         return ResponseEntity.ok(ApiResponse.success(userService.getAllRoles()));
     }
 
     @PostMapping("/users/{userId}/roles")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<Void>> assignUserRoles(
             @PathVariable Long userId,
             @Valid @RequestBody AssignUserRolesRequest request,

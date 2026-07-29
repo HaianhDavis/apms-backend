@@ -22,7 +22,6 @@ public class NotificationController {
     private final NotificationService notificationService;
 
     @GetMapping
-    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<PageResponse<NotificationResponse>>> getNotifications(
             @RequestParam(required = false) Boolean unreadOnly,
             @RequestParam(required = false) NotificationType type,
@@ -38,21 +37,18 @@ public class NotificationController {
     }
 
     @PatchMapping("/{notificationId}/read")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER', 'RESEARCH_STAFF')")
     public ResponseEntity<ApiResponse<Void>> markAsRead(@PathVariable Long notificationId) {
         notificationService.markAsRead(notificationId);
         return ResponseEntity.ok(ApiResponse.success(null, "Notification marked as read"));
     }
 
     @PatchMapping("/read-all")
-    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<Void>> markAllAsRead() {
         notificationService.markAllAsRead();
         return ResponseEntity.ok(ApiResponse.success(null, "All notifications marked as read"));
     }
 
     @DeleteMapping("/{notificationId}")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<Void>> deleteNotification(@PathVariable Long notificationId) {
         notificationService.deleteNotification(notificationId);
         return ResponseEntity.ok(ApiResponse.success(null, "Notification deleted"));
@@ -63,7 +59,6 @@ public class NotificationController {
     public ResponseEntity<ApiResponse<NotificationResponse>> sendNotification(
             @Valid @RequestBody SendNotificationRequest request) {
 
-        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED)
-                .body(ApiResponse.success(notificationService.sendNotification(request), "Notification sent"));
+        return ResponseEntity.ok(ApiResponse.success(notificationService.sendNotification(request), "Notification sent"));
     }
 }

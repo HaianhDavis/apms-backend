@@ -5,7 +5,6 @@ import com.apms.common.response.PageResponse;
 import com.apms.domain.profile.dto.ProfileResponse;
 import com.apms.domain.profile.dto.ProfileSourcesResponse;
 import com.apms.domain.profile.service.ProfileService;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
@@ -21,9 +20,10 @@ public class ProfileController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/company-profiles (or /profiles)
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER', 'RESEARCH_STAFF', 'SYSTEM_ADMIN')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<PageResponse<ProfileResponse>>> getAllProfiles(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String industry,
@@ -41,9 +41,10 @@ public class ProfileController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/profiles/{companyId}
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/{companyId}")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER', 'RESEARCH_STAFF', 'SYSTEM_ADMIN')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<ProfileResponse>> getProfile(
             @PathVariable String companyId) {
 
@@ -52,9 +53,10 @@ public class ProfileController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/profiles/search?name=
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/search")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER', 'RESEARCH_STAFF', 'SYSTEM_ADMIN')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<PageResponse<ProfileResponse>>> searchProfiles(
             @RequestParam String name,
             @RequestParam(defaultValue = "false") boolean excludeOwner,
@@ -68,9 +70,10 @@ public class ProfileController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/profiles/{companyId}/sources
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/{companyId}/sources")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER', 'RESEARCH_STAFF', 'SYSTEM_ADMIN')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<ProfileSourcesResponse>> getProfileSources(
             @PathVariable String companyId) {
 
@@ -84,7 +87,7 @@ public class ProfileController {
     @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<ProfileResponse>> updateProfile(
             @PathVariable String companyId,
-            @Valid @RequestBody com.apms.domain.profile.dto.UpdateCompanyProfileRequest request) {
+            @RequestBody com.apms.domain.profile.dto.UpdateCompanyProfileRequest request) {
 
         return ResponseEntity.ok(ApiResponse.success(profileService.updateProfile(companyId, request), "Profile updated"));
     }

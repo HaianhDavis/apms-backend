@@ -33,14 +33,12 @@ public class ProjectSecurityEvaluator {
 
     /**
      * Returns true if the current user is a member of the given project,
-     * OR if they have BUSINESS_OWNER or BUSINESS_DIRECTOR role (system-wide read access).
+     * OR if they have BUSINESS_OWNER role (system-wide read access).
      */
     public boolean isMemberOrOwner(Long projectId) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && hasOwnerAuthority(auth)) return true;
-        if (auth != null && hasDirectorAuthority(auth)) return true;
         UserDetailsImpl user = currentUser();
         if (user == null) return false;
+        if (isOwner(user)) return true;
         return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
     }
 
@@ -55,15 +53,12 @@ public class ProjectSecurityEvaluator {
     }
 
     /**
-     * BUSINESS_OWNER and BUSINESS_DIRECTOR can read anything;
-     * BDM and RS must be project members.
+     * BUSINESS_OWNER can read anything; BDM and RS must be project members.
      */
     public boolean isProjectReadable(Long projectId) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && hasOwnerAuthority(auth)) return true;
-        if (auth != null && hasDirectorAuthority(auth)) return true;
         UserDetailsImpl user = currentUser();
         if (user == null) return false;
+        if (isOwner(user)) return true;
         return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
     }
 
@@ -104,15 +99,12 @@ public class ProjectSecurityEvaluator {
      *
      * Rules:
      *   - BUSINESS_OWNER: always allowed
-     *   - BUSINESS_DIRECTOR: always allowed (executive read access)
      *   - BDM / BUSINESS_DEVELOPMENT_STAFF: must be a member of the candidate's project
      */
     public boolean canAccessCandidate(String candidateId) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth != null && hasOwnerAuthority(auth)) return true;
-        if (auth != null && hasDirectorAuthority(auth)) return true;
         UserDetailsImpl user = currentUser();
         if (user == null) return false;
+        if (isOwner(user)) return true;
 
         Long projectId = resolveProjectId(candidateId);
         if (projectId == null) return false;
@@ -140,16 +132,6 @@ public class ProjectSecurityEvaluator {
     // ─────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────
-
-    private boolean hasOwnerAuthority(Authentication auth) {
-        return auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_OWNER"));
-    }
-
-    private boolean hasDirectorAuthority(Authentication auth) {
-        return auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DIRECTOR"));
-    }
 
     private Long resolveProjectId(String candidateId) {
         if (!StringUtils.hasText(candidateId)) return null;

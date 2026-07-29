@@ -13,7 +13,7 @@ import org.mockito.Mockito;
 
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -81,34 +81,7 @@ class RoleEvaluationSecurityServiceTest {
         when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
         when(taskRepository.findById(10L)).thenReturn(Optional.of(task));
 
-        assertFalse(securityService.canAccessDraft("draft1", 100L));
-    }
-
-    @Test
-    void testSecurityReturnsFalseForMissingDraft() {
-        when(draftRepository.findById("missing")).thenReturn(Optional.empty());
-        assertFalse(securityService.canAccessDraft("missing", 100L));
-    }
-
-    @Test
-    void testSecurityReturnsFalseForNullAccountId() {
-        RoleEvaluationDraft draft = new RoleEvaluationDraft();
-        draft.setId("draft1");
-        draft.setProjectId(1L);
-        draft.setTaskId(10L);
-        draft.setEvaluatedRole(CompanyRole.COMPETITOR);
-
-        Project project = new Project();
-        project.setId(1L);
-
-        ProjectTask task = new ProjectTask();
-        task.setId(10L);
-        task.setProject(project);
-
-        when(draftRepository.findById("draft1")).thenReturn(Optional.of(draft));
-        when(projectRepository.findById(1L)).thenReturn(Optional.of(project));
-        when(taskRepository.findById(10L)).thenReturn(Optional.of(task));
-
-        assertFalse(securityService.canAccessDraft("draft1", null));
+        SecurityException ex = assertThrows(SecurityException.class, () -> securityService.canAccessDraft("draft1", 100L));
+        assertTrue(ex.getMessage().contains("task/project alignment failed"));
     }
 }

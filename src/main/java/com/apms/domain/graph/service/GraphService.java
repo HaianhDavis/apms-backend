@@ -29,6 +29,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 
+
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -50,53 +52,45 @@ public class GraphService {
     @Order(2)
     public void handleCandidateApprovedEvent(CandidateApprovedEvent event) {
         log.info("GraphService received CandidateApprovedEvent for candidateId: {}", event.getCandidateId());
-        try {
-            if (event.getProjectId() == null || event.getProjectId().isBlank()) {
-                log.error("CandidateApprovedEvent has null/blank projectId for candidateId: {}. Skipping graph update.", event.getCandidateId());
-                return;
-            }
 
-            Long projectId;
-            try {
-                projectId = Long.valueOf(event.getProjectId());
-            } catch (NumberFormatException e) {
-                log.error("CandidateApprovedEvent has non-numeric projectId='{}' for candidateId: {}. Skipping graph update.", event.getProjectId(), event.getCandidateId());
-                return;
-            }
+        CompanyCandidate candidate = candidateRepository.findById(event.getCandidateId())
+                .orElse(null);
+        if (candidate == null) return;
 
-            CompanyCandidate candidate = candidateRepository.findById(event.getCandidateId())
-                    .orElse(null);
-            if (candidate == null) return;
+        Project project = projectRepository.findById(Long.valueOf(event.getProjectId()))
+                .orElse(null);
+        if (project == null) return;
 
-            Project project = projectRepository.findById(projectId)
-                    .orElse(null);
-            if (project == null) return;
+        // The ProfileService should have run before this.
+        // If they run in unpredictable order, an @Order annotation on listeners is best.
+        // For now, we attempt to find the newly created/updated profile.
+        CompanyProfile profile = profileRepository.findByCandidateId(event.getCandidateId())
+                .orElse(null);
 
-            CompanyProfile profile = profileRepository.findByCandidateId(event.getCandidateId())
-                    .orElse(null);
-            if (profile == null) {
-                log.error("CompanyProfile not found for candidateId: {}. Ensure ProfileService runs first.", event.getCandidateId());
-                return;
-            }
+        if (profile == null) {
+            log.error("CompanyProfile not found for candidateId: {}. Ensure ProfileService runs first.", event.getCandidateId());
+            return;
+        }
 
-            RelationshipType finalRelType = event.getFinalRelationshipType();
-            mergeCompanyNode(profile);
+        RelationshipType finalRelType = event.getFinalRelationshipType();
 
-            if (finalRelType != null) {
-                createRelationship(
-                        ownerOrganizationService.getOwnerCompanyId(),
-                        profile.getCompanyId(),
-                        finalRelType.name(),
-                        candidate.getReview() != null ? candidate.getReview().getReviewedBy() : "SYSTEM",
-                        String.valueOf(project.getId()),
-                        candidate.getId(),
-                        event.getConfidenceScore() != null ? event.getConfidenceScore() : 1.0
-                );
-            } else {
-                log.warn("No finalRelType provided for candidate approval, cannot create relationship.");
-            }
-        } catch (Exception e) {
-            log.warn("Could not save approved candidate to Neo4j graph because database is unavailable: {}", e.getMessage());
+        // 1. Create or merge CompanyNode for the approved CompanyProfile
+        mergeCompanyNode(profile);
+
+        // 2. The relationship is from OwnerCompany to the target company (which is `profile`)
+        if (finalRelType != null) {
+            // Create relationship: OwnerCompany --[rel]-> TargetCompany (which is `profile.getCompanyId()`)
+            createRelationship(
+                    ownerOrganizationService.getOwnerCompanyId(),
+                    profile.getCompanyId(),
+                    finalRelType.name(),
+                    candidate.getReview() != null ? candidate.getReview().getReviewedBy() : "SYSTEM",
+                    String.valueOf(project.getId()),
+                    candidate.getId(),
+                    event.getConfidenceScore() != null ? event.getConfidenceScore() : 1.0
+            );
+        } else {
+            log.warn("No finalRelType provided for candidate approval, cannot create relationship.");
         }
     }
 
@@ -230,42 +224,32 @@ public class GraphService {
     // ─────────────────────────────────────────────
 
     public GraphCompanyDto getCompanyNodeWithRelationships(String companyId) {
-        try {
-            CompanyNode node = companyNodeRepository.findByCompanyId(companyId)
-                    .orElse(null);
-            if (node == null) return null;
+        CompanyNode node = companyNodeRepository.findByCompanyId(companyId)
+                .orElse(null);
+        if (node == null) return null;
 
-            List<CompanyRelationshipDto> relationships = getOutgoingRelationships(companyId);
-            
-            return GraphCompanyDto.builder()
-                    .companyId(node.getCompanyId())
-                    .name(node.getName())
-                    .industry(node.getIndustry())
-                    .createdAt(node.getCreatedAt())
-                    .updatedAt(node.getUpdatedAt())
-                    .relationships(relationships)
-                    .build();
-        } catch (Exception e) {
-            log.warn("Neo4j is unavailable, returning empty node detail. Error: {}", e.getMessage());
-            return null;
-        }
+        List<CompanyRelationshipDto> relationships = getOutgoingRelationships(companyId);
+
+        return GraphCompanyDto.builder()
+                .companyId(node.getCompanyId())
+                .name(node.getName())
+                .industry(node.getIndustry())
+                .createdAt(node.getCreatedAt())
+                .updatedAt(node.getUpdatedAt())
+                .relationships(relationships)
+                .build();
     }
 
     public List<GraphCompanyDto> getNetwork() {
-        try {
-            return companyNodeRepository.findAllNodes().stream()
-                    .map(node -> GraphCompanyDto.builder()
-                            .companyId(node.getCompanyId())
-                            .name(node.getName())
-                            .industry(node.getIndustry())
-                            .createdAt(node.getCreatedAt())
-                            .updatedAt(node.getUpdatedAt())
-                            .build())
-                    .toList();
-        } catch (Exception e) {
-            log.warn("Neo4j is unavailable, returning empty network. Error: {}", e.getMessage());
-            return List.of();
-        }
+        return companyNodeRepository.findAllNodes().stream()
+                .map(node -> GraphCompanyDto.builder()
+                        .companyId(node.getCompanyId())
+                        .name(node.getName())
+                        .industry(node.getIndustry())
+                        .createdAt(node.getCreatedAt())
+                        .updatedAt(node.getUpdatedAt())
+                        .build())
+                .toList();
     }
 
     public List<GraphCompanyDto> getCompaniesByRelationshipType(String relType) {
@@ -273,84 +257,69 @@ public class GraphService {
             return List.of();
         }
 
-        try {
-            String cypher = String.format("MATCH (c:Company)-[:%s]-(:Company) RETURN DISTINCT c", relType);
-            
-            return neo4jClient.query(cypher)
-                    .fetchAs(CompanyNode.class)
-                    .mappedBy((typeSystem, record) -> {
-                        var node = record.get("c").asNode();
-                        CompanyNode c = new CompanyNode();
-                        c.setCompanyId(node.get("companyId").asString());
-                        c.setName(node.get("name").asString("Unknown"));
-                        c.setIndustry(node.get("industry").asString("Unknown"));
-                        return c;
-                    })
-                    .all().stream()
-                    .map(node -> {
-                        String name = resolveNodeName(node.getCompanyId(), node.getName());
-                        return GraphCompanyDto.builder()
-                                .companyId(node.getCompanyId())
-                                .name(name)
-                                .industry(node.getIndustry())
-                                .build();
-                    })
-                    .toList();
-        } catch (Exception e) {
-            log.warn("Neo4j is unavailable, returning empty company list for relationship. Error: {}", e.getMessage());
-            return List.of();
-        }
-    }
+        String cypher = String.format("MATCH (c:Company)-[:%s]->() RETURN DISTINCT c", relType);
 
-    private String resolveNodeName(String companyId, String currentName) {
-        boolean isRawId = currentName == null || currentName.isBlank() 
-                || "Unknown".equalsIgnoreCase(currentName) 
-                || currentName.matches("^[0-9a-fA-F]{24}$");
-        if (!isRawId) return currentName;
-
-        try {
-            return profileRepository.findByCompanyId(companyId)
-                    .or(() -> profileRepository.findById(companyId))
-                    .map(p -> {
-                        if (p.getIdentity() != null) {
-                            if (StringUtils.hasText(p.getIdentity().getTradeName())) return p.getIdentity().getTradeName();
-                            if (StringUtils.hasText(p.getIdentity().getLegalName())) return p.getIdentity().getLegalName();
-                        }
-                        return p.getCompanyId();
-                    })
-                    .orElse(currentName);
-        } catch (Exception e) {
-            return currentName;
-        }
+        return neo4jClient.query(cypher)
+                .fetchAs(CompanyNode.class)
+                .mappedBy((typeSystem, record) -> {
+                    var node = record.get("c").asNode();
+                    CompanyNode c = new CompanyNode();
+                    c.setCompanyId(node.get("companyId").asString());
+                    c.setName(node.get("name").asString("Unknown"));
+                    c.setIndustry(node.get("industry").asString("Unknown"));
+                    return c;
+                })
+                .all().stream()
+                .map(node -> GraphCompanyDto.builder()
+                        .companyId(node.getCompanyId())
+                        .name(node.getName())
+                        .industry(node.getIndustry())
+                        .build())
+                .toList();
     }
 
     private List<CompanyRelationshipDto> getOutgoingRelationships(String companyId) {
-        try {
-            String cypher = """
-                MATCH (c1:Company {companyId: $companyId})-[r]->(c2:Company)
-                RETURN type(r) as relType, c2.companyId as targetCompanyId, 
-                       r.confidenceScore as confidenceScore, r.confirmedBy as confirmedBy, 
-                       r.projectId as projectId, r.candidateId as candidateId
-                """;
+        String cypher = """
+            MATCH (c1:Company {companyId: $companyId})-[r]->(c2:Company)
+            RETURN type(r) as relType, c2.companyId as targetCompanyId,
+                   r.confidenceScore as confidenceScore, r.confirmedBy as confirmedBy,
+                   r.projectId as projectId, r.candidateId as candidateId,
+                   r.startDate as startDate, r.endDate as endDate, r.status as status, r.metadata as metadata
+            """;
 
-            return (List<CompanyRelationshipDto>) neo4jClient.query(cypher)
-                    .bindAll(Map.of("companyId", companyId))
-                    .fetch()
-                    .all()
-                    .stream()
-                    .map(record -> CompanyRelationshipDto.builder()
-                            .sourceCompanyId(companyId)
-                            .targetCompanyId((String) record.get("targetCompanyId"))
-                            .relationshipType((String) record.get("relType"))
-                            .confidenceScore((Double) record.get("confidenceScore"))
-                            .confirmedBy((String) record.get("confirmedBy"))
-                            .projectId((String) record.get("projectId"))
-                            .candidateId((String) record.get("candidateId"))
-                            .build())
-                    .toList();
-        } catch (Exception e) {
-            log.warn("Neo4j is unavailable, returning empty outgoing relationships. Error: {}", e.getMessage());
-            return List.of();
-        }
+        return (List<CompanyRelationshipDto>) neo4jClient.query(cypher)
+                .bindAll(Map.of("companyId", companyId))
+                .fetch()
+                .all()
+                .stream()
+                .map(record -> {
+                    Map<String, Object> parsedMetadata = null;
+                    String metadataStr = (String) record.get("metadata");
+                    if (StringUtils.hasText(metadataStr)) {
+                        try {
+                            parsedMetadata = objectMapper.readValue(metadataStr, new TypeReference<Map<String, Object>>() {});
+                        } catch (JsonProcessingException e) {
+                            log.error("Failed to parse metadata JSON", e);
+                        }
+                    }
+
+                    String startDateStr = (String) record.get("startDate");
+                    String endDateStr = (String) record.get("endDate");
+
+                    return CompanyRelationshipDto.builder()
+                        .sourceCompanyId(companyId)
+                        .targetCompanyId((String) record.get("targetCompanyId"))
+                        .relationshipType((String) record.get("relType"))
+                        .confidenceScore((Double) record.get("confidenceScore"))
+                        .confirmedBy((String) record.get("confirmedBy"))
+                        .projectId((String) record.get("projectId"))
+                        .candidateId((String) record.get("candidateId"))
+                        .startDate(StringUtils.hasText(startDateStr) ? LocalDate.parse(startDateStr) : null)
+                        .endDate(StringUtils.hasText(endDateStr) ? LocalDate.parse(endDateStr) : null)
+                        .status((String) record.get("status"))
+                        .metadata(parsedMetadata)
+                        .build();
+                })
+                .toList();
     }
 }

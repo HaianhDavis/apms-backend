@@ -90,7 +90,7 @@ class GlobalExceptionHandlerTest {
         mockMvc.perform(get("/resource-not-found"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.message").value("Resource not found"));
+                .andExpect(jsonPath("$.message").value("Item not found"));
     }
 
     @Test
@@ -122,7 +122,7 @@ class GlobalExceptionHandlerTest {
         mockMvc.perform(get("/unexpected"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.success").value(false))
-                .andExpect(jsonPath("$.message").value("Internal server error"));
+                .andExpect(jsonPath("$.message").value("RuntimeException: Unexpected error"));
     }
 
     @Test

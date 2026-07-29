@@ -24,17 +24,16 @@ public class ProjectTaskSubmissionController {
     private final ProjectTaskSubmissionService submissionService;
 
     @PostMapping
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ProjectTaskSubmissionResponse> submitTask(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
             @Valid @RequestBody CreateProjectTaskSubmissionRequest request) {
-        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED)
-                .body(submissionService.submitTask(projectId, taskId, request));
+        return ResponseEntity.ok(submissionService.submitTask(projectId, taskId, request));
     }
 
     @GetMapping
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<PageResponse<ProjectTaskSubmissionResponse>> getSubmissions(
             @PathVariable Long projectId,
             @PathVariable Long taskId,

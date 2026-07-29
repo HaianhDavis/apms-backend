@@ -17,7 +17,6 @@ import com.apms.domain.project.dto.ReviewTaskSubmissionRequest;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.project.repository.sql.ProjectTaskRepository;
 import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
-import com.apms.domain.project.repository.sql.ProjectTaskDraftRepository;
 import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
 import com.apms.security.UserDetailsImpl;
@@ -51,7 +50,6 @@ public class ProjectTaskSubmissionService {
     private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
     private final com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository versionRepository;
     private final AuditLogService auditLogService;
-    private final ProjectTaskDraftRepository draftRepository;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Transactional
@@ -113,7 +111,6 @@ public class ProjectTaskSubmissionService {
         task.setStatus(TaskStatus.IN_REVIEW);
         task.setCompletedAt(null);
         taskRepository.save(task);
-        draftRepository.deleteByProjectTask_IdAndStaffAccount_Id(taskId, currentUser.getId());
 
         // Update target entity if it's a proposal
         if (StringUtils.hasText(request.getTargetEntityId()) && "CompanyProfileUpdateProposal".equals(request.getTargetEntityType())) {

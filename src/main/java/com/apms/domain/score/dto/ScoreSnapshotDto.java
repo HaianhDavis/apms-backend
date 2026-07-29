@@ -10,7 +10,6 @@ import java.time.LocalDateTime;
 public class ScoreSnapshotDto {
     private Long scoreSnapshotId;
     private String companyId;
-    private String companyName;
     private String projectId;
     private String candidateId;
     private Integer partnerFitScore;

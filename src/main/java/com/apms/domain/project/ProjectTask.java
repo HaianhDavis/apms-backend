@@ -35,7 +35,7 @@ public class ProjectTask {
     @EqualsAndHashCode.Exclude
     private Account assignedToAccount;
 
-    @Column(nullable = false, columnDefinition = "NVARCHAR(255)")
+    @Column(nullable = false)
     private String title;
 
     @Column(columnDefinition = "NVARCHAR(MAX)")

@@ -9,7 +9,6 @@ import com.apms.domain.rolemetric.entity.RoleMetricRecord;
 import com.apms.domain.rolemetric.entity.RoleMetricRecordVersion;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.common.exception.BusinessValidationException;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -32,7 +31,7 @@ public class RoleMetricRecordController {
     @PreAuthorize("@projectSecurity.isStaff(#projectId)")
     public ResponseEntity<RoleMetricResponse> createDraft(
             @PathVariable Long projectId,
-            @Valid @RequestBody CreateRoleMetricRequest request) {
+            @RequestBody CreateRoleMetricRequest request) {
         return ResponseEntity.ok(roleMetricRecordService.createDraft(projectId, request));
     }
 
@@ -41,7 +40,7 @@ public class RoleMetricRecordController {
     public ResponseEntity<RoleMetricResponse> updateDraft(
             @PathVariable Long projectId,
             @PathVariable Long metricId,
-            @Valid @RequestBody UpdateRoleMetricRequest request) {
+            @RequestBody UpdateRoleMetricRequest request) {
         return ResponseEntity.ok(roleMetricRecordService.updateDraft(projectId, metricId, request));
     }
 
@@ -50,7 +49,7 @@ public class RoleMetricRecordController {
     public ResponseEntity<RoleMetricEvidenceResponse> attachEvidence(
             @PathVariable Long projectId,
             @PathVariable Long metricId,
-            @Valid @RequestBody RoleMetricEvidenceRequest request) {
+            @RequestBody RoleMetricEvidenceRequest request) {
         return ResponseEntity.ok(roleMetricRecordService.attachEvidence(projectId, metricId, request));
     }
 
@@ -77,7 +76,7 @@ public class RoleMetricRecordController {
     public ResponseEntity<RoleMetricResponse> reviewMetric(
             @PathVariable Long projectId,
             @PathVariable Long metricId,
-            @Valid @RequestBody ReviewRoleMetricRequest request) {
+            @RequestBody ReviewRoleMetricRequest request) {
         return ResponseEntity.ok(roleMetricRecordService.reviewMetric(projectId, metricId, request));
     }
 

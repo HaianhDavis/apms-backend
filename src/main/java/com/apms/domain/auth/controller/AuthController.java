@@ -16,7 +16,6 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -30,7 +29,6 @@ public class AuthController {
     private final AuthenticationManager authenticationManager;
     private final JwtUtils jwtUtils;
     private final RefreshTokenService refreshTokenService;
-    private final com.apms.domain.auth.service.AuthService authService;
 
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<JwtResponse>> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
@@ -82,39 +80,11 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<Void>> logoutUser() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getPrincipal() instanceof UserDetailsImpl userDetails) {
             refreshTokenService.revokeToken(userDetails.getId());
         }
         return ResponseEntity.ok(ApiResponse.success(null, "Log out successful!"));
-    }
-
-    @PostMapping("/forgot-password")
-    public ResponseEntity<ApiResponse<Void>> forgotPassword(
-            @Valid @RequestBody com.apms.domain.auth.dto.ForgotPasswordRequest request,
-            @RequestHeader(value = "Origin", required = false, defaultValue = "http://localhost:5173") String origin) {
-        authService.processForgotPassword(request, origin);
-        return ResponseEntity.ok(ApiResponse.success(null, "If the email is valid, a reset link will be sent."));
-    }
-
-    @PostMapping("/reset-password")
-    public ResponseEntity<ApiResponse<Void>> resetPassword(
-            @Valid @RequestBody com.apms.domain.auth.dto.ResetPasswordRequest request) {
-        authService.resetPassword(request);
-        return ResponseEntity.ok(ApiResponse.success(null, "Password reset successfully."));
-    }
-
-    @PostMapping("/change-password")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<ApiResponse<Void>> changePassword(
-            @Valid @RequestBody com.apms.domain.auth.dto.ChangePasswordRequest request) {
-        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication != null && authentication.getPrincipal() instanceof UserDetailsImpl userDetails) {
-            authService.changePassword(userDetails.getId(), request);
-            return ResponseEntity.ok(ApiResponse.success(null, "Password changed successfully."));
-        }
-        return ResponseEntity.status(401).body(ApiResponse.error("Unauthorized"));
     }
 }

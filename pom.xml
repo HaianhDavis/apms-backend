@@ -33,7 +33,6 @@
         <springdoc.version>2.8.14</springdoc.version>
         <spring-ai.version>1.0.0-M6</spring-ai.version>
         <testcontainers.version>1.20.1</testcontainers.version>
-        <lombok.version>1.18.46</lombok.version>
     </properties>
 
     <dependencyManagement>
@@ -73,10 +72,6 @@
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-mail</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
         <dependency>
@@ -98,7 +93,6 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <version>${lombok.version}</version>
             <optional>true</optional>
         </dependency>
         <dependency>
@@ -198,7 +192,6 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <configuration>
-                    <mainClass>com.apms.ApmsBackendApplication</mainClass>
                     <excludes>
                         <exclude>
                             <groupId>org.projectlombok</groupId>
@@ -222,7 +215,6 @@
                                 <path>
                                     <groupId>org.projectlombok</groupId>
                                     <artifactId>lombok</artifactId>
-                                    <version>${lombok.version}</version>
                                 </path>
                                 <path>
                                     <groupId>org.mapstruct</groupId>
@@ -243,7 +235,6 @@
                                 <path>
                                     <groupId>org.projectlombok</groupId>
                                     <artifactId>lombok</artifactId>
-                                    <version>${lombok.version}</version>
                                 </path>
                                 <path>
                                     <groupId>org.mapstruct</groupId>

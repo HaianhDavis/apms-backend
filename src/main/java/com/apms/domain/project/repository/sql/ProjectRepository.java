@@ -26,6 +26,4 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
     boolean existsByIdAndMembersAccountId(@Param("projectId") Long projectId, @Param("accountId") Long accountId);
 
     Optional<Project> findFirstByCreatedByAccountIdOrderByIdAsc(Long accountId);
-
-    Optional<Project> findFirstByProjectNameOrderByIdAsc(String projectName);
 }

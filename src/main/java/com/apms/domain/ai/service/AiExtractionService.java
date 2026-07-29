@@ -86,9 +86,12 @@ public class AiExtractionService {
                 .orElseThrow(() -> new ResourceNotFoundException("ImportJob not found with id: " + importJobId));
 
         String rawDocumentId = importJob.getRawDocumentId();
-        if (!StringUtils.hasText(rawDocumentId) && !StringUtils.hasText(importJob.getLocalFilePath())) {
-            throw new ResourceNotFoundException("No RawDocument and no Local File linked to ImportJob id: " + importJobId);
+        if (!StringUtils.hasText(rawDocumentId)) {
+            throw new ResourceNotFoundException("No RawDocument linked to ImportJob id: " + importJobId);
         }
+
+        RawDocument rawDocument = rawDocumentRepository.findById(rawDocumentId)
+                .orElseThrow(() -> new ResourceNotFoundException("RawDocument not found with id: " + rawDocumentId));
 
         // Determine if mock or real
         boolean useMock = isMockMode();
@@ -103,33 +106,7 @@ public class AiExtractionService {
             usedProvider = "mock";
             usedModel = "mock";
         } else {
-            String sourceText = null;
-            if (StringUtils.hasText(rawDocumentId)) {
-                try {
-                    RawDocument rawDocument = rawDocumentRepository.findById(rawDocumentId)
-                        .orElseThrow(() -> new ResourceNotFoundException("RawDocument not found with id: " + rawDocumentId));
-                    sourceText = extractTextFromDocument(rawDocument);
-                } catch (Exception e) {
-                    log.warn("RawDocument not found or error extracting text. Falling back to ImportJob local file path.", e);
-                }
-            }
-            
-            if (sourceText == null) {
-                if (StringUtils.hasText(importJob.getLocalFilePath())) {
-                    try {
-                        String localPath = importJob.getLocalFilePath();
-                        if (!localPath.contains("/") && !localPath.contains("\\")) {
-                            localPath = "uploads/" + localPath;
-                        }
-                        sourceText = java.nio.file.Files.readString(java.nio.file.Paths.get(localPath));
-                    } catch (Exception ex) {
-                        throw new BusinessValidationException("Failed to read text from fallback local file: " + importJob.getLocalFilePath());
-                    }
-                } else {
-                    throw new BusinessValidationException("Cannot extract text: RawDocument missing and no local file path.");
-                }
-            }
-
+            String sourceText = extractTextFromDocument(rawDocument);
             log.info("Calling AI provider '{}' for ImportJob {}, text length: {}", aiProvider, importJobId, sourceText.length());
 
             if ("openai".equalsIgnoreCase(aiProvider)) {
@@ -191,28 +168,14 @@ public class AiExtractionService {
 
     @Transactional(readOnly = true)
     public AiExtractionCache getLatestExtraction(Long importJobId) {
-        try {
-            return extractionCacheRepository.findTopByImportJobIdOrderByCreatedAtDesc(importJobId)
-                    .orElseThrow(() -> new ResourceNotFoundException("No AI extraction found for ImportJob: " + importJobId));
-        } catch (ResourceNotFoundException e) {
-            throw e;
-        } catch (Exception e) {
-            log.warn("MongoDB error when fetching extraction for ImportJob {}", importJobId, e);
-            throw new ResourceNotFoundException("No AI extraction found for ImportJob: " + importJobId);
-        }
+        return extractionCacheRepository.findTopByImportJobIdOrderByCreatedAtDesc(importJobId)
+                .orElseThrow(() -> new ResourceNotFoundException("No AI extraction found for ImportJob: " + importJobId));
     }
 
     @Transactional(readOnly = true)
     public AiExtractionCache getExtractionById(String extractionId) {
-        try {
-            return extractionCacheRepository.findById(extractionId)
-                    .orElseThrow(() -> new ResourceNotFoundException("AI extraction not found: " + extractionId));
-        } catch (ResourceNotFoundException e) {
-            throw e;
-        } catch (Exception e) {
-            log.warn("MongoDB error when fetching extraction {}", extractionId, e);
-            throw new ResourceNotFoundException("AI extraction not found: " + extractionId);
-        }
+        return extractionCacheRepository.findById(extractionId)
+                .orElseThrow(() -> new ResourceNotFoundException("AI extraction not found: " + extractionId));
     }
 
     @Transactional
@@ -224,14 +187,9 @@ public class AiExtractionService {
         cache.setLastModifiedBy(String.valueOf(userId));
         cache.setUpdatedAt(LocalDateTime.now());
 
-        try {
-            AiExtractionCache saved = extractionCacheRepository.save(cache);
-            log.info("AI extraction updated manually: extractionId={}, userId={}", extractionId, userId);
-            return saved;
-        } catch (Exception e) {
-            log.warn("MongoDB error when saving updated extraction {}", extractionId, e);
-            return cache; // Return the memory-updated cache even if save fails
-        }
+        AiExtractionCache saved = extractionCacheRepository.save(cache);
+        log.info("AI extraction updated manually: extractionId={}, userId={}", extractionId, userId);
+        return saved;
     }
 
     @Transactional
@@ -329,15 +287,9 @@ public class AiExtractionService {
                     .qualityMetrics(qualityMetrics)
                     .qualityStatus(qualityStatus != null ? qualityStatus : com.apms.domain.ai.dto.ExtractionQualityStatus.PENDING_VALIDATION)
                     .createdAt(LocalDateTime.now())
-                    .updatedAt(LocalDateTime.now())
                     .build();
-
-            try {
-                extractionCacheRepository.save(cache);
-                log.info("Saved new AI extraction for ImportJob {} to MongoDB", importJobId);
-            } catch (Exception e) {
-                log.error("Failed to save AI extraction to MongoDB for ImportJob {}. It will not be cached.", importJobId, e);
-            }
+            extractionCacheRepository.save(cache);
+            log.info("Saved AI extraction cache for ImportJob {} (provider={})", importJobId, provider);
         } catch (Exception e) {
             log.warn("Failed to save AI extraction cache for ImportJob {}. Continuing.", importJobId, e);
         }

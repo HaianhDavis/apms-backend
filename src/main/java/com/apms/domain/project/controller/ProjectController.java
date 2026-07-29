@@ -42,22 +42,20 @@ public class ProjectController {
     }
 
     // ─────────────────────────────────────────────
-    // ─────────────────────────────────────────────
     // GET /api/v1/projects?status=&type=&page=&size=
-    // Role: BUSINESS_OWNER, BUSINESS_DIRECTOR, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF, KEY_MEMBER
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @GetMapping
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<PageResponse<ProjectResponse>>> getAllProjects(
             @RequestParam(required = false) ProjectStatus status,
             @RequestParam(required = false) ProjectType type,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+            @RequestParam(defaultValue = "20") int size) {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         PageResponse<ProjectResponse> response = PageResponse.of(
-                projectService.getAllProjects(status, type, pageable, currentUser));
+                projectService.getAllProjects(status, type, pageable));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -66,7 +64,7 @@ public class ProjectController {
     // Role: All authenticated
     // ─────────────────────────────────────────────
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER') and @projectSecurity.isProjectReadable(#id)")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isProjectReadable(#id)")
     public ResponseEntity<ApiResponse<ProjectResponse>> getProjectById(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success(projectService.getProjectById(id)));
     }
@@ -79,7 +77,7 @@ public class ProjectController {
     @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<ProjectResponse>> updateProject(
             @PathVariable Long id,
-            @Valid @RequestBody UpdateProjectRequest request) {
+            @RequestBody UpdateProjectRequest request) {
 
         return ResponseEntity.ok(ApiResponse.success(
                 projectService.updateProject(id, request), "Project updated successfully"));
@@ -102,10 +100,10 @@ public class ProjectController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/projects/{id}/members
-    // Role: BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF, KEY_MEMBER
+    // Role: BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/{id}/members")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DIRECTOR', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER') and @projectSecurity.isMemberOrOwner(#id)")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMember(#id)")
     public ResponseEntity<ApiResponse<List<ProjectMemberResponse>>> getProjectMembers(
             @PathVariable Long id) {
 

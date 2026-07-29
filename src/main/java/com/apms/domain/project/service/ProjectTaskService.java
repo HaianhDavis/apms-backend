@@ -19,17 +19,13 @@ import com.apms.domain.project.dto.ProjectTaskSubmissionResponse;
 import com.apms.domain.project.dto.WorkbenchDocumentResponse;
 import com.apms.domain.project.dto.CandidateDraftSummary;
 import com.apms.domain.project.dto.ProposalDraftSummary;
-import com.apms.domain.project.dto.ProjectTaskDraftResponse;
-import com.apms.domain.project.dto.SaveProjectTaskDraftRequest;
 import com.apms.common.enums.TaskAction;
 import com.apms.domain.document.service.DocumentService;
 import com.apms.domain.document.dto.ImportJobResponse;
 import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
 import com.apms.domain.profile.repository.mongo.CompanyProfileUpdateProposalRepository;
 import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
-import com.apms.domain.project.repository.sql.ProjectTaskDraftRepository;
 import com.apms.domain.project.ProjectTaskSubmission;
-import com.apms.domain.project.ProjectTaskDraft;
 import com.apms.domain.candidate.CompanyCandidate;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
 import com.apms.common.enums.ProjectType;
@@ -69,8 +65,6 @@ public class ProjectTaskService {
     private final CompanyCandidateRepository candidateRepository;
     private final CompanyProfileUpdateProposalRepository proposalRepository;
     private final ProjectTaskSubmissionRepository submissionRepository;
-    private final ProjectTaskDraftRepository draftRepository;
-    private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
 
     @Transactional
     public ProjectTaskResponse createTask(Long projectId, CreateProjectTaskRequest request) {
@@ -118,13 +112,6 @@ public class ProjectTaskService {
 
     @Transactional(readOnly = true)
     public Page<ProjectTaskResponse> getTasks(Long projectId, TaskStatus status, Long assignedToUserId, Pageable pageable) {
-        UserDetailsImpl currentUser = getCurrentUser();
-        if (currentUser == null) {
-            throw new AccessDeniedException("Unauthorized");
-        }
-        boolean isStaffOnly = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_STAFF)
-                && !hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)
-                && !hasRole(currentUser, SystemRole.SYSTEM_ADMIN);
         Specification<ProjectTask> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.equal(root.get("project").get("id"), projectId));
@@ -132,32 +119,10 @@ public class ProjectTaskService {
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
-            if (isStaffOnly) {
-                // A project member who is Staff must never see a colleague's queue.
-                predicates.add(cb.equal(root.get("assignedToAccount").get("id"), currentUser.getId()));
-            } else if (assignedToUserId != null) {
+            if (assignedToUserId != null) {
                 predicates.add(cb.equal(root.get("assignedToAccount").get("id"), assignedToUserId));
             }
 
-            return cb.and(predicates.toArray(new Predicate[0]));
-        };
-
-        return projectTaskRepository.findAll(spec, pageable).map(this::toResponse);
-    }
-
-    @Transactional(readOnly = true)
-    public Page<ProjectTaskResponse> getMyTasks(TaskStatus status, Pageable pageable) {
-        UserDetailsImpl currentUser = getCurrentUser();
-        if (currentUser == null) {
-            throw new AccessDeniedException("Unauthorized");
-        }
-
-        Specification<ProjectTask> spec = (root, query, cb) -> {
-            List<Predicate> predicates = new ArrayList<>();
-            predicates.add(cb.equal(root.get("assignedToAccount").get("id"), currentUser.getId()));
-            if (status != null) {
-                predicates.add(cb.equal(root.get("status"), status));
-            }
             return cb.and(predicates.toArray(new Predicate[0]));
         };
 
@@ -178,15 +143,10 @@ public class ProjectTaskService {
             throw new AccessDeniedException("Unauthorized");
         }
 
-        assertStaffIsAssignee(currentUser, task);
-
         boolean isStaff = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_STAFF);
         boolean isAdminOrManager = hasRole(currentUser, SystemRole.SYSTEM_ADMIN) || hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
 
         if (isStaff && !isAdminOrManager) {
-            if (task.getAssignedToAccount() == null && request.getAssignedToUserId() != null) {
-                throw new AccessDeniedException("Staff cannot reassign tasks");
-            }
             if (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(currentUser.getId())) {
                 throw new AccessDeniedException("Staff can only update tasks assigned to them");
             }
@@ -265,8 +225,6 @@ public class ProjectTaskService {
         if (currentUser == null) {
             throw new AccessDeniedException("Unauthorized");
         }
-
-        assertStaffIsAssignee(currentUser, task);
 
         Project project = task.getProject();
         TaskType tType = task.getTaskType() != null ? task.getTaskType() : TaskType.GENERAL_TASK;
@@ -480,82 +438,6 @@ public class ProjectTaskService {
         }
 
         return actions;
-    }
-
-    @Transactional(readOnly = true)
-    public ProjectTaskDraftResponse getDraft(Long projectId, Long taskId) {
-        ProjectTask task = findTaskInProject(projectId, taskId);
-        UserDetailsImpl currentUser = requireCurrentUser();
-        assertStaffIsAssignee(currentUser, task);
-        return draftRepository.findByProjectTask_IdAndStaffAccount_Id(taskId, currentUser.getId())
-                .map(this::toDraftResponse)
-                .orElse(null);
-    }
-
-    @Transactional
-    public ProjectTaskDraftResponse saveDraft(Long projectId, Long taskId, SaveProjectTaskDraftRequest request) {
-        ProjectTask task = findTaskInProject(projectId, taskId);
-        UserDetailsImpl currentUser = requireCurrentUser();
-        assertStaffIsAssignee(currentUser, task);
-
-        if (task.getStatus() == TaskStatus.DONE || task.getStatus() == TaskStatus.CANCELLED || task.getStatus() == TaskStatus.IN_REVIEW) {
-            throw new IllegalStateException("Cannot save a draft for a closed or submitted task");
-        }
-        if (request.getAttachedCompanyProfileId() != null && !request.getAttachedCompanyProfileId().isBlank()
-                && !companyProfileRepository.existsById(request.getAttachedCompanyProfileId())) {
-            throw new ResourceNotFoundException("Selected company profile not found");
-        }
-
-        Account staff = accountRepository.findById(currentUser.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
-        ProjectTaskDraft draft = draftRepository.findByProjectTask_IdAndStaffAccount_Id(taskId, currentUser.getId())
-                .orElseGet(() -> ProjectTaskDraft.builder().projectTask(task).staffAccount(staff).build());
-        draft.setAttachedCompanyProfileId(request.getAttachedCompanyProfileId());
-        draft.setNote(request.getNote());
-        draft.setStatus(request.getStatus());
-        return toDraftResponse(draftRepository.save(draft));
-    }
-
-    @Transactional
-    public void clearDraft(Long taskId, Long staffAccountId) {
-        draftRepository.deleteByProjectTask_IdAndStaffAccount_Id(taskId, staffAccountId);
-    }
-
-    private ProjectTask findTaskInProject(Long projectId, Long taskId) {
-        ProjectTask task = projectTaskRepository.findById(taskId)
-                .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
-        if (!task.getProject().getId().equals(projectId)) {
-            throw new IllegalArgumentException("Task does not belong to the specified project");
-        }
-        return task;
-    }
-
-    private UserDetailsImpl requireCurrentUser() {
-        UserDetailsImpl currentUser = getCurrentUser();
-        if (currentUser == null) {
-            throw new AccessDeniedException("Unauthorized");
-        }
-        return currentUser;
-    }
-
-    private void assertStaffIsAssignee(UserDetailsImpl currentUser, ProjectTask task) {
-        boolean isStaffOnly = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_STAFF)
-                && !hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)
-                && !hasRole(currentUser, SystemRole.SYSTEM_ADMIN);
-        if (isStaffOnly && (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(currentUser.getId()))) {
-            throw new AccessDeniedException("Staff can only access tasks assigned to them");
-        }
-    }
-
-    private ProjectTaskDraftResponse toDraftResponse(ProjectTaskDraft draft) {
-        return ProjectTaskDraftResponse.builder()
-                .id(draft.getId())
-                .taskId(draft.getProjectTask().getId())
-                .attachedCompanyProfileId(draft.getAttachedCompanyProfileId())
-                .note(draft.getNote())
-                .status(draft.getStatus())
-                .updatedAt(draft.getUpdatedAt())
-                .build();
     }
 
     private ProjectTaskResponse toResponse(ProjectTask task) {

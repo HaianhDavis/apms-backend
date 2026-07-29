@@ -29,11 +29,16 @@ import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
+import org.springframework.core.annotation.Order;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.UUID;
 
 @Slf4j
@@ -65,11 +70,6 @@ public class ProfileService {
 
         CompanyCandidate candidate = candidateRepository.findById(event.getCandidateId())
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate not found: " + event.getCandidateId()));
-
-        if (event.getProjectId() == null || event.getProjectId().isBlank()) {
-            log.error("CandidateApprovedEvent has null/blank projectId for candidateId: {}. Skipping profile creation.", event.getCandidateId());
-            return;
-        }
 
         Project project = projectRepository.findById(Long.valueOf(event.getProjectId()))
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + event.getProjectId()));
@@ -164,28 +164,19 @@ public class ProfileService {
 
     @Transactional(readOnly = true)
     public Page<ProfileResponse> getAllProfiles(Pageable pageable) {
-        try {
-            return profileRepository.findAll(pageable).map(this::toResponse);
-        } catch (Exception e) {
-            log.warn("Failed to fetch profiles from MongoDB: {}", e.getMessage());
-            return Page.empty(pageable);
-        }
+        return profileRepository.findAll(pageable).map(this::toResponse);
     }
 
     @Transactional(readOnly = true)
     public ProfileResponse getProfileByCompanyId(String companyId) {
-        try {
-            CompanyProfile profile = profileRepository.findByCompanyId(companyId)
-                    .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId));
-            if (Boolean.TRUE.equals(profile.getIsDeleted())) {
-                throw new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId);
-            }
+        CompanyProfile profile = profileRepository.findByCompanyId(companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId));
 
-            return toResponse(profile);
-        } catch (Exception e) {
-            log.warn("Failed to fetch profile {} from MongoDB: {}", companyId, e.getMessage());
+        if (Boolean.TRUE.equals(profile.getIsDeleted())) {
             throw new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId);
         }
+
+        return toResponse(profile);
     }
 
     @Transactional(readOnly = true)
@@ -229,11 +220,13 @@ public class ProfileService {
         }
 
         if (StringUtils.hasText(relationshipType)) {
+            // 1. Validate relationshipType
             java.util.List<String> validTypes = java.util.List.of("PARTNER_WITH", "COMPETITOR_OF", "POTENTIAL_PARTNER_OF", "SUPPLIER_OF", "CUSTOMER_OF");
             if (!validTypes.contains(relationshipType)) {
                 return Page.empty(pageable);
             }
 
+            // 2. Query Neo4j
             String cypher = String.format("MATCH (c:CompanyNode)-[:%s]-(:CompanyNode) RETURN DISTINCT c.companyId AS companyId", relationshipType);
             java.util.List<String> neo4jCompanyIds = new java.util.ArrayList<>(neo4jClient.query(cypher)
                     .fetchAs(String.class)
@@ -244,6 +237,7 @@ public class ProfileService {
                 return Page.empty(pageable);
             }
 
+            // 3. Add to Mongo criteria
             criteria.and("companyId").in(neo4jCompanyIds);
         }
 
@@ -253,16 +247,6 @@ public class ProfileService {
         java.util.List<CompanyProfile> profiles = mongoTemplate.find(query, CompanyProfile.class);
 
         return new PageImpl<>(profiles, pageable, total).map(this::toResponse);
-    }
-
-    @Transactional(readOnly = true)
-    public List<ProfileResponse> getApprovedProfilesForProject(Long projectId) {
-        return profileRepository.findByProjectId(String.valueOf(projectId)).stream()
-                .filter(profile -> !Boolean.TRUE.equals(profile.getIsDeleted()))
-                .filter(profile -> "VERIFIED".equalsIgnoreCase(profile.getReviewStatus())
-                        || "APPROVED".equalsIgnoreCase(profile.getReviewStatus()))
-                .map(this::toResponse)
-                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -286,32 +270,21 @@ public class ProfileService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ProfileResponse> searchProfilesByName(String name, Pageable pageable) {
-        try {
-            return profileRepository.searchByName(name, pageable).map(this::toResponse);
-        } catch (Exception e) {
-            log.warn("Failed to search profiles in MongoDB: {}", e.getMessage());
-            return Page.empty(pageable);
-        }
-    }
-
-    @Transactional(readOnly = true)
     public ProfileSourcesResponse getProfileSources(String companyId) {
-        try {
-            CompanyProfile profile = profileRepository.findByCompanyId(companyId)
-                    .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId));
+        CompanyProfile profile = profileRepository.findByCompanyId(companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId));
 
-            return ProfileSourcesResponse.builder()
-                    .companyId(profile.getCompanyId())
-                    .projectIds(profile.getSourceRefs().getProjectIds())
-                    .importJobIds(profile.getSourceRefs().getImportJobIds())
-                    .rawDocumentIds(profile.getSourceRefs().getRawDocumentIds())
-                    .candidateIds(profile.getSourceRefs().getCandidateIds())
-                    .build();
-        } catch (Exception e) {
-            log.warn("Failed to fetch profile sources from MongoDB: {}", e.getMessage());
+        if (Boolean.TRUE.equals(profile.getIsDeleted())) {
             throw new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId);
         }
+
+        return ProfileSourcesResponse.builder()
+                .companyId(profile.getCompanyId())
+                .projectIds(profile.getSourceRefs().getProjectIds())
+                .importJobIds(profile.getSourceRefs().getImportJobIds())
+                .rawDocumentIds(profile.getSourceRefs().getRawDocumentIds())
+                .candidateIds(profile.getSourceRefs().getCandidateIds())
+                .build();
     }
 
     // ─────────────────────────────────────────────

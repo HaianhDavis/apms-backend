@@ -7,7 +7,6 @@ import com.apms.security.UserDetailsImpl;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -29,16 +28,13 @@ public class CandidateMergeController {
      * one draft and submit it via the task submission endpoint.
      */
     @PostMapping("/from-extractions")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'KEY_MEMBER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<MergeCandidateResponse> mergeExtractionsIntoCandidate(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
             @Valid @RequestBody MergeExtractionsIntoCandidateRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
-        if (currentUser == null) {
-            throw new AccessDeniedException("Authentication required");
-        }
         MergeCandidateResponse response = mergeService.mergeExtractionsIntoCandidate(
                 projectId, taskId, request.getExtractionIds(), request.getNote(), currentUser.getId());
 

@@ -26,10 +26,8 @@ public class AiExtractionQualityService {
 
     private void validateField(String fieldName, ExtractionFieldResult result) {
         if (result == null || result.getValue() == null) {
-            if (result != null) {
-                result.setValidationStatus(ExtractionValidationStatus.PASS);
-                result.setValidationMessages("Field is empty.");
-            }
+            result.setValidationStatus(ExtractionValidationStatus.PASS);
+            result.setValidationMessages("Field is empty.");
             return;
         }
 
