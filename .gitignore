@@ -33,6 +33,10 @@ build/
 .vscode/
 
 .env
-*.log
+.env.*
+!.env.example
+
 uploads/
 
+.idea/
+.DS_Store

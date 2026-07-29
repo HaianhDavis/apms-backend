@@ -1,0 +1,15 @@
+target/
+uploads/
+
+.env
+.env.*
+!.env.example
+
+.git/
+.github/
+
+.idea/
+.vscode/
+
+.DS_Store
+*.log
