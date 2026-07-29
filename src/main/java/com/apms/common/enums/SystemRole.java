@@ -5,6 +5,7 @@ public enum SystemRole {
     BUSINESS_OWNER,
     BUSINESS_DIRECTOR,
     BUSINESS_DEVELOPMENT_MANAGER,
+    BUSINESS_DEVELOPMENT_STAFF,
     KEY_MEMBER,
 
     @Deprecated

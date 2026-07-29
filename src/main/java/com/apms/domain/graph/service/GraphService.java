@@ -352,6 +352,5 @@ public class GraphService {
             log.warn("Neo4j is unavailable, returning empty outgoing relationships. Error: {}", e.getMessage());
             return List.of();
         }
->>>>>>> d4242dc (Update backend services, controllers, security configuration, and test suite)
     }
 }
