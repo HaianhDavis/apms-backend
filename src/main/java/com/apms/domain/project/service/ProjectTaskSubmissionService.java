@@ -51,6 +51,9 @@ public class ProjectTaskSubmissionService {
     private final com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository versionRepository;
     private final AuditLogService auditLogService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.apms.domain.companymember.service.CompanyMemberResearchService companyMemberResearchService;
 
     @Transactional
     public ProjectTaskSubmissionResponse submitTask(Long projectId, Long taskId, CreateProjectTaskSubmissionRequest request) {
@@ -268,6 +271,8 @@ public class ProjectTaskSubmissionService {
 
                         auditLogService.log(currentUser.getId(), AuditAction.PROFILE_UPDATE_PROPOSAL_APPLIED, "CompanyProfileUpdateProposal", proposal.getId(), "Proposal applied and profile updated");
                     }
+                } else if (submission.getSubmissionType() == com.apms.common.enums.SubmissionType.COMPANY_MEMBER_RESEARCH) {
+                    companyMemberResearchService.handleApproval(submission, reviewer.getId(), request.getComment());
                 }
                 break;
 

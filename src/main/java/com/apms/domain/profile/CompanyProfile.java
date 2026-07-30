@@ -80,6 +80,9 @@ public class CompanyProfile {
     private com.apms.domain.company.model.RiskInfo risk;
     private com.apms.domain.company.model.ComplianceInfo compliance;
 
+    @Builder.Default
+    private List<CompanyMember> companyMembers = new ArrayList<>();
+
     // ─────────────────────────────────────────────────────────────
     // Profile Metadata
     // ─────────────────────────────────────────────────────────────
@@ -216,5 +219,20 @@ public class CompanyProfile {
         private String lastModifiedBy;
         private LocalDateTime updatedAt;
         private LocalDateTime deletedAt;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class CompanyMember {
+        private String fullName;
+        private String position;
+        private String imageUrl;
+        private String sourceUrl;
+        private String notes;
+        private LocalDateTime researchedAt;
+        private Long researchedBy;
+        private Long taskId;
     }
 }
