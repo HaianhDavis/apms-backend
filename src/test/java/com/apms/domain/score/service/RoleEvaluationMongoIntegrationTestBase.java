@@ -15,6 +15,9 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 import org.junit.jupiter.api.extension.ExtendWith;
 import com.apms.config.MongoConfig;
 import com.apms.domain.user.repository.sql.AccountRepository;
+import com.apms.domain.audit.service.AuditLogService;
+import com.apms.domain.project.repository.sql.ProjectTaskRepository;
+import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
 import com.apms.common.security.ProjectSecurityEvaluator;
 import org.mockito.Mockito;
 
@@ -53,6 +56,21 @@ public abstract class RoleEvaluationMongoIntegrationTestBase {
         }
 
         @Bean
+        public ProjectTaskRepository projectTaskRepository() {
+            return Mockito.mock(ProjectTaskRepository.class);
+        }
+
+        @Bean
+        public ProjectTaskSubmissionRepository projectTaskSubmissionRepository() {
+            return Mockito.mock(ProjectTaskSubmissionRepository.class);
+        }
+
+        @Bean
+        public AuditLogService auditLogService() {
+            return Mockito.mock(AuditLogService.class);
+        }
+
+        @Bean
         public ProjectSecurityEvaluator projectSecurityEvaluator() {
             return Mockito.mock(ProjectSecurityEvaluator.class);
         }
@@ -60,17 +78,22 @@ public abstract class RoleEvaluationMongoIntegrationTestBase {
         @Bean
         public PartnerRoleEvaluationSubmissionStrategy partnerRoleEvaluationSubmissionStrategy(
                 MongoTemplate mongoTemplate,
+                ProjectTaskRepository taskRepository,
+                ProjectTaskSubmissionRepository submissionRepository,
                 AccountRepository accountRepository,
-                PartnerDataSufficiencyEvaluator sufficiencyEvaluator) {
-            return new PartnerRoleEvaluationSubmissionStrategy(mongoTemplate, accountRepository, sufficiencyEvaluator);
+                PartnerDataSufficiencyEvaluator sufficiencyEvaluator,
+                AuditLogService auditLogService) {
+            return new PartnerRoleEvaluationSubmissionStrategy(mongoTemplate, taskRepository, submissionRepository, accountRepository, sufficiencyEvaluator, auditLogService);
         }
 
         @Bean
         public PartnerRoleEvaluationApprovalStrategy partnerRoleEvaluationApprovalStrategy(
                 MongoTemplate mongoTemplate,
                 PartnerDataSufficiencyEvaluator sufficiencyEvaluator,
-                ProjectSecurityEvaluator projectSecurityEvaluator) {
-            return new PartnerRoleEvaluationApprovalStrategy(mongoTemplate, sufficiencyEvaluator, projectSecurityEvaluator);
+                ProjectSecurityEvaluator projectSecurityEvaluator,
+                ProjectTaskRepository taskRepository,
+                ProjectTaskSubmissionRepository submissionRepository) {
+            return new PartnerRoleEvaluationApprovalStrategy(mongoTemplate, sufficiencyEvaluator, projectSecurityEvaluator, taskRepository, submissionRepository);
         }
     }
 

@@ -1,9 +1,15 @@
 package com.apms.domain.score.service;
 
+import com.apms.common.enums.SubmissionStatus;
+import com.apms.common.enums.TaskStatus;
+import com.apms.common.exception.BusinessValidationException;
 import com.apms.domain.company.enums.CompanyRole;
 import com.apms.domain.project.ProjectTask;
 import com.apms.domain.project.ProjectTaskSubmission;
+import com.apms.domain.project.repository.sql.ProjectTaskRepository;
+import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
 import com.apms.domain.score.draft.CriterionInput;
+import com.apms.domain.score.draft.EvidenceRecord;
 import com.apms.domain.score.draft.RoleEvaluationDraft;
 import com.apms.domain.score.dto.draft.ReviewRoleEvaluationRequest;
 import com.apms.domain.score.enums.RoleEvaluationStatus;
@@ -22,11 +28,11 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.data.mongodb.core.query.UpdateDefinition;
 
-import com.apms.domain.score.enums.EvaluationCompletenessStatus;
-import com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse;
 import com.apms.common.security.ProjectSecurityEvaluator;
+import com.apms.domain.score.registry.CanonicalRoleCriteria;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -48,6 +54,12 @@ public class PartnerRoleEvaluationApprovalStrategyTest {
     @Mock
     private ProjectSecurityEvaluator projectSecurityEvaluator;
 
+    @Mock
+    private ProjectTaskRepository taskRepository;
+
+    @Mock
+    private ProjectTaskSubmissionRepository submissionRepository;
+
     @InjectMocks
     private PartnerRoleEvaluationApprovalStrategy strategy;
 
@@ -67,10 +79,20 @@ public class PartnerRoleEvaluationApprovalStrategyTest {
         draft.setEvaluatedRole(CompanyRole.PARTNER);
 
         LinkedHashMap<String, CriterionInput> inputs = new LinkedHashMap<>();
-        for (int i = 0; i < 6; i++) {
-            inputs.put("CRIT_" + i, new CriterionInput());
+        LinkedHashMap<String, List<EvidenceRecord>> evidence = new LinkedHashMap<>();
+        for (String criterionKey : CanonicalRoleCriteria.PARTNER_CRITERIA) {
+            CriterionInput input = new CriterionInput();
+            input.setRawScore(new java.math.BigDecimal("90"));
+            input.setExplanation("Staff reason for " + criterionKey);
+            inputs.put(criterionKey, input);
+
+            EvidenceRecord record = new EvidenceRecord();
+            record.setEvidenceId("ev-" + criterionKey);
+            record.setRawDocumentId("raw-" + criterionKey);
+            evidence.put(criterionKey, List.of(record));
         }
         draft.setCriterionInputs(inputs);
+        draft.setCriterionEvidence(evidence);
 
         task = new ProjectTask();
         com.apms.domain.project.Project project = new com.apms.domain.project.Project();
@@ -95,11 +117,6 @@ public class PartnerRoleEvaluationApprovalStrategyTest {
 
         when(projectSecurityEvaluator.isManager(10L)).thenReturn(true);
 
-        RoleEvaluationReadinessResponse readiness = new RoleEvaluationReadinessResponse();
-        readiness.setStaffMaySubmit(true);
-        readiness.setAggregateCompletenessStatus(EvaluationCompletenessStatus.COMPLETE);
-        when(sufficiencyEvaluator.evaluate(draft)).thenReturn(readiness);
-
         strategy.approve(draft, task, submission, request, 100L, "key1");
 
         ArgumentCaptor<RoleEvaluationVersion> versionCaptor = ArgumentCaptor.forClass(RoleEvaluationVersion.class);
@@ -116,6 +133,10 @@ public class PartnerRoleEvaluationApprovalStrategyTest {
         Update update = (Update) updateCaptor.getValue();
         org.bson.Document setDoc = (org.bson.Document) update.getUpdateObject().get("$set");
         assertEquals(RoleEvaluationStatus.APPROVED, setDoc.get("status"));
+        assertEquals(SubmissionStatus.APPROVED, submission.getStatus());
+        assertEquals(TaskStatus.DONE, task.getStatus());
+        verify(submissionRepository).save(submission);
+        verify(taskRepository).save(task);
     }
 
     @Test
@@ -164,30 +185,24 @@ public class PartnerRoleEvaluationApprovalStrategyTest {
     @Test
     void approve_ThrowsIfIncomplete() {
         when(projectSecurityEvaluator.isManager(10L)).thenReturn(true);
-        RoleEvaluationReadinessResponse readiness = new RoleEvaluationReadinessResponse();
-        readiness.setStaffMaySubmit(false);
-        readiness.setAggregateCompletenessStatus(EvaluationCompletenessStatus.INCOMPLETE);
-        when(sufficiencyEvaluator.evaluate(draft)).thenReturn(readiness);
+        draft.getCriterionEvidence().remove(CanonicalRoleCriteria.PARTNER_CRITERIA.get(0));
 
-        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             strategy.approve(draft, task, submission, request, 100L, "key1")
         );
-        assertTrue(ex.getMessage().contains("Cannot approve INCOMPLETE evaluation."));
+        assertTrue(ex.getMessage().contains("Cannot approve evaluation"));
     }
 
     @Test
-    void approve_ThrowsIfPartialWithoutJustification() {
+    void approve_AllowsBlankCommentWhenStaffConfirmedDataIsComplete() {
         when(projectSecurityEvaluator.isManager(10L)).thenReturn(true);
-        RoleEvaluationReadinessResponse readiness = new RoleEvaluationReadinessResponse();
-        readiness.setStaffMaySubmit(true);
-        readiness.setAggregateCompletenessStatus(EvaluationCompletenessStatus.PARTIAL);
-        when(sufficiencyEvaluator.evaluate(draft)).thenReturn(readiness);
+        when(mongoTemplate.updateFirst(any(Query.class), any(UpdateDefinition.class), eq(RoleEvaluationDraft.class)))
+                .thenReturn(UpdateResult.acknowledged(1, 1L, null));
 
         request.setComment(" ");
 
-        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () ->
-            strategy.approve(draft, task, submission, request, 100L, "key1")
-        );
-        assertTrue(ex.getMessage().contains("Manager justification is required"));
+        strategy.approve(draft, task, submission, request, 100L, "key1");
+
+        verify(mongoTemplate).insert(any(RoleEvaluationVersion.class));
     }
 }

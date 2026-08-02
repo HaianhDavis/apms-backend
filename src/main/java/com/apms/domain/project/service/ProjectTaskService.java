@@ -30,8 +30,12 @@ import com.apms.domain.candidate.CompanyCandidate;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
 import com.apms.common.enums.ProjectType;
 import com.apms.common.enums.SubmissionStatus;
+import com.apms.common.enums.SubmissionType;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.project.repository.sql.ProjectTaskRepository;
+import com.apms.domain.score.draft.RoleEvaluationDraft;
+import com.apms.domain.score.enums.RoleEvaluationStatus;
+import com.apms.domain.score.repository.mongo.RoleEvaluationDraftRepository;
 import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
 import com.apms.domain.notification.service.NotificationService;
@@ -66,6 +70,7 @@ public class ProjectTaskService {
     private final CompanyCandidateRepository candidateRepository;
     private final CompanyProfileUpdateProposalRepository proposalRepository;
     private final ProjectTaskSubmissionRepository submissionRepository;
+    private final RoleEvaluationDraftRepository roleEvaluationDraftRepository;
     private final NotificationService notificationService;
 
     @Transactional
@@ -251,7 +256,7 @@ public class ProjectTaskService {
         auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_UPDATED, "ProjectTask", String.valueOf(taskId), "Task deleted");
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public ProjectTaskWorkbenchResponse getTaskWorkbench(Long projectId, Long taskId) {
         ProjectTask task = projectTaskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
@@ -267,6 +272,9 @@ public class ProjectTaskService {
 
         Project project = task.getProject();
         TaskType tType = task.getTaskType() != null ? task.getTaskType() : TaskType.GENERAL_TASK;
+        if (tType == TaskType.ROLE_EVALUATION) {
+            syncSubmittedRoleEvaluationState(projectId, task, currentUser);
+        }
         
         // 1. Evaluate actions
         List<TaskAction> actions = evaluateAvailableActions(currentUser, task, project, tType);
@@ -415,6 +423,57 @@ public class ProjectTaskService {
                 .profileUpdateProposalDrafts(proposalSummaries)
                 .submissions(submissions)
                 .build();
+    }
+
+    private void syncSubmittedRoleEvaluationState(Long projectId, ProjectTask task, UserDetailsImpl currentUser) {
+        List<RoleEvaluationDraft> reviewDrafts = roleEvaluationDraftRepository
+                .findByProjectIdAndTaskIdOrderByCreatedAtDesc(projectId, task.getId())
+                .stream()
+                .filter(draft -> draft.getStatus() == RoleEvaluationStatus.IN_REVIEW || draft.getStatus() == RoleEvaluationStatus.APPROVED)
+                .toList();
+        if (reviewDrafts.isEmpty()) {
+            return;
+        }
+
+        Account submittedBy = task.getAssignedToAccount();
+        if (submittedBy == null) {
+            submittedBy = accountRepository.findById(currentUser.getId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
+        }
+
+        List<ProjectTaskSubmission> submissions = submissionRepository.findByProjectTask_Id(task.getId());
+        boolean hasApprovedDraft = reviewDrafts.stream().anyMatch(draft -> draft.getStatus() == RoleEvaluationStatus.APPROVED);
+        for (RoleEvaluationDraft draft : reviewDrafts) {
+            Account submissionAccount = submittedBy;
+            if (draft.getSubmittedByAccountId() != null) {
+                submissionAccount = accountRepository.findById(draft.getSubmittedByAccountId()).orElse(submittedBy);
+            }
+            Account finalSubmissionAccount = submissionAccount;
+
+            ProjectTaskSubmission submission = submissions.stream()
+                    .filter(item -> "ROLE_EVALUATION_DRAFT".equals(item.getTargetEntityType())
+                            && draft.getId().equals(item.getTargetEntityId()))
+                    .findFirst()
+                    .orElseGet(() -> ProjectTaskSubmission.builder()
+                            .project(task.getProject())
+                            .projectTask(task)
+                            .submissionType(SubmissionType.ROLE_EVALUATION)
+                            .targetEntityType("ROLE_EVALUATION_DRAFT")
+                            .targetEntityId(draft.getId())
+                            .submittedByAccount(finalSubmissionAccount)
+                            .build());
+            submission.setStatus(draft.getStatus() == RoleEvaluationStatus.APPROVED ? SubmissionStatus.APPROVED : SubmissionStatus.IN_REVIEW);
+            submission.setSubmittedByAccount(submissionAccount);
+            submission.setSubmittedAt(draft.getSubmittedAt() != null ? draft.getSubmittedAt() : LocalDateTime.now());
+            submissionRepository.save(submission);
+        }
+
+        TaskStatus targetStatus = hasApprovedDraft ? TaskStatus.DONE : TaskStatus.IN_REVIEW;
+        if (task.getStatus() != targetStatus) {
+            task.setStatus(targetStatus);
+            task.setCompletedAt(hasApprovedDraft ? LocalDateTime.now() : null);
+            projectTaskRepository.save(task);
+        }
     }
 
     private String candidateDisplayName(CompanyCandidate candidate) {

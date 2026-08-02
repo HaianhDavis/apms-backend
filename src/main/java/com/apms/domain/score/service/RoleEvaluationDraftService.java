@@ -8,6 +8,7 @@ import com.apms.domain.company.enums.CompanyRole;
 import com.apms.common.enums.RelationshipType;
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.CompanyProfileVersion;
+import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectTask;
 import com.apms.domain.project.repository.sql.ProjectRepository;
@@ -56,6 +57,7 @@ public class RoleEvaluationDraftService {
     private final ProjectTaskRepository taskRepository;
     private final RoleScoreRuleSetRepository ruleSetRepository;
     private final MongoTemplate mongoTemplate;
+    private final CompanyProfileRepository profileRepository;
 
     private final CompanyProfileIdentifierResolver identifierResolver;
     private final OwnerOrganizationProperties ownerProperties;
@@ -83,13 +85,9 @@ public class RoleEvaluationDraftService {
             throw new IllegalArgumentException("Task type must be ROLE_EVALUATION");
         }
 
-        if (project.getTargetRelationshipType() != RelationshipType.COMPETITOR_OF) {
-            throw new IllegalArgumentException("Phase 2B only supports COMPETITOR_OF");
-        }
-
         CompanyRole evaluatedRole = roleMapper.map(project.getTargetRelationshipType());
 
-        String targetCompanyId = project.getTargetCompanyProfileId();
+        String targetCompanyId = resolveProjectTargetCompanyId(project);
         CompanyProfile targetProfile = identifierResolver.resolveTargetProfile(targetCompanyId);
 
         if (targetProfile.getCompanyId().equals(ownerProperties.getCompanyProfileId()) ||
@@ -150,10 +148,44 @@ public class RoleEvaluationDraftService {
         return mapToResponse(draft);
     }
 
+    private String resolveProjectTargetCompanyId(Project project) {
+        if (org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId())) {
+            return project.getTargetCompanyProfileId();
+        }
+
+        List<CompanyProfile> approvedProfiles = profileRepository.findByProjectId(String.valueOf(project.getId()))
+                .stream()
+                .filter(profile -> "APPROVED".equals(profile.getReviewStatus()))
+                .filter(profile -> !Boolean.TRUE.equals(profile.getIsDeleted()))
+                .toList();
+
+        if (approvedProfiles.isEmpty()) {
+            throw new IllegalArgumentException("Target profile not found for projectId: " + project.getId()
+                    + ". Approve a candidate in this project before creating a ROLE_EVALUATION draft.");
+        }
+        if (approvedProfiles.size() > 1) {
+            throw new IllegalArgumentException("Multiple approved target profiles found for projectId: " + project.getId()
+                    + ". Please set the project target company before creating a ROLE_EVALUATION draft.");
+        }
+
+        CompanyProfile profile = approvedProfiles.get(0);
+        project.setTargetCompanyProfileId(profile.getCompanyId());
+        projectRepository.save(project);
+        log.info("Backfilled project {} targetCompanyProfileId with approved profile companyId {}", project.getId(), profile.getCompanyId());
+        return profile.getCompanyId();
+    }
+
     public RoleEvaluationDraftResponse getDraft(String draftId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
         return mapToResponse(draft);
+    }
+
+    public List<RoleEvaluationDraftResponse> getDraftsForTask(Long projectId, Long taskId) {
+        return draftRepository.findByProjectIdAndTaskIdOrderByCreatedAtDesc(projectId, taskId)
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
     }
 
     public RoleEvaluationDraft getRawDraft(String draftId) {
@@ -238,6 +270,44 @@ public class RoleEvaluationDraftService {
         draft.setUpdatedAt(LocalDateTime.now());
         auditLogService.log(accountId, AuditAction.ROLE_EVALUATION_EVIDENCE_ADDED, "ROLE_EVALUATION_DRAFT", draftId,
                 "Added evidence for criterion=" + request.getCriterionKey());
+        return mapToResponse(draftRepository.save(draft));
+    }
+
+    public RoleEvaluationDraftResponse removeEvidence(String draftId, String evidenceId, Long accountId) {
+        RoleEvaluationDraft draft = draftRepository.findById(draftId)
+                .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+
+        if (draft.getStatus() != RoleEvaluationStatus.DRAFT && draft.getStatus() != RoleEvaluationStatus.REVISION_REQUIRED) {
+            throw new IllegalStateException("Draft cannot be edited in current state");
+        }
+
+        String criterionKey = null;
+        boolean removed = false;
+        for (var entry : draft.getCriterionEvidence().entrySet()) {
+            List<EvidenceRecord> evidence = entry.getValue();
+            if (evidence == null) continue;
+            boolean changed = evidence.removeIf(item -> evidenceId.equals(item.getEvidenceId()));
+            if (changed) {
+                criterionKey = entry.getKey();
+                removed = true;
+                break;
+            }
+        }
+
+        if (!removed) {
+            throw new IllegalArgumentException("Evidence not found: " + evidenceId);
+        }
+
+        if (criterionKey != null) {
+            CriterionInput input = draft.getCriterionInputs().get(criterionKey);
+            if (input != null && input.getEvidenceIds() != null) {
+                input.getEvidenceIds().removeIf(evidenceId::equals);
+            }
+        }
+
+        draft.setUpdatedAt(LocalDateTime.now());
+        auditLogService.log(accountId, AuditAction.ROLE_EVALUATION_EVIDENCE_ADDED, "ROLE_EVALUATION_DRAFT", draftId,
+                "Removed evidence=" + evidenceId + " for criterion=" + criterionKey);
         return mapToResponse(draftRepository.save(draft));
     }
 
@@ -459,6 +529,17 @@ public class RoleEvaluationDraftService {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
 
+        if (draft.getEvaluatedRole() == CompanyRole.PARTNER) {
+            RoleEvaluationPreviewResponse response = new RoleEvaluationPreviewResponse();
+            response.setCriterionScores(new LinkedHashMap<>());
+            response.setNormalizedCriterionScores(new LinkedHashMap<>());
+            response.setCompletenessStatus(EvaluationCompletenessStatus.PARTIAL);
+            response.setMissingCriteria(new ArrayList<>());
+            response.setPreviewOverallScore(null);
+            response.setWarnings(java.util.List.of("PARTNER evaluations are qualitative-only and do not produce an overall numeric score."));
+            return response;
+        }
+
         RoleEvaluationCalculationRequest request = new RoleEvaluationCalculationRequest();
         request.setEvaluatedRole(draft.getEvaluatedRole());
 
@@ -472,6 +553,7 @@ public class RoleEvaluationDraftService {
 
         RoleScoreRuleSet ruleSet = ruleSetRepository.findByEvaluatedRoleAndActiveTrue(draft.getEvaluatedRole())
                 .orElseThrow(() -> new IllegalStateException("Active rule set not found for preview"));
+        request.setRuleSetVersion(ruleSet.getRuleSetVersion());
 
         RoleEvaluationCalculationResult result = scoringEngine.calculate(request);
 

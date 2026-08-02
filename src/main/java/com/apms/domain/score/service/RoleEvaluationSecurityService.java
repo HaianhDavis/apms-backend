@@ -39,7 +39,7 @@ public class RoleEvaluationSecurityService {
         }
         if (draft.getEvaluatedRole() == CompanyRole.PARTNER) {
             // PARTNER_WITH relationship check is implied by evaluatedRole
-            if (project.getTargetCompanyProfileId() != null && !project.getTargetCompanyProfileId().equals(draft.getTargetProfileDocumentId())) {
+            if (project.getTargetCompanyProfileId() != null && !project.getTargetCompanyProfileId().equals(draft.getTargetCompanyId())) {
                 throw new SecurityException("target company alignment failed");
             }
         }

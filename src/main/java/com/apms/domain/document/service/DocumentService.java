@@ -32,6 +32,7 @@ public class DocumentService {
     private final ProjectRepository projectRepository;
     private final AccountRepository accountRepository;
     private final StorageService storageService;
+    private final DocumentTextExtractionService documentTextExtractionService;
 
     public record DocumentDownload(Resource resource, String fileName, String mimeType) {}
 
@@ -51,6 +52,8 @@ public class DocumentService {
         // Save file locally
         String localFilePath = storageService.store(file);
         String sourceType = deriveSourceType(file.getOriginalFilename());
+        String extractedText = documentTextExtractionService.extractText(sourceType, localFilePath);
+        boolean hasExtractedText = org.springframework.util.StringUtils.hasText(extractedText);
 
         // Create ImportJob in SQL
         ImportJob importJob = ImportJob.builder()
@@ -76,6 +79,7 @@ public class DocumentService {
                 .source(RawDocument.Source.builder()
                         .type(sourceType)
                         .fileName(file.getOriginalFilename())
+                        .inputText(extractedText)
                         .build())
                 .storage(RawDocument.Storage.builder()
                         .provider("LOCAL")
@@ -84,9 +88,10 @@ public class DocumentService {
                         .sizeBytes(file.getSize())
                         .build())
                 .processing(RawDocument.Processing.builder()
-                        .status("UPLOADED")
+                        .status(hasExtractedText ? "EXTRACTED" : "UPLOADED")
                         .candidateCount(0)
                         .startedAt(now)
+                        .completedAt(hasExtractedText ? now : null)
                         .build())
                 .metadata(RawDocument.Metadata.builder()
                         .uploadedBy(String.valueOf(uploaderUserId))
@@ -293,6 +298,7 @@ public class DocumentService {
             case "DOC", "DOCX" -> "DOCX";
             case "XLS", "XLSX" -> "XLSX";
             case "CSV"  -> "CSV";
+            case "TXT"  -> "TXT";
             default -> "OTHER";
         };
     }

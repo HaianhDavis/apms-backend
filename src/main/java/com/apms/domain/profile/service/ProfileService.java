@@ -21,7 +21,9 @@ import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -97,7 +99,7 @@ public class ProfileService {
                 .innovation(candidate.getInnovation())
                 .risk(candidate.getRisk())
                 .compliance(candidate.getCompliance())
-                .reviewStatus("VERIFIED")
+                .reviewStatus("APPROVED")
                 .metadata(CompanyProfile.Metadata.builder()
                         .createdBy("SYSTEM")
                         .createdAt(LocalDateTime.now())
@@ -107,7 +109,12 @@ public class ProfileService {
 
         addSourceRefs(profile, project, candidate);
 
-        profileRepository.save(profile);
+        profile = profileRepository.save(profile);
+        if (!StringUtils.hasText(project.getTargetCompanyProfileId())) {
+            project.setTargetCompanyProfileId(profile.getCompanyId());
+            projectRepository.save(project);
+            log.info("Linked project {} to new CompanyProfile companyId {}", project.getId(), profile.getCompanyId());
+        }
         log.info("Successfully created CompanyProfile for companyId: {}", newCompanyId);
     }
 
@@ -136,6 +143,7 @@ public class ProfileService {
         if (candidate.getRisk() != null) profile.setRisk(candidate.getRisk());
         if (candidate.getCompliance() != null) profile.setCompliance(candidate.getCompliance());
 
+        profile.setReviewStatus("APPROVED");
         profile.setVersion(profile.getVersion() + 1);
         profile.getMetadata().setUpdatedAt(LocalDateTime.now());
         profile.getMetadata().setLastModifiedBy("SYSTEM");
@@ -164,12 +172,13 @@ public class ProfileService {
 
     @Transactional(readOnly = true)
     public Page<ProfileResponse> getAllProfiles(Pageable pageable) {
-        return profileRepository.findAll(pageable).map(this::toResponse);
+        return profileRepository.findAll(newestFirst(pageable)).map(this::toResponse);
     }
 
     @Transactional(readOnly = true)
     public ProfileResponse getProfileByCompanyId(String companyId) {
         CompanyProfile profile = profileRepository.findByCompanyId(companyId)
+                .or(() -> profileRepository.findById(companyId))
                 .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId));
 
         if (Boolean.TRUE.equals(profile.getIsDeleted())) {
@@ -197,6 +206,7 @@ public class ProfileService {
 
     @Transactional(readOnly = true)
     public Page<ProfileResponse> searchCompanyProfiles(String keyword, String industry, String market, String reviewStatus, String relationshipType, boolean excludeOwner, Pageable pageable) {
+        Pageable effectivePageable = newestFirst(pageable);
         Criteria criteria = Criteria.where("isDeleted").ne(true);
 
         if (excludeOwner) {
@@ -243,14 +253,15 @@ public class ProfileService {
 
         Query query = new Query(criteria);
         long total = mongoTemplate.count(query, CompanyProfile.class);
-        query.with(pageable);
+        query.with(effectivePageable);
         java.util.List<CompanyProfile> profiles = mongoTemplate.find(query, CompanyProfile.class);
 
-        return new PageImpl<>(profiles, pageable, total).map(this::toResponse);
+        return new PageImpl<>(profiles, effectivePageable, total).map(this::toResponse);
     }
 
     @Transactional(readOnly = true)
     public Page<ProfileResponse> searchProfilesByName(String name, boolean excludeOwner, Pageable pageable) {
+        Pageable effectivePageable = newestFirst(pageable);
         Criteria criteria = Criteria.where("isDeleted").ne(true);
 
         if (excludeOwner) {
@@ -263,10 +274,20 @@ public class ProfileService {
                     Criteria.where("identity.tradeName").regex(name, "i")
             );
         }
-        Query query = new Query(criteria).with(pageable);
+        Query query = new Query(criteria).with(effectivePageable);
         java.util.List<CompanyProfile> profiles = mongoTemplate.find(query, CompanyProfile.class);
         long total = mongoTemplate.count(new Query(criteria), CompanyProfile.class);
-        return new PageImpl<>(profiles, pageable, total).map(this::toResponse);
+        return new PageImpl<>(profiles, effectivePageable, total).map(this::toResponse);
+    }
+
+    private Pageable newestFirst(Pageable pageable) {
+        Sort defaultSort = Sort.by(
+                Sort.Order.desc("metadata.updatedAt"),
+                Sort.Order.desc("metadata.createdAt"),
+                Sort.Order.desc("_id")
+        );
+        Sort sort = pageable.getSort().isSorted() ? pageable.getSort().and(defaultSort) : defaultSort;
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort);
     }
 
     @Transactional(readOnly = true)

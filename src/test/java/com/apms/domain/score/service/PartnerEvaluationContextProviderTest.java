@@ -43,6 +43,8 @@ class PartnerEvaluationContextProviderTest {
                 Mockito.mock(com.apms.domain.rolemetric.repository.RoleMetricEvidenceVersionRepository.class),
                 Mockito.mock(com.apms.domain.contract.repository.sql.PartnerContractVersionRepository.class),
                 Mockito.mock(com.apms.domain.contract.repository.sql.PartnerContractClauseVersionRepository.class),
+                Mockito.mock(com.apms.domain.document.repository.mongo.RawDocumentRepository.class),
+                Mockito.mock(com.apms.domain.document.service.DocumentTextExtractionService.class),
                 objectMapper
         );
     }
@@ -53,7 +55,7 @@ class PartnerEvaluationContextProviderTest {
         draft.setPinnedSourceReferences(new ArrayList<>());
 
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () -> provider.buildContext(draft, "crit1"));
-        assertTrue(ex.getMessage().contains("has no pinned source references"));
+        assertTrue(ex.getMessage().contains("has no selected evidence"));
     }
 
     @Test

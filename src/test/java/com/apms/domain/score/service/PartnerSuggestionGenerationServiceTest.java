@@ -79,7 +79,7 @@ class PartnerSuggestionGenerationServiceTest {
         aiResp.setRationale("Good rationale");
         when(promptProvider.getPromptTemplate("crit1")).thenReturn("prompt");
         when(aiProvider.generateSuggestionJson(any(), anyString())).thenReturn("{}");
-        when(validator.validateAndMap(anyString(), eq("crit1"), eq(draft.getPinnedSourceReferences()))).thenReturn(aiResp);
+        when(validator.validateAndMap(anyString(), eq("crit1"), any())).thenReturn(aiResp);
 
         String result = service.generateSuggestion("draft1", "crit1", "gen1");
         assertEquals("GENERATED", result);
@@ -304,26 +304,17 @@ class PartnerSuggestionGenerationServiceTest {
     }
 
     @Test
-    void testInsufficientDataBlocksGeneration() {
+    void testNoEvidenceBlocksGeneration() {
         RoleEvaluationDraft draft = new RoleEvaluationDraft();
         draft.setId("draft1");
         draft.setWorkingRevisionNumber(5);
         draft.setSourceSnapshotHash("hash1");
-        draft.setPinnedSourceReferences(List.of(new ApprovedSourceReference()));
+        draft.setPinnedSourceReferences(List.of());
 
         when(draftRepository.findById("draft1")).thenReturn(Optional.of(draft));
 
-        com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse readiness = com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse.builder()
-            .criterionResults(java.util.Map.of(
-                "crit1", com.apms.domain.score.dto.draft.CriterionReadinessResult.builder()
-                    .sufficiencyStatus(PartnerDataSufficiencyEvaluator.SufficiencyStatus.INCOMPLETE)
-                    .build()
-            ))
-            .build();
-        when(sufficiencyEvaluator.evaluate(draft)).thenReturn(readiness);
-
         String result = service.generateSuggestion("draft1", "crit1", "gen1");
-        assertEquals("NEEDS_MORE_DATA", result);
+        assertEquals("NO_EVIDENCE_SELECTED", result);
 
         verify(aiProvider, never()).generateSuggestionJson(any(), anyString());
     }

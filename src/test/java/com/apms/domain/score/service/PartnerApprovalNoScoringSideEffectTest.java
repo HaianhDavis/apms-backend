@@ -4,7 +4,10 @@ import com.apms.domain.company.enums.CompanyRole;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectTask;
 import com.apms.domain.project.ProjectTaskSubmission;
+import com.apms.domain.project.repository.sql.ProjectTaskRepository;
+import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
 import com.apms.domain.score.draft.CriterionInput;
+import com.apms.domain.score.draft.EvidenceRecord;
 import com.apms.domain.score.draft.RoleEvaluationDraft;
 import com.apms.domain.score.draft.RoleEvaluationVersion;
 import com.apms.domain.score.dto.draft.ReviewRoleEvaluationRequest;
@@ -18,12 +21,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
-import java.util.HashMap;
-import java.util.Map;
-
-import com.apms.domain.score.enums.EvaluationCompletenessStatus;
-import com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse;
 import com.apms.common.security.ProjectSecurityEvaluator;
+import com.apms.domain.score.registry.CanonicalRoleCriteria;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
@@ -39,6 +38,12 @@ public class PartnerApprovalNoScoringSideEffectTest {
 
     @Mock
     private ProjectSecurityEvaluator projectSecurityEvaluator;
+
+    @Mock
+    private ProjectTaskRepository taskRepository;
+
+    @Mock
+    private ProjectTaskSubmissionRepository submissionRepository;
 
     @InjectMocks
     private PartnerRoleEvaluationApprovalStrategy approvalStrategy;
@@ -59,12 +64,20 @@ public class PartnerApprovalNoScoringSideEffectTest {
         draft.setStaleRuleSet(false);
 
         java.util.LinkedHashMap<String, CriterionInput> criteria = new java.util.LinkedHashMap<>();
-        for (int i = 1; i <= 6; i++) {
+        java.util.LinkedHashMap<String, java.util.List<EvidenceRecord>> evidence = new java.util.LinkedHashMap<>();
+        for (String criterionKey : CanonicalRoleCriteria.PARTNER_CRITERIA) {
             CriterionInput input = new CriterionInput();
-            input.setExplanation("test " + i);
-            criteria.put("C" + i, input);
+            input.setRawScore(new java.math.BigDecimal("90"));
+            input.setExplanation("test " + criterionKey);
+            criteria.put(criterionKey, input);
+
+            EvidenceRecord record = new EvidenceRecord();
+            record.setEvidenceId("ev-" + criterionKey);
+            record.setRawDocumentId("raw-" + criterionKey);
+            evidence.put(criterionKey, java.util.List.of(record));
         }
         draft.setCriterionInputs(criteria);
+        draft.setCriterionEvidence(evidence);
 
         Project project = new Project();
         project.setId(100L);
@@ -89,11 +102,6 @@ public class PartnerApprovalNoScoringSideEffectTest {
                 .thenReturn(mockUpdateResult);
 
         org.mockito.Mockito.when(projectSecurityEvaluator.isManager(100L)).thenReturn(true);
-
-        RoleEvaluationReadinessResponse readiness = new RoleEvaluationReadinessResponse();
-        readiness.setStaffMaySubmit(true);
-        readiness.setAggregateCompletenessStatus(EvaluationCompletenessStatus.COMPLETE);
-        org.mockito.Mockito.when(sufficiencyEvaluator.evaluate(draft)).thenReturn(readiness);
 
         approvalStrategy.approve(draft, task, submission, request, 10L, "idemp-key");
 

@@ -1,7 +1,12 @@
 package com.apms.domain.score.service;
 
+import com.apms.common.exception.BusinessValidationException;
+import com.apms.common.enums.SubmissionStatus;
+import com.apms.common.enums.TaskStatus;
 import com.apms.domain.project.ProjectTask;
 import com.apms.domain.project.ProjectTaskSubmission;
+import com.apms.domain.project.repository.sql.ProjectTaskRepository;
+import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
 import com.apms.domain.score.draft.RoleEvaluationDraft;
 import com.apms.domain.score.dto.draft.SubmitRoleEvaluationRequest;
 import com.apms.domain.score.outbox.RoleEvaluationOutboxEvent;
@@ -17,8 +22,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
-import com.apms.domain.score.enums.EvaluationCompletenessStatus;
-import com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse;
+import com.apms.domain.score.draft.EvidenceRecord;
+import com.apms.domain.score.registry.CanonicalRoleCriteria;
+import com.apms.domain.user.repository.sql.AccountRepository;
+import com.apms.domain.audit.service.AuditLogService;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -42,6 +49,18 @@ public class PartnerRoleEvaluationSubmissionStrategyTest {
     @Mock
     private RoleEvaluationOutboxEventRepository outboxRepository;
 
+    @Mock
+    private ProjectTaskRepository taskRepository;
+
+    @Mock
+    private ProjectTaskSubmissionRepository submissionRepository;
+
+    @Mock
+    private AccountRepository accountRepository;
+
+    @Mock
+    private AuditLogService auditLogService;
+
     @InjectMocks
     private PartnerRoleEvaluationSubmissionStrategy strategy;
 
@@ -51,10 +70,20 @@ public class PartnerRoleEvaluationSubmissionStrategyTest {
         draft.setId("draft-1");
         draft.setStatus(RoleEvaluationStatus.DRAFT);
         java.util.LinkedHashMap<String, com.apms.domain.score.draft.CriterionInput> inputs = new java.util.LinkedHashMap<>();
-        for (int i = 0; i < 6; i++) {
-            inputs.put("CRIT_" + i, new com.apms.domain.score.draft.CriterionInput());
+        java.util.LinkedHashMap<String, java.util.List<EvidenceRecord>> evidence = new java.util.LinkedHashMap<>();
+        for (String criterionKey : CanonicalRoleCriteria.PARTNER_CRITERIA) {
+            com.apms.domain.score.draft.CriterionInput input = new com.apms.domain.score.draft.CriterionInput();
+            input.setRawScore(new java.math.BigDecimal("80"));
+            input.setExplanation("Staff reason for " + criterionKey);
+            inputs.put(criterionKey, input);
+
+            EvidenceRecord record = new EvidenceRecord();
+            record.setEvidenceId("ev-" + criterionKey);
+            record.setRawDocumentId("raw-" + criterionKey);
+            evidence.put(criterionKey, java.util.List.of(record));
         }
         draft.setCriterionInputs(inputs);
+        draft.setCriterionEvidence(evidence);
 
         ProjectTask task = new ProjectTask();
         com.apms.domain.project.Project project = new com.apms.domain.project.Project();
@@ -70,11 +99,7 @@ public class PartnerRoleEvaluationSubmissionStrategyTest {
                 any(org.springframework.data.mongodb.core.query.UpdateDefinition.class),
                 eq(RoleEvaluationDraft.class)))
                 .thenReturn(com.mongodb.client.result.UpdateResult.acknowledged(1, 1L, null));
-
-        RoleEvaluationReadinessResponse readiness = new RoleEvaluationReadinessResponse();
-        readiness.setStaffMaySubmit(true);
-        readiness.setAggregateCompletenessStatus(EvaluationCompletenessStatus.COMPLETE);
-        when(sufficiencyEvaluator.evaluate(draft)).thenReturn(readiness);
+        when(accountRepository.findById(1L)).thenReturn(java.util.Optional.of(assignee));
 
         strategy.submit(draft, task, submission, request, 1L);
 
@@ -89,6 +114,10 @@ public class PartnerRoleEvaluationSubmissionStrategyTest {
         assertEquals(RoleEvaluationStatus.IN_REVIEW, setDoc.get("status"));
 
         verify(mongoTemplate).insert(any(RoleEvaluationOutboxEvent.class));
+        assertEquals(TaskStatus.IN_REVIEW, task.getStatus());
+        assertEquals(SubmissionStatus.IN_REVIEW, submission.getStatus());
+        verify(submissionRepository).save(submission);
+        verify(taskRepository).save(task);
     }
 
     @Test
@@ -106,12 +135,7 @@ public class PartnerRoleEvaluationSubmissionStrategyTest {
         ProjectTaskSubmission submission = new ProjectTaskSubmission();
         SubmitRoleEvaluationRequest request = new SubmitRoleEvaluationRequest();
 
-        RoleEvaluationReadinessResponse readiness = new RoleEvaluationReadinessResponse();
-        readiness.setStaffMaySubmit(false);
-        readiness.setAggregateCompletenessStatus(EvaluationCompletenessStatus.INCOMPLETE);
-        when(sufficiencyEvaluator.evaluate(draft)).thenReturn(readiness);
-
-        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             strategy.submit(draft, task, submission, request, 1L)
         );
         assertTrue(ex.getMessage().contains("Data is INCOMPLETE"));

@@ -43,7 +43,14 @@ class PartnerSourceAggregationTest {
         clauseRepo = Mockito.mock(PartnerContractClauseVersionRepository.class);
 
         contextProvider = new PartnerEvaluationContextProvider(
-            companyProfileRepo, metricRepo, null, contractRepo, clauseRepo, new ObjectMapper()
+            companyProfileRepo,
+            metricRepo,
+            null,
+            contractRepo,
+            clauseRepo,
+            Mockito.mock(com.apms.domain.document.repository.mongo.RawDocumentRepository.class),
+            Mockito.mock(com.apms.domain.document.service.DocumentTextExtractionService.class),
+            new ObjectMapper()
         );
         evaluator = new PartnerDataSufficiencyEvaluator(contextProvider);
     }

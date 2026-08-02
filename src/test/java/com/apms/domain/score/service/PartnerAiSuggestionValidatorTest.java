@@ -2,12 +2,10 @@ package com.apms.domain.score.service;
 
 import com.apms.common.exception.BusinessValidationException;
 import com.apms.domain.ai.dto.PartnerCriterionSuggestionResponse;
-import com.apms.domain.score.draft.ApprovedSourceReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -30,7 +28,7 @@ class PartnerAiSuggestionValidatorTest {
                     "evidenceReferenceIds": []
                 }
                 """;
-        List<ApprovedSourceReference> refs = new ArrayList<>();
+        Set<String> refs = Set.of();
 
         PartnerCriterionSuggestionResponse resp = validator.validateAndMap(json, "businessValueContributionScore", refs);
         assertNotNull(resp);
@@ -46,7 +44,7 @@ class PartnerAiSuggestionValidatorTest {
                     "score": 85.0
                 }
                 """;
-        List<ApprovedSourceReference> refs = new ArrayList<>();
+        Set<String> refs = Set.of();
 
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(json, "businessValueContributionScore", refs));
@@ -64,7 +62,7 @@ class PartnerAiSuggestionValidatorTest {
                     }
                 }
                 """;
-        List<ApprovedSourceReference> refs = new ArrayList<>();
+        Set<String> refs = Set.of();
 
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(badJson, "businessValueContributionScore", refs));
@@ -83,7 +81,7 @@ class PartnerAiSuggestionValidatorTest {
                     }
                 }
                 """;
-        List<ApprovedSourceReference> refs = new ArrayList<>();
+        Set<String> refs = Set.of();
 
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(badJson, "businessValueContributionScore", refs));
@@ -99,7 +97,7 @@ class PartnerAiSuggestionValidatorTest {
                     "evidenceReferenceIds": ["ref1", "ref1"]
                 }
                 """;
-        List<ApprovedSourceReference> refs = new ArrayList<>();
+        Set<String> refs = Set.of();
 
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(json, "businessValueContributionScore", refs));
@@ -115,15 +113,15 @@ class PartnerAiSuggestionValidatorTest {
                     "evidenceReferenceIds": ["mongo_id_1234"]
                 }
                 """;
-        List<ApprovedSourceReference> refs = new ArrayList<>();
+        Set<String> refs = Set.of();
 
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(json, "businessValueContributionScore", refs));
-        assertTrue(ex.getMessage().contains("does not belong to the pinned source set"));
+        assertTrue(ex.getMessage().contains("does not belong to the selected evidence set"));
     }
 
     @Test
-    void testRejectsEvidenceIdForAnotherCriterion() {
+    void testAcceptsSelectedEvidenceId() {
         String json = """
                 {
                     "criterionKey": "businessValueContributionScore",
@@ -131,15 +129,11 @@ class PartnerAiSuggestionValidatorTest {
                     "evidenceReferenceIds": ["ref2"]
                 }
                 """;
-        ApprovedSourceReference ref = new ApprovedSourceReference();
-        ref.setReferenceId("ref2");
-        ref.setCriterionKey("someOtherCriterion");
 
-        List<ApprovedSourceReference> refs = List.of(ref);
+        Set<String> refs = Set.of("ref2");
 
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
-            validator.validateAndMap(json, "businessValueContributionScore", refs));
-        assertTrue(ex.getMessage().contains("is associated with a different criterion"));
+        PartnerCriterionSuggestionResponse resp = validator.validateAndMap(json, "businessValueContributionScore", refs);
+        assertEquals("businessValueContributionScore", resp.getCriterionKey());
     }
 
     @Test
@@ -153,7 +147,7 @@ class PartnerAiSuggestionValidatorTest {
                     ]
                 }
                 """;
-        List<ApprovedSourceReference> refs = new ArrayList<>();
+        Set<String> refs = Set.of();
 
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(badJson, "businessValueContributionScore", refs));
@@ -169,7 +163,7 @@ class PartnerAiSuggestionValidatorTest {
                     "overallScore": 90
                 }
                 """;
-        List<ApprovedSourceReference> refs = new ArrayList<>();
+        Set<String> refs = Set.of();
 
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
             validator.validateAndMap(badJson, "businessValueContributionScore", refs));

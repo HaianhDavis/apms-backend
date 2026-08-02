@@ -471,7 +471,7 @@ class PotentialPartnerScoringTest {
         @DisplayName("PartnerRoleEvaluationSubmissionStrategy still supports only PARTNER")
         void partnerSubmissionStrategyShouldNotSupportPotentialPartner() {
             PartnerRoleEvaluationSubmissionStrategy strategy =
-                    new PartnerRoleEvaluationSubmissionStrategy(null, null, null);
+                    new PartnerRoleEvaluationSubmissionStrategy(null, null, null, null, null, null);
 
             assertThat(strategy.supports(CompanyRole.PARTNER)).isTrue();
             assertThat(strategy.supports(CompanyRole.POTENTIAL_PARTNER)).isFalse();
