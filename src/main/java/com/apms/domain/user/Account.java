@@ -44,4 +44,9 @@ public class Account {
 
     @UpdateTimestamp
     private LocalDateTime updatedAt;
+
+    @Column(length = 20)
+    private String phoneNumber;
+
+    private LocalDateTime phoneVerifiedAt;
 }

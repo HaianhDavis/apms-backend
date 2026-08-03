@@ -9,5 +9,6 @@ public enum SubmissionType {
     PARTNER_CONTRACT_COLLECTION,
     COMPANY_REPORT,
     ROLE_EVALUATION,
+    COMPANY_NEWS_RESEARCH,
     OTHER
 }

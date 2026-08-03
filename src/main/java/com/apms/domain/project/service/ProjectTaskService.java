@@ -89,9 +89,9 @@ public class ProjectTaskService {
                     .orElseThrow(() -> new ResourceNotFoundException("Assigned account not found"));
         }
 
-        if (request.getTaskType() == TaskType.PARTNER_CONTRACT_COLLECTION) {
+        if (request.getTaskType() == TaskType.PARTNER_CONTRACT_COLLECTION || request.getTaskType() == TaskType.COMPANY_NEWS_RESEARCH) {
             if (!org.springframework.util.StringUtils.hasText(request.getTargetCompanyProfileId())) {
-                throw new com.apms.common.exception.BusinessValidationException("targetCompanyProfileId is required for PARTNER_CONTRACT_COLLECTION");
+                throw new com.apms.common.exception.BusinessValidationException("targetCompanyProfileId is required for " + request.getTaskType().name());
             }
         }
 
@@ -455,6 +455,12 @@ public class ProjectTaskService {
                     actions.add(TaskAction.EDIT_EXTRACTION_RESULT);
                     actions.add(TaskAction.REVIEW_EXTRACTION_RESULT);
                     actions.add(TaskAction.SUBMIT_SELECTED_DRAFT);
+                } else if (taskType == TaskType.COMPANY_NEWS_RESEARCH) {
+                    actions.add(TaskAction.CREATE_NEWS_DRAFT);
+                    actions.add(TaskAction.VIEW_NEWS_DRAFTS);
+                    actions.add(TaskAction.EDIT_NEWS_DRAFT);
+                    actions.add(TaskAction.UPLOAD_NEWS_IMAGE);
+                    actions.add(TaskAction.SUBMIT_NEWS_DRAFTS);
                 } else {
                     // GENERAL_TASK
                     actions.add(TaskAction.SUBMIT_WORK);
@@ -478,6 +484,8 @@ public class ProjectTaskService {
             } else if (taskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
                 actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
                 actions.add(TaskAction.REVIEW_EXTRACTION_RESULT);
+            } else if (taskType == TaskType.COMPANY_NEWS_RESEARCH) {
+                actions.add(TaskAction.VIEW_NEWS_DRAFTS);
             }
             if (task.getStatus() == TaskStatus.IN_REVIEW) {
                 actions.add(TaskAction.VIEW_SUBMISSIONS);
