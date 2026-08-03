@@ -45,6 +45,7 @@ public class PartnerContractExtractionService {
     private final RawDocumentRepository rawDocumentRepository;
     private final AuditLogService auditService;
     private final ProjectRepository projectRepository;
+    private final com.apms.domain.project.repository.sql.ProjectTaskRepository projectTaskRepository;
     private final ContractExtractionProperties config;
 
     public PartnerContractExtractionService(PartnerContractExtractionDraftRepository draftRepository,
@@ -54,6 +55,7 @@ public class PartnerContractExtractionService {
                                             RawDocumentRepository rawDocumentRepository,
                                             AuditLogService auditService,
                                             ProjectRepository projectRepository,
+                                            com.apms.domain.project.repository.sql.ProjectTaskRepository projectTaskRepository,
                                             ContractExtractionProperties config) {
         this.draftRepository = draftRepository;
         this.extractionProvider = extractionProvider;
@@ -62,6 +64,7 @@ public class PartnerContractExtractionService {
         this.rawDocumentRepository = rawDocumentRepository;
         this.auditService = auditService;
         this.projectRepository = projectRepository;
+        this.projectTaskRepository = projectTaskRepository;
         this.config = config;
     }
 
@@ -259,6 +262,164 @@ public class PartnerContractExtractionService {
     }
 
     @Transactional
+    public PartnerContractExtractionDraft generateExtractionForTask(Long taskId, String rawDocumentId, Long accountId) {
+        com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new BusinessValidationException("Task not found: " + taskId));
+
+        validateProjectAccess(task.getProject().getId(), accountId, true);
+
+        if (task.getTaskType() != com.apms.common.enums.TaskType.PARTNER_CONTRACT_COLLECTION) {
+            throw new BusinessValidationException("Task is not a PARTNER_CONTRACT_COLLECTION task");
+        }
+
+        RawDocument doc = rawDocumentRepository.findById(rawDocumentId)
+                .orElseThrow(() -> new BusinessValidationException("RawDocument not found: " + rawDocumentId));
+
+        if (doc.getIsHidden() != null && doc.getIsHidden()) {
+            throw new BusinessValidationException("RawDocument is hidden.");
+        }
+
+        if (!String.valueOf(task.getProject().getId()).equals(doc.getProjectId())) {
+            throw new BusinessValidationException("RawDocument project mismatch.");
+        }
+
+        if (doc.getTaskId() != null && !String.valueOf(taskId).equals(doc.getTaskId())) {
+            throw new BusinessValidationException("RawDocument task mismatch.");
+        }
+
+        String sourceText = extractText(doc);
+        if (sourceText == null || sourceText.trim().isEmpty()) {
+            throw new BusinessValidationException("No text available for extraction.");
+        }
+
+        String docHash = doc.getStorage() != null && doc.getStorage().getChecksum() != null ?
+                doc.getStorage().getChecksum() : DigestUtils.md5DigestAsHex(sourceText.getBytes());
+
+        List<ContractExtractionFieldResult> allFields = new ArrayList<>();
+        List<ClauseCandidate> allClauses = new ArrayList<>();
+        List<String> allWarnings = new ArrayList<>();
+
+        ContractExtractionGenerationStatus status = ContractExtractionGenerationStatus.COMPLETED;
+        ContractExtractionQualityStatus quality = ContractExtractionQualityStatus.PASS;
+
+        int totalLength = sourceText.length();
+        int offset = 0;
+        int processedLength = 0;
+        int segmentCount = 0;
+        int skippedSegments = 0;
+        boolean clauseLimitHit = false;
+        List<ContractDocumentSegment> segments = new ArrayList<>();
+
+        int segmentChars = config.getSegmentChars();
+        int overlapChars = config.getSegmentOverlapChars();
+        int maxSegments = config.getMaxSegments();
+        int maxTotalChars = config.getMaxTotalChars();
+        int maxClauses = config.getMaxClauses();
+
+        while (offset < totalLength) {
+            if (processedLength >= maxTotalChars) {
+                status = ContractExtractionGenerationStatus.PARTIAL;
+                quality = ContractExtractionQualityStatus.WARNING;
+                int remainingChars = totalLength - offset;
+                skippedSegments = (int) Math.ceil((double) remainingChars / segmentChars);
+                allWarnings.add("Document exceeded max-total-chars (" + maxTotalChars + "). " + skippedSegments + " segments were skipped.");
+                break;
+            }
+
+            if (segmentCount >= maxSegments) {
+                status = ContractExtractionGenerationStatus.PARTIAL;
+                quality = ContractExtractionQualityStatus.WARNING;
+                int remainingChars = totalLength - offset;
+                skippedSegments = (int) Math.ceil((double) remainingChars / segmentChars);
+                allWarnings.add("Document exceeded max-segments (" + maxSegments + "). " + skippedSegments + " segments were skipped.");
+                break;
+            }
+
+            if (allClauses.size() >= maxClauses) {
+                status = ContractExtractionGenerationStatus.PARTIAL;
+                quality = ContractExtractionQualityStatus.WARNING;
+                clauseLimitHit = true;
+                int remainingChars = totalLength - offset;
+                skippedSegments = (int) Math.ceil((double) remainingChars / segmentChars);
+                allWarnings.add("Extraction exceeded max-clauses (" + maxClauses + "). " + skippedSegments + " segments were skipped.");
+                break;
+            }
+
+            int endOffset = Math.min(offset + segmentChars, totalLength);
+            String chunk = sourceText.substring(offset, endOffset);
+
+            try {
+                String segmentId = generateSegmentId(docHash, offset, endOffset);
+                String excerptHash = DigestUtils.md5DigestAsHex(chunk.getBytes());
+
+                ContractDocumentSegment segment = ContractDocumentSegment.builder()
+                        .segmentId(segmentId)
+                        .rawDocumentId(doc.getId())
+                        .sourceDocumentHash(docHash)
+                        .startOffset(offset)
+                        .endOffset(endOffset)
+                        .excerpt(chunk)
+                        .excerptHash(excerptHash)
+                        .build();
+                segments.add(segment);
+                segmentCount++;
+
+                PartnerContractExtractionOutput output = extractionProvider.extractContract(chunk);
+                if (output.getMetadataFields() != null) {
+                    output.getMetadataFields().forEach(f -> {
+                        f.setEvidenceReferences(List.of(segmentId));
+                        allFields.add(f);
+                    });
+                }
+                if (output.getClauseCandidates() != null) {
+                    output.getClauseCandidates().forEach(c -> {
+                        c.setEvidenceReferences(List.of(segmentId));
+                        allClauses.add(c);
+                    });
+                }
+                if (output.getWarnings() != null) allWarnings.addAll(output.getWarnings());
+            } catch (Exception e) {
+                log.error("Failed to extract chunk at offset {}", offset, e);
+                status = ContractExtractionGenerationStatus.PARTIAL;
+                quality = ContractExtractionQualityStatus.WARNING;
+                allWarnings.add("Failed to process segment at offset " + offset);
+            }
+
+            processedLength += chunk.length();
+            int advance = segmentChars - overlapChars;
+            if (advance <= 0) advance = segmentChars;
+            offset += advance;
+        }
+
+        PartnerContractExtractionDraft draft = PartnerContractExtractionDraft.builder()
+                .purpose(ContractExtractionPurpose.PARTNER_CONTRACT_COLLECTION)
+                .sourceProjectId(task.getProject().getId())
+                .sourceTaskId(taskId)
+                .targetCompanyProfileId(task.getTargetCompanyProfileId())
+                .ownerCompanyProfileId(doc.getOwnerCompanyProfileId())
+                .rawDocumentId(doc.getId())
+                .sourceDocumentHash(docHash)
+                .generationStatus(status)
+                .qualityStatus(quality)
+                .reviewStatus(ContractExtractionReviewStatus.PENDING)
+                .applicationStatus(ContractExtractionApplicationStatus.NOT_APPLIED)
+                .approvalSyncStatus(ContractExtractionApprovalSyncStatus.NOT_REQUIRED)
+                .generatedAt(LocalDateTime.now())
+                .generatedByAccountId(accountId)
+                .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
+                .fieldResults(allFields)
+                .clauseCandidates(allClauses)
+                .warnings(allWarnings)
+                .segments(segments)
+                .build();
+
+        draft = draftRepository.save(draft);
+        auditService.log(accountId, AuditAction.PARTNER_CONTRACT_EXTRACTION_STARTED, "PartnerContractExtractionDraft", draft.getId(), "Generated task-level extraction draft: " + draft.getId());
+        return draft;
+    }
+
+    @Transactional
     public PartnerContractExtractionDraft reviewField(Long contractId, String extractionId, String fieldKey, com.apms.domain.contract.dto.ReviewExtractionFieldRequest request, Long accountId) {
         PartnerContractExtractionDraft draft = getDraftForContract(extractionId, contractId);
         validateProjectAccess(draft.getSourceProjectId(), accountId, true);
@@ -331,6 +492,79 @@ public class PartnerContractExtractionService {
         return draft;
     }
 
+    @Transactional
+    public PartnerContractExtractionDraft reviewFieldByTask(Long taskId, String extractionId, String fieldKey, com.apms.domain.contract.dto.ReviewExtractionFieldRequest request, Long accountId) {
+        PartnerContractExtractionDraft draft = getDraftForTask(extractionId, taskId);
+        validateProjectAccess(draft.getSourceProjectId(), accountId, true);
+        ensureDraftIsEditable(draft);
+
+        ContractExtractionFieldResult fieldResult = draft.getFieldResults().stream()
+                .filter(f -> f.getFieldName().equals(fieldKey))
+                .findFirst()
+                .orElseThrow(() -> new BusinessValidationException("Field not found: " + fieldKey));
+
+        if (request.getReviewDecision() == ContractExtractionReviewDecision.EDIT && request.getReviewedValue() == null) {
+            throw new BusinessValidationException("EDIT decision requires a reviewedValue");
+        }
+
+        fieldResult.setReviewDecision(request.getReviewDecision());
+        fieldResult.setReviewedValue(request.getReviewedValue());
+        fieldResult.setReviewComment(request.getReviewComment());
+        fieldResult.setReviewedByAccountId(accountId);
+        fieldResult.setReviewedAt(LocalDateTime.now());
+
+        updateDraftReviewStatus(draft);
+        draft.setUpdatedAt(LocalDateTime.now());
+        draft = draftRepository.save(draft);
+        auditService.log(accountId, AuditAction.PARTNER_CONTRACT_EXTRACTION_FIELD_REVIEWED, "PartnerContractExtractionDraft", extractionId, "Reviewed field: " + fieldKey);
+        return draft;
+    }
+
+    @Transactional
+    public PartnerContractExtractionDraft reviewClauseByTask(Long taskId, String extractionId, String clauseCandidateId, com.apms.domain.contract.dto.ReviewExtractionClauseRequest request, Long accountId) {
+        PartnerContractExtractionDraft draft = getDraftForTask(extractionId, taskId);
+        validateProjectAccess(draft.getSourceProjectId(), accountId, true);
+        ensureDraftIsEditable(draft);
+
+        ClauseCandidate clause = draft.getClauseCandidates().stream()
+                .filter(c -> c.getClauseCandidateId().equals(clauseCandidateId))
+                .findFirst()
+                .orElseThrow(() -> new BusinessValidationException("Clause not found: " + clauseCandidateId));
+
+        clause.setReviewDecision(request.getReviewDecision());
+        clause.setReviewComment(request.getReviewComment());
+
+        if (request.getReviewDecision() == ContractExtractionReviewDecision.EDIT) {
+            if (!StringUtils.hasText(request.getReviewComment())) {
+                throw new BusinessValidationException("EDIT decision requires a reviewComment");
+            }
+            clause.setClauseTitle(request.getClauseTitle());
+            clause.setClauseType(request.getClauseType());
+            clause.setNormalizedTerms(request.getNormalizedTerms());
+            clause.setEffectiveDate(request.getEffectiveDate());
+            clause.setExpiryDate(request.getExpiryDate());
+            clause.setNoticePeriodDays(request.getNoticePeriodDays());
+            clause.setTargetMetricKey(request.getTargetMetricKey());
+            clause.setTargetValue(request.getTargetValue());
+            clause.setTargetUnit(request.getTargetUnit());
+            clause.setComparator(request.getComparator());
+            clause.setMeasurementPeriod(request.getMeasurementPeriod());
+            clause.setPenaltyValue(request.getPenaltyValue());
+            clause.setPenaltyCurrency(request.getPenaltyCurrency());
+            clause.setPenaltyDescription(request.getPenaltyDescription());
+            clause.setReviewedFields(request.getReviewedFields());
+        }
+
+        clause.setReviewedByAccountId(accountId);
+        clause.setReviewedAt(LocalDateTime.now());
+
+        updateDraftReviewStatus(draft);
+        draft.setUpdatedAt(LocalDateTime.now());
+        draft = draftRepository.save(draft);
+        auditService.log(accountId, AuditAction.PARTNER_CONTRACT_EXTRACTION_CLAUSE_REVIEWED, "PartnerContractExtractionDraft", extractionId, "Reviewed clause: " + clauseCandidateId);
+        return draft;
+    }
+
     private void updateDraftReviewStatus(PartnerContractExtractionDraft draft) {
         boolean allReviewed = true;
         boolean anyReviewed = false;
@@ -354,6 +588,11 @@ public class PartnerContractExtractionService {
     private PartnerContractExtractionDraft getDraftForContract(String extractionId, Long contractId) {
         return draftRepository.findByIdAndPartnerContractId(extractionId, contractId)
                 .orElseThrow(() -> new BusinessValidationException("Extraction not found or does not belong to contract"));
+    }
+
+    private PartnerContractExtractionDraft getDraftForTask(String extractionId, Long taskId) {
+        return draftRepository.findByIdAndSourceTaskId(extractionId, taskId)
+                .orElseThrow(() -> new BusinessValidationException("Extraction not found or does not belong to task"));
     }
 
     private void ensureDraftIsEditable(PartnerContractExtractionDraft draft) {
@@ -614,6 +853,21 @@ public class PartnerContractExtractionService {
     @Transactional(readOnly = true)
     public PartnerContractExtractionDraft getExtraction(Long contractId, String extractionId, Long accountId) {
         PartnerContractExtractionDraft draft = getDraftForContract(extractionId, contractId);
+        validateProjectAccess(draft.getSourceProjectId(), accountId, false);
+        return draft;
+    }
+
+    @Transactional(readOnly = true)
+    public List<PartnerContractExtractionDraft> listExtractionsByTask(Long taskId, Long accountId) {
+        com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new BusinessValidationException("Task not found: " + taskId));
+        validateProjectAccess(task.getProject().getId(), accountId, false);
+        return draftRepository.findBySourceTaskIdOrderByGeneratedAtDesc(taskId);
+    }
+
+    @Transactional(readOnly = true)
+    public PartnerContractExtractionDraft getExtractionByTask(Long taskId, String extractionId, Long accountId) {
+        PartnerContractExtractionDraft draft = getDraftForTask(extractionId, taskId);
         validateProjectAccess(draft.getSourceProjectId(), accountId, false);
         return draft;
     }

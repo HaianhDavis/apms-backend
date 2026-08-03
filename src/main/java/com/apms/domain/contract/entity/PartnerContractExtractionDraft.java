@@ -42,9 +42,12 @@ public class PartnerContractExtractionDraft {
     private Long sourceProjectId;
 
     private Long sourceTaskId;
-
     private String sourceDocumentHash;
     private String sourceExtractionVersion;
+
+    private ContractExtractionPurpose purpose;
+    private String targetCompanyProfileId;
+    private String ownerCompanyProfileId;
 
     private Integer contractVersionAtGeneration;
     private Integer currentApprovedVersion;

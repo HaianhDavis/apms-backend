@@ -3,8 +3,10 @@ package com.apms.common.enums;
 public enum SubmissionType {
     COMPANY_CANDIDATE,
     PROFILE_UPDATE_PROPOSAL,
+    @Deprecated
     DOCUMENT_COLLECTION,
     COMPANY_MEMBER_RESEARCH,
+    PARTNER_CONTRACT_COLLECTION,
     COMPANY_REPORT,
     ROLE_EVALUATION,
     OTHER

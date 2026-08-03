@@ -32,6 +32,7 @@ CREATE TABLE project_tasks (
     title VARCHAR(255) NOT NULL,
     description NVARCHAR(MAX),
     status VARCHAR(255) NOT NULL,
+    target_company_profile_id VARCHAR(255),
     task_type VARCHAR(50),
     priority VARCHAR(255),
     due_date DATETIME2,

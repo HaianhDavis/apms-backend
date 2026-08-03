@@ -12,4 +12,6 @@ public interface PartnerContractExtractionDraftRepository extends MongoRepositor
     List<PartnerContractExtractionDraft> findByPartnerContractId(Long partnerContractId);
     List<PartnerContractExtractionDraft> findByPartnerContractIdOrderByGeneratedAtDesc(Long partnerContractId);
     Optional<PartnerContractExtractionDraft> findByIdAndPartnerContractId(String id, Long partnerContractId);
+    List<PartnerContractExtractionDraft> findBySourceTaskIdOrderByGeneratedAtDesc(Long sourceTaskId);
+    Optional<PartnerContractExtractionDraft> findByIdAndSourceTaskId(String id, Long sourceTaskId);
 }

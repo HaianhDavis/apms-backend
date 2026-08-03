@@ -16,4 +16,5 @@ public class UpdateProjectTaskRequest {
     private TaskPriority priority;
     private LocalDateTime dueDate;
     private TaskType taskType;
+    private String targetCompanyProfileId;
 }

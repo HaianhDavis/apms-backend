@@ -65,6 +65,7 @@ public class ProjectTaskService {
     private final CompanyCandidateRepository candidateRepository;
     private final CompanyProfileUpdateProposalRepository proposalRepository;
     private final ProjectTaskSubmissionRepository submissionRepository;
+    private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
 
     @Transactional
     public ProjectTaskResponse createTask(Long projectId, CreateProjectTaskRequest request) {
@@ -88,6 +89,24 @@ public class ProjectTaskService {
                     .orElseThrow(() -> new ResourceNotFoundException("Assigned account not found"));
         }
 
+        if (request.getTaskType() == TaskType.PARTNER_CONTRACT_COLLECTION) {
+            if (!org.springframework.util.StringUtils.hasText(request.getTargetCompanyProfileId())) {
+                throw new com.apms.common.exception.BusinessValidationException("targetCompanyProfileId is required for PARTNER_CONTRACT_COLLECTION");
+            }
+        }
+
+        if (org.springframework.util.StringUtils.hasText(request.getTargetCompanyProfileId())) {
+            com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findById(request.getTargetCompanyProfileId())
+                    .orElseThrow(() -> new com.apms.common.exception.BusinessValidationException("Target company profile not found"));
+            if (Boolean.TRUE.equals(profile.getIsDeleted())) {
+                throw new com.apms.common.exception.BusinessValidationException("Target company profile is deleted");
+            }
+        }
+
+        if (request.getTaskType() == TaskType.DOCUMENT_COLLECTION) {
+            throw new com.apms.common.exception.BusinessValidationException("DOCUMENT_COLLECTION is deprecated. Use COMPANY_DATA_PREPARATION, which includes document collection and upload.");
+        }
+
         ProjectTask task = ProjectTask.builder()
                 .project(project)
                 .title(request.getTitle())
@@ -98,6 +117,7 @@ public class ProjectTaskService {
                 .createdByAccount(createdBy)
                 .status(TaskStatus.TODO)
                 .taskType(request.getTaskType() != null ? request.getTaskType() : TaskType.GENERAL_TASK)
+                .targetCompanyProfileId(request.getTargetCompanyProfileId())
                 .build();
 
         task = projectTaskRepository.save(task);
@@ -135,7 +155,7 @@ public class ProjectTaskService {
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
 
         if (!task.getProject().getId().equals(projectId)) {
-            throw new IllegalArgumentException("Task does not belong to the specified project");
+            throw new com.apms.common.exception.BusinessValidationException("Task does not belong to the specified project");
         }
 
         UserDetailsImpl currentUser = getCurrentUser();
@@ -187,6 +207,21 @@ public class ProjectTaskService {
             if (request.getTaskType() != null && task.getStatus() != TaskStatus.DONE && task.getStatus() != TaskStatus.CANCELLED) {
                 task.setTaskType(request.getTaskType());
             }
+            if (request.getTargetCompanyProfileId() != null) {
+                com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findById(request.getTargetCompanyProfileId())
+                        .orElseThrow(() -> new com.apms.common.exception.BusinessValidationException("Target company profile not found"));
+                if (Boolean.TRUE.equals(profile.getIsDeleted())) {
+                    throw new com.apms.common.exception.BusinessValidationException("Target company profile is deleted");
+                }
+                task.setTargetCompanyProfileId(request.getTargetCompanyProfileId());
+            }
+
+            TaskType effectiveTaskType = request.getTaskType() != null ? request.getTaskType() : task.getTaskType();
+            if (effectiveTaskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
+                if (!org.springframework.util.StringUtils.hasText(task.getTargetCompanyProfileId())) {
+                     throw new com.apms.common.exception.BusinessValidationException("targetCompanyProfileId is required for PARTNER_CONTRACT_COLLECTION");
+                }
+            }
 
             if (request.getAssignedToUserId() != null) {
                 Long currentAssignedId = task.getAssignedToAccount() != null ? task.getAssignedToAccount().getId() : null;
@@ -218,7 +253,7 @@ public class ProjectTaskService {
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
 
         if (!task.getProject().getId().equals(projectId)) {
-            throw new IllegalArgumentException("Task does not belong to the specified project");
+            throw new com.apms.common.exception.BusinessValidationException("Task does not belong to the specified project");
         }
 
         UserDetailsImpl currentUser = getCurrentUser();
@@ -233,7 +268,12 @@ public class ProjectTaskService {
         List<TaskAction> actions = evaluateAvailableActions(currentUser, task, project, tType);
 
         // 2. Fetch documents (only metadata/import jobs)
-        List<ImportJobResponse> rawDocuments = documentService.getProjectImportJobs(projectId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
+        List<ImportJobResponse> rawDocuments;
+        if (tType == TaskType.COMPANY_DATA_PREPARATION) {
+            rawDocuments = documentService.getTaskImportJobs(projectId, taskId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
+        } else {
+            rawDocuments = documentService.getProjectImportJobs(projectId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
+        }
 
         List<WorkbenchDocumentResponse> documents = new ArrayList<>();
         for (ImportJobResponse doc : rawDocuments) {
@@ -393,6 +433,8 @@ public class ProjectTaskService {
                     actions.add(TaskAction.SUBMIT_WORK);
                 } else if (taskType == TaskType.COMPANY_DATA_PREPARATION) {
                     actions.add(TaskAction.VIEW_DOCUMENTS);
+                    actions.add(TaskAction.UPLOAD_DOCUMENT);
+                    actions.add(TaskAction.ADD_MANUAL_DOCUMENT);
                     actions.add(TaskAction.RUN_AI_EXTRACTION);
                     actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
                     actions.add(TaskAction.EDIT_EXTRACTION_RESULT);
@@ -404,6 +446,14 @@ public class ProjectTaskService {
                         actions.add(TaskAction.GENERATE_PROFILE_UPDATE_PROPOSAL_DRAFT);
                         actions.add(TaskAction.VIEW_PROFILE_UPDATE_PROPOSAL_DRAFTS);
                     }
+                    actions.add(TaskAction.SUBMIT_SELECTED_DRAFT);
+                } else if (taskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
+                    actions.add(TaskAction.VIEW_DOCUMENTS);
+                    actions.add(TaskAction.UPLOAD_DOCUMENT);
+                    actions.add(TaskAction.RUN_AI_EXTRACTION);
+                    actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
+                    actions.add(TaskAction.EDIT_EXTRACTION_RESULT);
+                    actions.add(TaskAction.REVIEW_EXTRACTION_RESULT);
                     actions.add(TaskAction.SUBMIT_SELECTED_DRAFT);
                 } else {
                     // GENERAL_TASK
@@ -425,6 +475,9 @@ public class ProjectTaskService {
                 } else if (project.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY) {
                     actions.add(TaskAction.VIEW_PROFILE_UPDATE_PROPOSAL_DRAFTS);
                 }
+            } else if (taskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
+                actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
+                actions.add(TaskAction.REVIEW_EXTRACTION_RESULT);
             }
             if (task.getStatus() == TaskStatus.IN_REVIEW) {
                 actions.add(TaskAction.VIEW_SUBMISSIONS);
@@ -461,6 +514,7 @@ public class ProjectTaskService {
                 .updatedAt(task.getUpdatedAt())
                 .completedAt(task.getCompletedAt())
                 .taskType(task.getTaskType() != null ? task.getTaskType() : TaskType.GENERAL_TASK)
+                .targetCompanyProfileId(task.getTargetCompanyProfileId())
                 .build();
     }
 

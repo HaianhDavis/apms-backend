@@ -35,11 +35,14 @@ public class RawDocument {
     @Indexed
     private String taskId;
 
-    /**
-     * SQL Server import_jobs.id — cross-DB soft reference (stored as String).
-     */
     @Indexed
     private String importJobId;
+
+    @Indexed
+    private String targetCompanyProfileId;
+
+    @Indexed
+    private String ownerCompanyProfileId;
 
     /**
      * Source information about the original document or manual entry.
