@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+import java.time.LocalDate;
 
 @Data
 public class CreateProjectRequest {
@@ -35,4 +36,7 @@ public class CreateProjectRequest {
     private RelationshipType targetRelationshipType;
 
     private String description;
+
+    @NotNull(message = "plannedEndDate is required")
+    private LocalDate plannedEndDate;
 }

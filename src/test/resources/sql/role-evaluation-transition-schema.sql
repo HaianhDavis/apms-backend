@@ -23,6 +23,7 @@ CREATE TABLE projects (
     created_by BIGINT NOT NULL,
     created_at DATETIME2,
     updated_at DATETIME2,
+    planned_end_date DATE,
     CONSTRAINT fk_projects_created_by FOREIGN KEY (created_by) REFERENCES accounts(id)
 );
 
