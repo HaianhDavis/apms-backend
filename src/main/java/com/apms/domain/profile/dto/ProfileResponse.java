@@ -23,6 +23,7 @@ public class ProfileResponse {
     private com.apms.domain.company.model.InnovationInfo innovation;
     private com.apms.domain.company.model.RiskInfo risk;
     private com.apms.domain.company.model.ComplianceInfo compliance;
+    private List<CompanyProfile.CompanyMember> companyMembers;
 
     private String reviewStatus;
     private List<String> tags;

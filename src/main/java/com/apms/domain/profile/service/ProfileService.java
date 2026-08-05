@@ -401,6 +401,7 @@ public class ProfileService {
                 .innovation(p.getInnovation())
                 .risk(p.getRisk())
                 .compliance(p.getCompliance())
+                .companyMembers(p.getCompanyMembers())
                 .reviewStatus(p.getReviewStatus())
                 .tags(p.getTags())
                 .metadata(p.getMetadata())

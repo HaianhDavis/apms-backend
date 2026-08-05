@@ -52,6 +52,9 @@ public class ProjectTaskSubmissionService {
     private final com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository versionRepository;
     private final AuditLogService auditLogService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.apms.domain.companymember.service.CompanyMemberResearchService companyMemberResearchService;
 
     @Transactional
     public ProjectTaskSubmissionResponse submitTask(Long projectId, Long taskId, CreateProjectTaskSubmissionRequest request) {
@@ -94,7 +97,6 @@ public class ProjectTaskSubmissionService {
         Account submitter = accountRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
 
-        boolean directDocumentCollection = task.getTaskType() == TaskType.DOCUMENT_COLLECTION;
         LocalDateTime now = LocalDateTime.now();
 
         ProjectTaskSubmission submission = ProjectTaskSubmission.builder()
@@ -104,19 +106,16 @@ public class ProjectTaskSubmissionService {
                 .submissionType(request.getSubmissionType())
                 .targetEntityType(request.getTargetEntityType())
                 .targetEntityId(request.getTargetEntityId())
-                .status(directDocumentCollection ? SubmissionStatus.APPROVED : SubmissionStatus.IN_REVIEW)
+                .status(SubmissionStatus.IN_REVIEW)
                 .note(request.getNote())
                 .submittedAt(now)
-                .reviewedByAccount(directDocumentCollection ? submitter : null)
-                .reviewedAt(directDocumentCollection ? now : null)
-                .reviewComment(directDocumentCollection ? "Document collection submitted directly to project." : null)
                 .build();
 
         submission = submissionRepository.save(submission);
 
         // Update task status
-        task.setStatus(directDocumentCollection ? TaskStatus.DONE : TaskStatus.IN_REVIEW);
-        task.setCompletedAt(directDocumentCollection ? now : null);
+        task.setStatus(TaskStatus.IN_REVIEW);
+        task.setCompletedAt(null);
         taskRepository.save(task);
 
         // Update target entity if it's a proposal
@@ -132,7 +131,7 @@ public class ProjectTaskSubmissionService {
                 AuditAction.PROJECT_TASK_SUBMITTED,
                 "ProjectTask",
                 String.valueOf(task.getId()),
-                directDocumentCollection ? "Document collection submitted directly to project" : "Task submitted for review");
+                "Task submitted for review");
 
         return toResponse(submission);
     }
@@ -180,10 +179,6 @@ public class ProjectTaskSubmissionService {
 
         LocalDateTime now = LocalDateTime.now();
         ProjectTask task = submission.getProjectTask();
-
-        if (task.getTaskType() == TaskType.DOCUMENT_COLLECTION) {
-            throw new com.apms.common.exception.BusinessValidationException("DOCUMENT_COLLECTION tasks are submitted directly and do not require manager review.");
-        }
 
         submission.setReviewedByAccount(reviewer);
         submission.setReviewedAt(now);
@@ -284,6 +279,8 @@ public class ProjectTaskSubmissionService {
 
                         auditLogService.log(currentUser.getId(), AuditAction.PROFILE_UPDATE_PROPOSAL_APPLIED, "CompanyProfileUpdateProposal", proposal.getId(), "Proposal applied and profile updated");
                     }
+                } else if (submission.getSubmissionType() == com.apms.common.enums.SubmissionType.COMPANY_MEMBER_RESEARCH) {
+                    companyMemberResearchService.handleApproval(submission, reviewer.getId(), request.getComment());
                 }
                 break;
 

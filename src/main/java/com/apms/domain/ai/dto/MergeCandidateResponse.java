@@ -17,7 +17,10 @@ public class MergeCandidateResponse {
     private Map<String, Object> insights;
     private List<String> keyPeople;
     private Map<String, Object> financial;
+    private Map<String, Object> market;
     private Map<String, Object> innovation;
+    private Map<String, Object> risk;
+    private Map<String, Object> compliance;
     private List<FieldEvidence> fieldEvidence;
     private Boolean hasConflicts;
     private Integer conflictCount;

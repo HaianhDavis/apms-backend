@@ -1,6 +1,7 @@
 package com.apms.domain.project.service;
 
 import com.apms.common.enums.AuditAction;
+import com.apms.common.enums.CandidateStatus;
 import com.apms.common.enums.SystemRole;
 import com.apms.common.enums.TaskStatus;
 import com.apms.common.enums.TaskType;
@@ -54,6 +55,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 @Slf4j
@@ -360,7 +362,10 @@ public class ProjectTaskService {
                         .isApproved(linkedSub != null && linkedSub.getStatus() == SubmissionStatus.APPROVED)
                         .linkedSubmissionId(linkedSub != null ? linkedSub.getId() : null)
                         .build();
-            }).toList();
+            }).sorted(Comparator
+                    .comparingInt((CandidateDraftSummary draft) -> candidateDraftStatusRank(draft.getStatus()))
+                    .thenComparing(CandidateDraftSummary::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                    .toList();
 
             List<CompanyProfileUpdateProposal> proposals = proposalRepository.findByTaskId(taskId);
             proposalSummaries = proposals.stream().map(p -> {
@@ -487,6 +492,14 @@ public class ProjectTaskService {
             return candidate.getIdentity().getLegalName();
         }
         return "Candidate " + candidate.getId().substring(Math.max(0, candidate.getId().length() - 8));
+    }
+
+    private int candidateDraftStatusRank(CandidateStatus status) {
+        if (status == CandidateStatus.DRAFT) return 0;
+        if (status == CandidateStatus.PENDING_REVIEW) return 1;
+        if (status == CandidateStatus.REJECTED) return 2;
+        if (status == CandidateStatus.APPROVED) return 3;
+        return 4;
     }
 
     private String candidateIndustry(CompanyCandidate candidate) {
