@@ -47,6 +47,9 @@ public class CompanyRelationshipClosenessConcurrencyIntegrationTest extends Apms
     @MockBean
     private OwnerOrganizationService ownerOrganizationService;
 
+    @MockBean
+    private com.apms.domain.audit.service.AuditLogService auditLogService;
+
     private final String TARGET_COMPANY_ID = "6a31a0000000000000000002";
     private final String OWNER_COMPANY_ID = "6a31a0000000000000000001";
     private UserDetailsImpl ownerUser;

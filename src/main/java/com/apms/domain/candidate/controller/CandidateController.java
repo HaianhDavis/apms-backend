@@ -105,10 +105,11 @@ public class CandidateController {
     @PostMapping("/candidates/{candidateId}/submit")
     @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> submitCandidate(
-            @PathVariable String candidateId) {
+            @PathVariable String candidateId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         return ResponseEntity.ok(ApiResponse.success(
-                candidateService.submitCandidate(candidateId), "Candidate submitted for review"));
+                candidateService.submitCandidate(candidateId, currentUser.getId()), "Candidate submitted for review"));
     }
 
     // ─────────────────────────────────────────────

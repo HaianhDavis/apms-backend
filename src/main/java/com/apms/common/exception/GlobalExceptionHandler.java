@@ -56,6 +56,16 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ApiResponse.error(ex.getMessage()));
     }
 
+    @ExceptionHandler(org.springframework.dao.OptimisticLockingFailureException.class)
+    public ResponseEntity<java.util.Map<String, Object>> handleOptimisticLockingFailure(org.springframework.dao.OptimisticLockingFailureException ex) {
+        log.warn("Optimistic locking failure: {}", ex.getMessage());
+        java.util.Map<String, Object> response = new java.util.HashMap<>();
+        response.put("success", false);
+        response.put("message", "Document was modified by another transaction. Please reload and try again.");
+        // Try to extract document version or revision if we want, but usually it's in the exception message
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGeneralException(Exception ex) {
         log.error("Unexpected error occurred", ex);

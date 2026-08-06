@@ -18,6 +18,10 @@ import com.apms.domain.project.Project;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.document.ImportJob;
 import com.apms.domain.document.repository.sql.ImportJobRepository;
+import com.apms.domain.project.fieldapproval.CandidateFieldAccessor;
+import com.apms.domain.project.fieldapproval.FieldApprovalGuard;
+import com.apms.domain.project.fieldapproval.FieldApprovalService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -40,6 +44,9 @@ public class CandidateService {
     private final AiExtractionService aiExtractionService;
     private final ApplicationEventPublisher eventPublisher;
     private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
+    private final FieldApprovalGuard fieldApprovalGuard;
+    private final FieldApprovalService fieldApprovalService;
+    private final ObjectMapper objectMapper;
 
     // ─────────────────────────────────────────────
     // CREATE (from AI)
@@ -174,6 +181,13 @@ public class CandidateService {
             throw new BusinessValidationException("Cannot edit candidate in status: " + candidate.getStatus());
         }
 
+        CompanyCandidate oldDraft;
+        try {
+            oldDraft = objectMapper.readValue(objectMapper.writeValueAsString(candidate), CompanyCandidate.class);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to clone candidate for guarding", e);
+        }
+
         if (request.getIdentity() != null) candidate.setIdentity(request.getIdentity());
         if (request.getBusiness() != null) candidate.setBusiness(request.getBusiness());
         if (request.getCompanySize() != null) candidate.setCompanySize(request.getCompanySize());
@@ -184,7 +198,22 @@ public class CandidateService {
             candidate.setSuggestedRelationshipType(request.getSuggestedRelationshipType());
         }
 
-        candidate.setRevisionNumber(candidate.getRevisionNumber() + 1);
+        fieldApprovalGuard.guardMutation(oldDraft, candidate, CandidateFieldAccessor.getAllDefinitions(),
+                candidate.getFieldApprovals(), candidate.getStatus() == CandidateStatus.PENDING_REVIEW, candidate.getRevisionNumber());
+
+        // Track changed fields incrementally so submitCandidate knows what changed
+        if (candidate.getChangedFieldPaths() == null) {
+            candidate.setChangedFieldPaths(new java.util.ArrayList<>());
+        }
+        for (com.apms.domain.project.fieldapproval.FieldDefinition<CompanyCandidate> def : CandidateFieldAccessor.getAllDefinitions()) {
+            Object oldVal = def.getGetter().apply(oldDraft);
+            Object newVal = def.getGetter().apply(candidate);
+            String hashOld = com.apms.domain.project.fieldapproval.FieldValueHasher.hashValue(oldVal, def.isCollection() && !def.isOrderedCollection());
+            String hashNew = com.apms.domain.project.fieldapproval.FieldValueHasher.hashValue(newVal, def.isCollection() && !def.isOrderedCollection());
+            if (!java.util.Objects.equals(hashOld, hashNew) && !candidate.getChangedFieldPaths().contains(def.getCanonicalPath())) {
+                candidate.getChangedFieldPaths().add(def.getCanonicalPath());
+            }
+        }
 
         if (candidate.getMetadata() != null) {
             candidate.getMetadata().setLastModifiedBy(String.valueOf(userId));
@@ -198,12 +227,51 @@ public class CandidateService {
     }
 
     @Transactional
-    public CandidateResponse submitCandidate(String candidateId) {
+    public CandidateResponse submitCandidate(String candidateId, Long submitterId) {
         CompanyCandidate candidate = findCandidateOrThrow(candidateId);
+
+        if (candidate.getStatus() == CandidateStatus.PENDING_REVIEW) {
+            // Might be a retry of a successful Mongo save that failed in SQL. Allow to return for idempotency check.
+            return toResponse(candidate);
+        }
 
         if (candidate.getStatus() != CandidateStatus.DRAFT && candidate.getStatus() != CandidateStatus.CORRECTED) {
             throw new BusinessValidationException("Only DRAFT or CORRECTED candidates can be submitted");
         }
+
+        boolean isFirstSubmission = (candidate.getFieldApprovals() == null || candidate.getFieldApprovals().isEmpty());
+
+        if (isFirstSubmission) {
+            candidate.setRevisionNumber(1);
+            candidate.setFieldApprovals(new java.util.ArrayList<>());
+            fieldApprovalService.initializeFirstSubmission(candidate, CandidateFieldAccessor.getAllDefinitions(), candidate.getFieldApprovals());
+        } else {
+            // Resubmission
+            candidate.setRevisionNumber(candidate.getRevisionNumber() + 1);
+            if (candidate.getChangedFieldPaths() != null) {
+                java.util.Map<String, com.apms.domain.project.fieldapproval.FieldApprovalRecord> map = com.apms.domain.project.fieldapproval.FieldApprovalUtils.toMap(candidate.getFieldApprovals());
+                for (String path : candidate.getChangedFieldPaths()) {
+                    com.apms.domain.project.fieldapproval.FieldApprovalRecord record = map.get(path);
+                    if (record == null) {
+                        record = com.apms.domain.project.fieldapproval.FieldApprovalRecord.builder().fieldPath(path).build();
+                        candidate.getFieldApprovals().add(record);
+                        map.put(path, record);
+                    }
+                    if (record.getStatus() == com.apms.common.enums.FieldApprovalStatus.REVISION_REQUIRED) {
+                        record.setPreviousStatus(record.getStatus());
+                        record.setPreviousComment(record.getComment());
+                    }
+                    record.setStatus(com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW);
+                    record.setChangedInRevision(candidate.getRevisionNumber());
+                    record.setReviewedByAccountId(null);
+                    record.setReviewedAt(null);
+                }
+            }
+        }
+
+        candidate.setChangedFieldPaths(new java.util.ArrayList<>()); // reset for next review cycle
+        candidate.setLastSubmittedAt(LocalDateTime.now());
+        candidate.setLastSubmittedByAccountId(submitterId);
 
         candidate.setStatus(CandidateStatus.PENDING_REVIEW);
         if (candidate.getMetadata() != null) {
@@ -213,6 +281,95 @@ public class CandidateService {
         candidate = candidateRepository.save(candidate);
         log.info("Candidate submitted for review: id={}", candidateId);
         return toResponse(candidate);
+    }
+
+    @Transactional
+    public void reviewFields(String candidateId, com.apms.domain.project.dto.FieldReviewRequest request, Long reviewerId) {
+        CompanyCandidate candidate = findCandidateOrThrow(candidateId);
+        if (!java.util.Objects.equals(candidate.getRevisionNumber(), request.getExpectedRevisionNumber())) {
+            throw new BusinessValidationException("Revision mismatch. Expected: " + request.getExpectedRevisionNumber() + ", Actual: " + candidate.getRevisionNumber());
+        }
+        if (!java.util.Objects.equals(candidate.getDocumentVersion(), request.getExpectedDocumentVersion())) {
+            throw new BusinessValidationException("Document version mismatch (optimistic locking). Expected: " + request.getExpectedDocumentVersion() + ", Actual: " + candidate.getDocumentVersion());
+        }
+
+        fieldApprovalService.processBatchReview(
+                candidate, request, reviewerId,
+                "CompanyCandidate", candidateId,
+                candidate.getFieldApprovals(),
+                com.apms.domain.project.fieldapproval.CandidateFieldAccessor.getAllDefinitions(),
+                candidate.getRevisionNumber()
+        );
+
+        candidateRepository.save(candidate);
+    }
+
+    @Transactional
+    public void reopenField(String candidateId, String fieldPath, com.apms.domain.project.dto.FieldReopenRequest request, Long reviewerId) {
+        CompanyCandidate candidate = findCandidateOrThrow(candidateId);
+        if (!java.util.Objects.equals(candidate.getRevisionNumber(), request.getExpectedRevisionNumber())) {
+            throw new BusinessValidationException("Revision mismatch. Expected: " + request.getExpectedRevisionNumber() + ", Actual: " + candidate.getRevisionNumber());
+        }
+        if (!java.util.Objects.equals(candidate.getDocumentVersion(), request.getExpectedDocumentVersion())) {
+            throw new BusinessValidationException("Document version mismatch (optimistic locking). Expected: " + request.getExpectedDocumentVersion() + ", Actual: " + candidate.getDocumentVersion());
+        }
+
+        fieldApprovalService.processReopen(
+                fieldPath, request, reviewerId,
+                "CompanyCandidate", candidateId,
+                candidate.getFieldApprovals()
+        );
+
+        candidateRepository.save(candidate);
+    }
+
+    @Transactional(readOnly = true)
+    public void validateFinalReviewReadiness(String candidateId, com.apms.common.enums.ReviewDecision decision) {
+        CompanyCandidate candidate = findCandidateOrThrow(candidateId);
+        fieldApprovalService.validateFinalReviewReadiness(candidate, candidate.getFieldApprovals(), com.apms.domain.project.fieldapproval.CandidateFieldAccessor.getAllDefinitions(), decision);
+    }
+
+    @Transactional(readOnly = true)
+    public com.apms.domain.project.dto.ReviewSummaryResponse getReviewSummary(String candidateId, Integer submittedRevisionNumber) {
+        CompanyCandidate candidate = findCandidateOrThrow(candidateId);
+
+        boolean readyForApproval = true;
+        java.util.List<String> blockingFields = new java.util.ArrayList<>();
+        if (candidate.getFieldApprovals() != null) {
+            for (com.apms.domain.project.fieldapproval.FieldApprovalRecord record : candidate.getFieldApprovals()) {
+                if (record.getStatus() == com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW || record.getStatus() == com.apms.common.enums.FieldApprovalStatus.REVISION_REQUIRED) {
+                    readyForApproval = false;
+                    blockingFields.add(record.getFieldPath());
+                }
+            }
+        }
+
+        java.util.Map<String, com.apms.domain.project.dto.FieldApprovalResponse> mappedApprovals = new java.util.HashMap<>();
+        if (candidate.getFieldApprovals() != null) {
+            candidate.getFieldApprovals().forEach(v -> {
+                mappedApprovals.put(v.getFieldPath(), com.apms.domain.project.dto.FieldApprovalResponse.builder()
+                        .status(v.getStatus())
+                        .reviewedRevision(v.getReviewedRevision())
+                        .comment(v.getComment())
+                        .previousComment(v.getPreviousComment())
+                        .previousStatus(v.getPreviousStatus())
+                        .changedInRevision(v.getChangedInRevision())
+                        .staleReason(v.getStaleReason())
+                        .pendingValue(v.getPendingValue())
+                        .pendingEvidenceIds(v.getPendingEvidenceIds())
+                        .build());
+            });
+        }
+
+        return com.apms.domain.project.dto.ReviewSummaryResponse.builder()
+                .revisionNumber(candidate.getRevisionNumber())
+                .documentVersion(candidate.getDocumentVersion())
+                .submittedRevisionNumber(submittedRevisionNumber)
+                .fieldApprovals(mappedApprovals)
+                .changedFieldPaths(candidate.getChangedFieldPaths())
+                .readyForApproval(readyForApproval)
+                .blockingFields(blockingFields)
+                .build();
     }
 
     @Transactional
@@ -248,7 +405,7 @@ public class CandidateService {
         }
 
         candidate.setStatus(CandidateStatus.CORRECTED);
-        candidate.setRevisionNumber(candidate.getRevisionNumber() + 1);
+        // Revision number increments only on submit, not correct
         if (candidate.getMetadata() != null) {
             candidate.getMetadata().setUpdatedAt(LocalDateTime.now());
         }

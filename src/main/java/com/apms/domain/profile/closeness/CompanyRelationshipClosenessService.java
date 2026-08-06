@@ -81,8 +81,9 @@ public class CompanyRelationshipClosenessService {
 
         String ownerId = ownerOrganizationService.getOwnerCompanyProfileId();
         
-        int maxRetries = 3;
+        int maxRetries = 5;
         for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            java.util.concurrent.atomic.AtomicBoolean wasCreate = new java.util.concurrent.atomic.AtomicBoolean(false);
             try {
                 ClosenessUpsertResult result = sqlTransactionTemplate.execute(status -> {
                     Optional<CompanyRelationshipCloseness> existingOpt = closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerId, targetCompanyProfileId);
@@ -90,6 +91,7 @@ public class CompanyRelationshipClosenessService {
                     if (existingOpt.isPresent()) {
                         return applyUpdate(existingOpt.get(), request, currentUser.getId());
                     } else {
+                        wasCreate.set(true);
                         CompanyRelationshipCloseness newEntity = new CompanyRelationshipCloseness();
                         newEntity.setOwnerCompanyProfileId(ownerId);
                         newEntity.setTargetCompanyProfileId(targetCompanyProfileId);
@@ -106,7 +108,7 @@ public class CompanyRelationshipClosenessService {
                 boolean rowExists = Boolean.TRUE.equals(sqlTransactionTemplate.execute(status -> 
                         closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerId, targetCompanyProfileId).isPresent()));
                 
-                if (!rowExists || attempt == maxRetries) {
+                if (!wasCreate.get() || !rowExists || attempt == maxRetries) {
                     throw e;
                 }
                 log.warn("Concurrent insert detected for owner-target pair: {}-{}, retrying... (attempt {})", ownerId, targetCompanyProfileId, attempt);

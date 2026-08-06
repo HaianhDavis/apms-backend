@@ -62,4 +62,36 @@ public class ProjectTaskSubmissionController {
             @Valid @RequestBody ReviewTaskSubmissionRequest request) {
         return ResponseEntity.ok(submissionService.reviewSubmission(projectId, taskId, submissionId, request));
     }
+
+    @GetMapping("/{submissionId}/field-review-summary")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<com.apms.domain.project.dto.ReviewSummaryResponse> getReviewSummary(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable Long submissionId) {
+        return ResponseEntity.ok(submissionService.getReviewSummary(projectId, taskId, submissionId));
+    }
+
+    @PostMapping("/{submissionId}/field-reviews")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<Void> reviewFields(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable Long submissionId,
+            @Valid @RequestBody com.apms.domain.project.dto.FieldReviewRequest request) {
+        submissionService.reviewFields(projectId, taskId, submissionId, request);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/{submissionId}/fields/{fieldPath}/reopen")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<Void> reopenField(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable Long submissionId,
+            @PathVariable String fieldPath,
+            @Valid @RequestBody com.apms.domain.project.dto.FieldReopenRequest request) {
+        submissionService.reopenField(projectId, taskId, submissionId, fieldPath, request);
+        return ResponseEntity.ok().build();
+    }
 }

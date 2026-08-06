@@ -11,6 +11,7 @@ import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * MongoDB document representing a draft or in-review company profile candidate.
@@ -63,6 +64,14 @@ public class CompanyCandidate {
      */
     @Builder.Default
     private Integer revisionNumber = 1;
+
+    @org.springframework.data.annotation.Version
+    private Long documentVersion;
+
+    private java.util.List<com.apms.domain.project.fieldapproval.FieldApprovalRecord> fieldApprovals;
+    private java.util.List<String> changedFieldPaths;
+    private LocalDateTime lastSubmittedAt;
+    private Long lastSubmittedByAccountId;
 
     @Indexed
     private CandidateStatus status;

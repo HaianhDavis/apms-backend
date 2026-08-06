@@ -24,10 +24,22 @@ public class CompanyProfileUpdateProposal {
     private Long projectId;
     private Long taskId;
 
+    @org.springframework.data.annotation.Version
+    private Long documentVersion;
+
+    @Builder.Default
+    private Integer revisionNumber = 1;
+
+    private List<com.apms.domain.project.fieldapproval.FieldApprovalRecord> fieldApprovals;
+    private List<String> changedFieldPaths;
+    private LocalDateTime lastSubmittedAt;
+    private Long lastSubmittedByAccountId;
+
     private String companyProfileId;
 
     private Map<String, Object> proposedIdentity;
     private Map<String, Object> proposedBusiness;
+    private Map<String, Object> proposedCompanySize;
     private Map<String, Object> proposedContact;
     private Map<String, Object> proposedInsights;
     private Map<String, Object> proposedFinancial;

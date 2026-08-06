@@ -8,6 +8,7 @@ import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.containers.Neo4jContainer;
 
 @SpringBootTest
+@org.springframework.context.annotation.Import(com.apms.common.config.GeminiTestConfiguration.class)
 public abstract class ApmsIntegrationTestBase {
 
     static final MSSQLServerContainer<?> sqlServerContainer;
