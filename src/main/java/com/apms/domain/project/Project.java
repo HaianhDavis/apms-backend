@@ -7,6 +7,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -55,6 +56,9 @@ public class Project {
 
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String description;
+
+    @Column(name = "planned_end_date")
+    private LocalDate plannedEndDate;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

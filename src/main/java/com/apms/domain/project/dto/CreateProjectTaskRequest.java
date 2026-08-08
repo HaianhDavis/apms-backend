@@ -21,6 +21,8 @@ public class CreateProjectTaskRequest {
 
     private LocalDateTime dueDate;
 
-    @Schema(description = "Type of task (DOCUMENT_COLLECTION, COMPANY_DATA_PREPARATION, GENERAL_TASK)")
+    @Schema(description = "Type of task (COMPANY_DATA_PREPARATION, GENERAL_TASK)")
     private TaskType taskType;
+
+    private String targetCompanyProfileId;
 }

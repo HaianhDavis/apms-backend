@@ -35,6 +35,15 @@ public class PartnerContract {
     @Column(nullable = true)
     private Long sourceTaskId;
 
+    @Column(nullable = true)
+    private Long sourceSubmissionId;
+
+    @Column(nullable = true, length = 50)
+    private String extractionDraftId;
+
+    @Column(nullable = true, length = 36)
+    private String ownerCompanyProfileId;
+
     @Column(nullable = true, length = 50)
     private String rawDocumentId;
 

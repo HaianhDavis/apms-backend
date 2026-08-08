@@ -6,6 +6,7 @@ import com.apms.common.enums.ProjectType;
 import lombok.Builder;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -24,5 +25,10 @@ public class ProjectResponse {
     private Long createdBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private LocalDate plannedEndDate;
+    private Integer totalTasks;
+    private Integer completedTasks;
+    private Integer progressPercentage;
+    private Boolean isOverdue;
     private List<ProjectMemberResponse> members;
 }

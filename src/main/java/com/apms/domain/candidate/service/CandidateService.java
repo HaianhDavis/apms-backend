@@ -396,6 +396,122 @@ public class CandidateService {
     // HELPERS
     // ─────────────────────────────────────────────
 
+    @Transactional
+    public CandidateResponse reviewCandidate(String projectId, String candidateId, com.apms.domain.candidate.dto.CandidateReviewRequest request, Long userId) {
+        CompanyCandidate candidate = findCandidateOrThrow(candidateId);
+        
+        if (!projectId.equals(candidate.getProjectId())) {
+            throw new BusinessValidationException("Candidate does not belong to project");
+        }
+
+        if (candidate.getFieldResults() == null) {
+            candidate.setFieldResults(new java.util.HashMap<>());
+        }
+
+        if (request.getFields() != null) {
+            for (java.util.Map.Entry<String, com.apms.domain.candidate.dto.CandidateReviewRequest.FieldReviewUpdate> entry : request.getFields().entrySet()) {
+                String fieldName = entry.getKey();
+                com.apms.domain.candidate.dto.CandidateReviewRequest.FieldReviewUpdate update = entry.getValue();
+                
+                com.apms.domain.ai.dto.ExtractionFieldResult fieldResult = candidate.getFieldResults().get(fieldName);
+                if (fieldResult == null) {
+                    fieldResult = new com.apms.domain.ai.dto.ExtractionFieldResult();
+                    candidate.getFieldResults().put(fieldName, fieldResult);
+                }
+                
+                fieldResult.setReviewedValue(update.getReviewedValue());
+                fieldResult.setReviewStatus(update.getReviewStatus());
+                fieldResult.setReviewedByUserId(userId);
+                fieldResult.setReviewedAt(LocalDateTime.now());
+                
+                Object val = update.getReviewedValue() != null ? update.getReviewedValue() : fieldResult.getValue();
+                
+                // Sync to embedded models
+                syncEmbeddedField(candidate, fieldName, val);
+            }
+        }
+        
+        if (candidate.getMetadata() != null) {
+            candidate.getMetadata().setLastModifiedBy(String.valueOf(userId));
+            candidate.getMetadata().setUpdatedAt(LocalDateTime.now());
+        }
+        
+        candidate = candidateRepository.save(candidate);
+        return toResponse(candidate);
+    }
+    
+    @SuppressWarnings("unchecked")
+    private void syncEmbeddedField(CompanyCandidate candidate, String fieldName, Object value) {
+        if (candidate.getIdentity() == null) candidate.setIdentity(new CompanyCandidate.Identity());
+        if (candidate.getBusiness() == null) candidate.setBusiness(new CompanyCandidate.Business());
+        if (candidate.getContact() == null) candidate.setContact(new CompanyCandidate.Contact());
+        if (candidate.getCompanySize() == null) candidate.setCompanySize(new CompanyCandidate.CompanySize());
+        if (candidate.getInsights() == null) candidate.setInsights(new CompanyCandidate.Insights());
+        
+        try {
+            switch (fieldName) {
+                case "identity.legalName":
+                    candidate.getIdentity().setLegalName((String) value);
+                    break;
+                case "identity.tradeName":
+                    candidate.getIdentity().setTradeName((String) value);
+                    break;
+                case "identity.taxCode":
+                    candidate.getIdentity().setTaxCode((String) value);
+                    break;
+                case "identity.registrationNumber":
+                    candidate.getIdentity().setRegistrationNumber((String) value);
+                    break;
+                case "business.industries":
+                    candidate.getBusiness().setIndustries((List<String>) value);
+                    break;
+                case "business.businessModel":
+                    candidate.getBusiness().setBusinessModel((String) value);
+                    break;
+                case "business.markets":
+                    candidate.getBusiness().setMarkets((List<String>) value);
+                    break;
+                case "business.targetCustomers":
+                    candidate.getBusiness().setTargetCustomers((List<String>) value);
+                    break;
+                case "contact.website":
+                    candidate.getContact().setWebsite((String) value);
+                    break;
+                case "contact.emails":
+                    candidate.getContact().setEmails((List<String>) value);
+                    break;
+                case "contact.phones":
+                    candidate.getContact().setPhones((List<String>) value);
+                    break;
+                case "companySize.employeeTier":
+                    candidate.getCompanySize().setEmployeeTier((String) value);
+                    break;
+                case "companySize.employeeCount":
+                    candidate.getCompanySize().setEmployeeCount(value instanceof Number ? ((Number) value).intValue() : null);
+                    break;
+                case "companySize.revenueTier":
+                    candidate.getCompanySize().setRevenueTier((String) value);
+                    break;
+                case "insights.strengths":
+                    candidate.getInsights().setStrengths((List<String>) value);
+                    break;
+                case "insights.weaknesses":
+                    candidate.getInsights().setWeaknesses((List<String>) value);
+                    break;
+                case "insights.opportunities":
+                    candidate.getInsights().setOpportunities((List<String>) value);
+                    break;
+                case "insights.threats":
+                    candidate.getInsights().setThreats((List<String>) value);
+                    break;
+                default:
+                    log.warn("Unmapped field name for synchronization: {}", fieldName);
+            }
+        } catch (ClassCastException e) {
+            log.error("Invalid value type for field {}", fieldName, e);
+        }
+    }
+
     private CompanyCandidate findCandidateOrThrow(String candidateId) {
         return candidateRepository.findById(candidateId)
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate not found: " + candidateId));
@@ -432,6 +548,10 @@ public class CandidateService {
                 .deduplication(c.getDeduplication())
                 .extractionSource(c.getExtractionSource())
                 .review(c.getReview())
+                .fieldResults(c.getFieldResults())
+                .qualityStatus(c.getQualityStatus())
+                .qualityMetrics(c.getQualityMetrics())
+                .rawAiOutput(c.getRawAiOutput())
                 .scorePreview(c.getScorePreview())
                 .aiMetadata(c.getAiMetadata())
                 .metadata(c.getMetadata())

@@ -52,7 +52,7 @@ public class AiExtractionService {
     @Value("${spring.ai.openai.api-key:dummy-key}")
     private String openAiApiKey;
 
-    @Value("${app.ai.gemini.model:gemini-2.5-flash}")
+    @Value("${app.ai.gemini.model:gemini-3.6-flash}")
     private String geminiModel;
 
     @Value("${app.storage.upload-dir:uploads/}")

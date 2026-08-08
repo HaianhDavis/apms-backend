@@ -487,4 +487,78 @@ public class PartnerContractService {
             throw new BusinessValidationException("Invalid clause ID format: " + clauseId);
         }
     }
+    @Transactional(readOnly = true)
+    public com.apms.common.response.PageResponse<PartnerContractResponse> listContractsByProfile(String profileId, Long accountId, org.springframework.data.domain.Pageable pageable) {
+        // Optional: validate access to the profile. For now, basic role checks could apply.
+        org.springframework.data.domain.Page<PartnerContract> page = contractRepository.findByPartnerCompanyIdAndReviewStatus(
+                profileId, ContractReviewStatus.APPROVED, pageable);
+
+        List<PartnerContractResponse> content = page.getContent()
+                .stream()
+                .map(PartnerContractMapper::toResponse)
+                .collect(Collectors.toList());
+
+        return com.apms.common.response.PageResponse.<PartnerContractResponse>builder()
+                .content(content)
+                .pageNumber(page.getNumber())
+                .pageSize(page.getSize())
+                .totalElements(page.getTotalElements())
+                .totalPages(page.getTotalPages())
+                .last(page.isLast())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public PartnerContractResponse getContractByProfile(String profileId, Long contractId, Long accountId) {
+        PartnerContract contract = getContractEntity(contractId);
+        if (!contract.getPartnerCompanyId().equals(profileId)) {
+            throw new BusinessValidationException("Contract does not belong to this profile");
+        }
+        if (contract.getReviewStatus() != ContractReviewStatus.APPROVED) {
+            throw new BusinessValidationException("Only approved contracts can be accessed via profile");
+        }
+        return PartnerContractMapper.toResponse(contract);
+    }
+
+    @Transactional(readOnly = true)
+    public PartnerContractSummaryResponse getContractSummaryByProfile(String profileId, Long accountId) {
+        List<PartnerContract> contracts = contractRepository.findByPartnerCompanyIdAndReviewStatus(profileId, ContractReviewStatus.APPROVED);
+
+        int total = contracts.size();
+        int active = 0, upcoming = 0, expiringSoon = 0, expired = 0, terminated = 0;
+        java.time.LocalDate nearestExpiry = null;
+        java.util.Map<String, java.math.BigDecimal> valueByCurrency = new java.util.HashMap<>();
+
+        java.time.LocalDate now = java.time.LocalDate.now();
+        java.time.LocalDate soon = now.plusDays(90);
+
+        for (PartnerContract c : contracts) {
+            ContractLifecycleStatus status = c.getLifecycleStatus();
+            if (status == ContractLifecycleStatus.ACTIVE) active++;
+            else if (status == ContractLifecycleStatus.EXPIRED) expired++;
+            else if (status == ContractLifecycleStatus.TERMINATED) terminated++;
+            else if (status == ContractLifecycleStatus.PENDING_EFFECTIVE) upcoming++; // Map to upcoming
+
+            if (c.getExpiryDate() != null) {
+                if (nearestExpiry == null || c.getExpiryDate().isBefore(nearestExpiry)) {
+                    nearestExpiry = c.getExpiryDate();
+                }
+            }
+
+            if (c.getCurrency() != null && c.getTotalContractValue() != null) {
+                valueByCurrency.merge(c.getCurrency(), c.getTotalContractValue(), java.math.BigDecimal::add);
+            }
+        }
+
+        return PartnerContractSummaryResponse.builder()
+                .totalContracts(total)
+                .activeContracts(active)
+                .upcomingContracts(upcoming)
+                .expiringSoonContracts(expiringSoon)
+                .expiredContracts(expired)
+                .terminatedContracts(terminated)
+                .nearestExpiryDate(nearestExpiry)
+                .totalApprovedValueByCurrency(valueByCurrency)
+                .build();
+    }
 }

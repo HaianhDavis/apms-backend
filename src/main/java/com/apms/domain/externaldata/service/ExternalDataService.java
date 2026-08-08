@@ -6,12 +6,16 @@ import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.externaldata.ExternalDataItem;
 import com.apms.domain.externaldata.dto.ExternalDataItemResponse;
 import com.apms.domain.externaldata.repository.mongo.ExternalDataRepository;
+import com.apms.domain.crawler.domain.CrawledArticle;
+import com.apms.domain.crawler.domain.CompanyMatch;
 import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -20,7 +24,9 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -33,23 +39,38 @@ public class ExternalDataService {
     private final ExternalDataRepository externalDataRepository;
     private final MongoTemplate mongoTemplate;
     private final AuditLogService auditLogService;
+    private final com.apms.domain.crawler.repository.TrackedCompanyRepository trackedCompanyRepository;
 
     public Page<ExternalDataItemResponse> getExternalData(
             ExternalDataCategory category,
             String keyword,
             String source,
+            String companyName,
             LocalDateTime fromDate,
             LocalDateTime toDate,
             Pageable pageable) {
 
         Criteria criteria = new Criteria();
 
-        if (category != null) {
-            criteria.and("category").is(category);
-        }
+        // category is ignored because CrawledArticle does not have a category field.
 
         if (StringUtils.hasText(source)) {
-            criteria.and("source").is(source);
+            criteria.and("sourceName").is(source);
+        }
+
+        if (StringUtils.hasText(companyName)) {
+            List<Criteria> orCriterias = new ArrayList<>();
+            orCriterias.add(Criteria.where("matchedCompanies.companyName").regex(companyName.trim(), "i"));
+            
+            trackedCompanyRepository.findByCompanyNameIgnoreCase(companyName.trim()).ifPresent(tc -> {
+                if (tc.getAliases() != null) {
+                    for (String alias : tc.getAliases()) {
+                        orCriterias.add(Criteria.where("matchedCompanies.companyName").regex(alias.trim(), "i"));
+                    }
+                }
+            });
+            
+            criteria.andOperator(new Criteria().orOperator(orCriterias.toArray(new Criteria[0])));
         }
 
         if (StringUtils.hasText(keyword)) {
@@ -60,18 +81,25 @@ public class ExternalDataService {
         }
 
         if (fromDate != null) {
-            criteria.and("publishedAt").gte(fromDate);
+            criteria.and("publishedDate").gte(fromDate.toString());
         }
         if (toDate != null) {
-            criteria.andOperator(Criteria.where("publishedAt").lte(toDate));
+            criteria.andOperator(Criteria.where("publishedDate").lte(toDate.toString()));
+        }
+
+        Sort sort = pageable.getSort();
+        if (sort.getOrderFor("publishedAt") != null) {
+            Sort.Order order = sort.getOrderFor("publishedAt");
+            sort = Sort.by(order.getDirection(), "publishedDate");
+            pageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort);
         }
 
         Query query = new Query(criteria);
-        long total = mongoTemplate.count(query, ExternalDataItem.class);
+        long total = mongoTemplate.count(query, CrawledArticle.class, "crawled_articles");
         query.with(pageable);
-        List<ExternalDataItem> items = mongoTemplate.find(query, ExternalDataItem.class);
+        List<CrawledArticle> items = mongoTemplate.find(query, CrawledArticle.class, "crawled_articles");
 
-        List<ExternalDataItemResponse> responses = items.stream().map(this::toResponse).collect(Collectors.toList());
+        List<ExternalDataItemResponse> responses = items.stream().map(this::crawledToResponse).collect(Collectors.toList());
         return new PageImpl<>(responses, pageable, total);
     }
 
@@ -81,6 +109,7 @@ public class ExternalDataService {
                 .summary("Tech Corp is expanding its operations into the AI space with a new partnership.")
                 .source("TechCrunch Demo")
                 .url("https://example.com/demo-news")
+                .imageUrl("https://example.com/images/demo.jpg")
                 .publishedAt(LocalDateTime.now())
                 .category(ExternalDataCategory.NEWS)
                 .build();
@@ -151,6 +180,41 @@ public class ExternalDataService {
                 .relatedCompanyId(item.getRelatedCompanyId())
                 .createdAt(item.getCreatedAt())
                 .updatedAt(item.getUpdatedAt())
+                .imageUrl(item.getImageUrl())
+                .build();
+    }
+
+    private ExternalDataItemResponse crawledToResponse(CrawledArticle item) {
+        LocalDateTime pubDate = null;
+        try {
+            if (item.getPublishedDate() != null) {
+                if (item.getPublishedDate().contains("T")) {
+                    pubDate = LocalDateTime.parse(item.getPublishedDate());
+                } else {
+                    pubDate = LocalDate.parse(item.getPublishedDate()).atStartOfDay();
+                }
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+
+        String companyName = null;
+        if (item.getMatchedCompanies() != null && !item.getMatchedCompanies().isEmpty()) {
+            companyName = item.getMatchedCompanies().get(0).getCompanyName();
+        }
+
+        return ExternalDataItemResponse.builder()
+                .id(item.getId())
+                .title(item.getTitle())
+                .summary(item.getAiSummary() != null ? item.getAiSummary() : item.getSummary())
+                .source(item.getSourceName())
+                .url(item.getUrl())
+                .publishedAt(pubDate)
+                .category(ExternalDataCategory.NEWS)
+                .sentiment(item.getSentiment())
+                .riskLevel(item.getPriorityLevel())
+                .relatedCompanyName(companyName)
+                .imageUrl(item.getThumbnail())
                 .build();
     }
 

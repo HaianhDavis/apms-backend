@@ -98,6 +98,9 @@ public class CompanyProfile {
     @Builder.Default
     private Boolean isDeleted = false;
 
+    @Builder.Default
+    private Boolean isHidden = false;
+
     private Metadata metadata;
 
     @Builder.Default

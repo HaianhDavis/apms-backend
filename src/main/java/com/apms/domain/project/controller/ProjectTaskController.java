@@ -47,8 +47,9 @@ public class ProjectTaskController {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         boolean staffOnly = currentUser.getAuthorities().stream()
                 .anyMatch(authority -> "ROLE_BUSINESS_DEVELOPMENT_STAFF".equals(authority.getAuthority()));
+        Long effectiveAssignedToUserId = staffOnly ? currentUser.getId() : assignedToUserId;
         PageResponse<ProjectTaskResponse> response = PageResponse.of(
-                projectTaskService.getTasks(projectId, status, assignedToUserId, pageable, currentUser.getId(), staffOnly));
+                projectTaskService.getTasks(projectId, status, effectiveAssignedToUserId, pageable));
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }

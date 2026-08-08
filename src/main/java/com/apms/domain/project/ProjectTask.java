@@ -69,4 +69,7 @@ public class ProjectTask {
     private LocalDateTime updatedAt;
 
     private LocalDateTime completedAt;
+
+    @Column(nullable = true, length = 36)
+    private String targetCompanyProfileId;
 }

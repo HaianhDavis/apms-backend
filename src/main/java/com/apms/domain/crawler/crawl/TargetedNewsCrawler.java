@@ -39,16 +39,37 @@ public class TargetedNewsCrawler {
             new NewsSearchSource(
                     "CafeF",
                     "https://cafef.vn",
-                    List.of("https://cafef.vn/tim-kiem.chn?keywords=%s"),
+                    List.of("https://news.google.com/rss/search?q=site:cafef.vn%%20%s%%20when:7d&hl=vi&gl=VN&ceid=VN:vi"),
                     "vi",
-                    false),
+                    true),
             new NewsSearchSource(
                     "VietnamNet",
                     "https://vietnamnet.vn",
-                    List.of(
-                            "https://vietnamnet.vn/tim-kiem?keyword=%s",
-                            "https://vietnamnet.vn/tim-kiem?q=%s",
-                            "https://news.google.com/rss/search?q=site:vietnamnet.vn%%20%s&hl=vi&gl=VN&ceid=VN:vi"),
+                    List.of("https://news.google.com/rss/search?q=site:vietnamnet.vn%%20%s%%20when:7d&hl=vi&gl=VN&ceid=VN:vi"),
+                    "vi",
+                    true),
+            new NewsSearchSource(
+                    "VnExpress",
+                    "https://vnexpress.net",
+                    List.of("https://news.google.com/rss/search?q=site:vnexpress.net%%20%s%%20when:7d&hl=vi&gl=VN&ceid=VN:vi"),
+                    "vi",
+                    true),
+            new NewsSearchSource(
+                    "TuoiTre",
+                    "https://tuoitre.vn",
+                    List.of("https://news.google.com/rss/search?q=site:tuoitre.vn%%20%s%%20when:7d&hl=vi&gl=VN&ceid=VN:vi"),
+                    "vi",
+                    true),
+            new NewsSearchSource(
+                    "ThanhNien",
+                    "https://thanhnien.vn",
+                    List.of("https://news.google.com/rss/search?q=site:thanhnien.vn%%20%s%%20when:7d&hl=vi&gl=VN&ceid=VN:vi"),
+                    "vi",
+                    true),
+            new NewsSearchSource(
+                    "BaoDauTu",
+                    "https://baodautu.vn",
+                    List.of("https://news.google.com/rss/search?q=site:baodautu.vn%%20%s%%20when:7d&hl=vi&gl=VN&ceid=VN:vi"),
                     "vi",
                     true)
     );
@@ -63,10 +84,18 @@ public class TargetedNewsCrawler {
         Map<String, CrawledArticle> articlesByUrl = new LinkedHashMap<>();
 
         for (TrackedCompany company : trackedCompanies) {
-            for (NewsSearchSource source : SOURCES) {
-                List<CrawledArticle> articles = crawlCompanyFromSource(company, source, maxArticlesPerCompanyPerSource);
-                for (CrawledArticle article : articles) {
-                    articlesByUrl.putIfAbsent(article.getUrl(), article);
+            List<String> namesToSearch = new ArrayList<>();
+            namesToSearch.add(company.getCompanyName());
+            if (company.getAliases() != null) {
+                namesToSearch.addAll(company.getAliases());
+            }
+
+            for (String searchName : namesToSearch) {
+                for (NewsSearchSource source : SOURCES) {
+                    List<CrawledArticle> articles = crawlCompanyFromSource(company, searchName, source, maxArticlesPerCompanyPerSource);
+                    for (CrawledArticle article : articles) {
+                        articlesByUrl.putIfAbsent(article.getUrl(), article);
+                    }
                 }
             }
         }
@@ -76,10 +105,11 @@ public class TargetedNewsCrawler {
 
     private List<CrawledArticle> crawlCompanyFromSource(
             TrackedCompany company,
+            String searchName,
             NewsSearchSource source,
             int maxArticles) {
 
-        log.info("TargetedNewsCrawler: Searching '{}' for '{}'", source.name(), company.getCompanyName());
+        log.info("TargetedNewsCrawler: Searching '{}' for '{}'", source.name(), searchName);
 
         Map<String, CrawledArticle> articlesByUrl = new LinkedHashMap<>();
         for (String template : source.searchUrlTemplates()) {
@@ -87,7 +117,7 @@ public class TargetedNewsCrawler {
                 break;
             }
 
-            String searchUrl = template.formatted(urlEncode(company.getCompanyName()));
+            String searchUrl = template.formatted(urlEncode(searchName));
             try {
                 String body = restClient.get()
                         .uri(searchUrl)
@@ -96,7 +126,7 @@ public class TargetedNewsCrawler {
 
                 if (body == null || body.isBlank()) {
                     log.warn("TargetedNewsCrawler: Empty search response from '{}' for '{}'",
-                            source.name(), company.getCompanyName());
+                            source.name(), searchName);
                     continue;
                 }
 
@@ -109,7 +139,7 @@ public class TargetedNewsCrawler {
                 }
             } catch (Exception e) {
                 log.warn("TargetedNewsCrawler: Search failed for '{}' on '{}' via '{}': {}",
-                        company.getCompanyName(), source.name(), searchUrl, e.getMessage());
+                        searchName, source.name(), searchUrl, e.getMessage());
             }
         }
 

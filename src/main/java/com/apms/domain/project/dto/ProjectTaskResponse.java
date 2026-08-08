@@ -26,5 +26,6 @@ public class ProjectTaskResponse {
     private LocalDateTime updatedAt;
     private LocalDateTime completedAt;
     private TaskType taskType;
+    private String targetCompanyProfileId;
     private java.util.List<TaskAction> availableActions;
 }

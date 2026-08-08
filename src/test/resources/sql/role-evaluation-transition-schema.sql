@@ -5,7 +5,9 @@ CREATE TABLE accounts (
     password_hash VARCHAR(255) NOT NULL,
     is_active BIT DEFAULT 1,
     created_at DATETIME2,
-    updated_at DATETIME2
+    updated_at DATETIME2,
+    phone_number NVARCHAR(20) NULL,
+    phone_verified_at DATETIME2 NULL
 );
 
 IF OBJECT_ID('projects', 'U') IS NULL
@@ -21,6 +23,7 @@ CREATE TABLE projects (
     created_by BIGINT NOT NULL,
     created_at DATETIME2,
     updated_at DATETIME2,
+    planned_end_date DATE,
     CONSTRAINT fk_projects_created_by FOREIGN KEY (created_by) REFERENCES accounts(id)
 );
 
@@ -32,6 +35,7 @@ CREATE TABLE project_tasks (
     title VARCHAR(255) NOT NULL,
     description NVARCHAR(MAX),
     status VARCHAR(255) NOT NULL,
+    target_company_profile_id VARCHAR(255),
     task_type VARCHAR(50),
     priority VARCHAR(255),
     due_date DATETIME2,
@@ -113,4 +117,21 @@ CREATE TABLE users (
     created_at DATETIME2,
     updated_at DATETIME2,
     CONSTRAINT fk_users_account FOREIGN KEY (account_id) REFERENCES accounts(id)
+);
+
+IF OBJECT_ID('otp_challenges', 'U') IS NULL
+CREATE TABLE otp_challenges (
+    id BIGINT IDENTITY(1,1) PRIMARY KEY,
+    account_id BIGINT NOT NULL,
+    purpose NVARCHAR(50) NOT NULL,
+    otp_hash NVARCHAR(255) NOT NULL,
+    expires_at DATETIME2 NOT NULL,
+    attempt_count INT NOT NULL DEFAULT 0,
+    max_attempts INT NOT NULL DEFAULT 5,
+    used_at DATETIME2 NULL,
+    invalidated_at DATETIME2 NULL,
+    invalidation_reason NVARCHAR(255) NULL,
+    created_at DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+    request_ip NVARCHAR(45) NULL,
+    CONSTRAINT fk_otp_challenge_account FOREIGN KEY (account_id) REFERENCES accounts(id)
 );

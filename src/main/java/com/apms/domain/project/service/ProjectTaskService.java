@@ -1,10 +1,7 @@
 package com.apms.domain.project.service;
 
-import com.apms.common.enums.AuditAction;
+import com.apms.common.enums.*;
 import com.apms.common.enums.CandidateStatus;
-import com.apms.common.enums.SystemRole;
-import com.apms.common.enums.TaskStatus;
-import com.apms.common.enums.TaskType;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.ai.AiExtractionCache;
 import com.apms.domain.ai.dto.ExtractionQualityStatus;
@@ -20,7 +17,6 @@ import com.apms.domain.project.dto.ProjectTaskSubmissionResponse;
 import com.apms.domain.project.dto.WorkbenchDocumentResponse;
 import com.apms.domain.project.dto.CandidateDraftSummary;
 import com.apms.domain.project.dto.ProposalDraftSummary;
-import com.apms.common.enums.TaskAction;
 import com.apms.domain.document.service.DocumentService;
 import com.apms.domain.document.dto.ImportJobResponse;
 import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
@@ -29,9 +25,6 @@ import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
 import com.apms.domain.project.ProjectTaskSubmission;
 import com.apms.domain.candidate.CompanyCandidate;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
-import com.apms.common.enums.ProjectType;
-import com.apms.common.enums.SubmissionStatus;
-import com.apms.common.enums.SubmissionType;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.project.repository.sql.ProjectTaskRepository;
 import com.apms.domain.score.draft.RoleEvaluationDraft;
@@ -74,6 +67,7 @@ public class ProjectTaskService {
     private final ProjectTaskSubmissionRepository submissionRepository;
     private final RoleEvaluationDraftRepository roleEvaluationDraftRepository;
     private final NotificationService notificationService;
+    private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
 
     @Transactional
     public ProjectTaskResponse createTask(Long projectId, CreateProjectTaskRequest request) {
@@ -97,6 +91,29 @@ public class ProjectTaskService {
                     .orElseThrow(() -> new ResourceNotFoundException("Assigned account not found"));
         }
 
+        if (request.getTaskType() == TaskType.PARTNER_CONTRACT_COLLECTION || request.getTaskType() == TaskType.COMPANY_NEWS_RESEARCH) {
+            if (!org.springframework.util.StringUtils.hasText(request.getTargetCompanyProfileId())) {
+                // Auto-resolve from project if not explicitly provided
+                if (org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId())) {
+                    request.setTargetCompanyProfileId(project.getTargetCompanyProfileId());
+                } else {
+                    throw new com.apms.common.exception.BusinessValidationException("targetCompanyProfileId is required for " + request.getTaskType().name());
+                }
+            }
+        }
+
+        if (org.springframework.util.StringUtils.hasText(request.getTargetCompanyProfileId())) {
+            com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findByCompanyId(request.getTargetCompanyProfileId())
+                    .orElseThrow(() -> new com.apms.common.exception.BusinessValidationException("Target company profile not found"));
+            if (Boolean.TRUE.equals(profile.getIsDeleted())) {
+                throw new com.apms.common.exception.BusinessValidationException("Target company profile is deleted");
+            }
+        }
+
+        if (request.getTaskType() == TaskType.DOCUMENT_COLLECTION) {
+            throw new com.apms.common.exception.BusinessValidationException("DOCUMENT_COLLECTION is deprecated. Use COMPANY_DATA_PREPARATION, which includes document collection and upload.");
+        }
+
         ProjectTask task = ProjectTask.builder()
                 .project(project)
                 .title(request.getTitle())
@@ -114,7 +131,6 @@ public class ProjectTaskService {
         auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_CREATED, "ProjectTask", String.valueOf(task.getId()), "Task created");
         if (assignedTo != null) {
             auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_ASSIGNED, "ProjectTask", String.valueOf(task.getId()), "Task assigned to user: " + assignedTo.getId());
-            notificationService.notifyTaskAssigned(task, assignedTo, createdBy);
         }
 
         return toResponse(task);
@@ -122,12 +138,6 @@ public class ProjectTaskService {
 
     @Transactional(readOnly = true)
     public Page<ProjectTaskResponse> getTasks(Long projectId, TaskStatus status, Long assignedToUserId, Pageable pageable) {
-        return getTasks(projectId, status, assignedToUserId, pageable, null, false);
-    }
-
-    @Transactional(readOnly = true)
-    public Page<ProjectTaskResponse> getTasks(Long projectId, TaskStatus status, Long assignedToUserId, Pageable pageable, Long currentUserId, boolean restrictToAssignedUser) {
-        Long effectiveAssignedToUserId = restrictToAssignedUser ? currentUserId : assignedToUserId;
         Specification<ProjectTask> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.equal(root.get("project").get("id"), projectId));
@@ -135,8 +145,8 @@ public class ProjectTaskService {
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
-            if (effectiveAssignedToUserId != null) {
-                predicates.add(cb.equal(root.get("assignedToAccount").get("id"), effectiveAssignedToUserId));
+            if (assignedToUserId != null) {
+                predicates.add(cb.equal(root.get("assignedToAccount").get("id"), assignedToUserId));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));
@@ -151,7 +161,7 @@ public class ProjectTaskService {
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
 
         if (!task.getProject().getId().equals(projectId)) {
-            throw new IllegalArgumentException("Task does not belong to the specified project");
+            throw new com.apms.common.exception.BusinessValidationException("Task does not belong to the specified project");
         }
 
         UserDetailsImpl currentUser = getCurrentUser();
@@ -204,6 +214,21 @@ public class ProjectTaskService {
             if (request.getDueDate() != null) task.setDueDate(request.getDueDate());
             if (request.getTaskType() != null && task.getStatus() != TaskStatus.DONE && task.getStatus() != TaskStatus.CANCELLED) {
                 task.setTaskType(request.getTaskType());
+            }
+            if (request.getTargetCompanyProfileId() != null) {
+                com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findById(request.getTargetCompanyProfileId())
+                        .orElseThrow(() -> new com.apms.common.exception.BusinessValidationException("Target company profile not found"));
+                if (Boolean.TRUE.equals(profile.getIsDeleted())) {
+                    throw new com.apms.common.exception.BusinessValidationException("Target company profile is deleted");
+                }
+                task.setTargetCompanyProfileId(request.getTargetCompanyProfileId());
+            }
+
+            TaskType effectiveTaskType = request.getTaskType() != null ? request.getTaskType() : task.getTaskType();
+            if (effectiveTaskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
+                if (!org.springframework.util.StringUtils.hasText(task.getTargetCompanyProfileId())) {
+                     throw new com.apms.common.exception.BusinessValidationException("targetCompanyProfileId is required for PARTNER_CONTRACT_COLLECTION");
+                }
             }
 
             if (request.getAssignedToUserId() != null) {
@@ -277,17 +302,22 @@ public class ProjectTaskService {
         if (tType == TaskType.ROLE_EVALUATION) {
             syncSubmittedRoleEvaluationState(projectId, task, currentUser);
         }
-        
+
         // 1. Evaluate actions
         List<TaskAction> actions = evaluateAvailableActions(currentUser, task, project, tType);
 
         // 2. Fetch documents (only metadata/import jobs)
-        List<ImportJobResponse> rawDocuments = documentService.getTaskImportJobs(projectId, taskId);
-        
+        List<ImportJobResponse> rawDocuments;
+        if (tType == TaskType.COMPANY_DATA_PREPARATION) {
+            rawDocuments = documentService.getTaskImportJobs(projectId, taskId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
+        } else {
+            rawDocuments = documentService.getProjectImportJobs(projectId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
+        }
+
         List<WorkbenchDocumentResponse> documents = new ArrayList<>();
         for (ImportJobResponse doc : rawDocuments) {
             AiExtractionCache extraction = extractionCacheRepository.findTopByImportJobIdOrderByCreatedAtDesc(doc.getId()).orElse(null);
-            
+
             String latestExtractionId = null;
             ExtractionQualityStatus status = null;
             Double evidenceCoverageRate = null;
@@ -295,21 +325,21 @@ public class ProjectTaskService {
             Integer warningFields = null;
             Integer failedFields = null;
             boolean canGenerateDraft = false;
-            
+
             if (extraction != null) {
                 latestExtractionId = extraction.getId();
                 status = extraction.getQualityStatus();
-                
+
                 if (extraction.getQualityMetrics() != null) {
                     evidenceCoverageRate = extraction.getQualityMetrics().getEvidenceCoverageRate();
                     completenessRate = extraction.getQualityMetrics().getCompletenessRate();
                     warningFields = extraction.getQualityMetrics().getWarningFields();
                     failedFields = extraction.getQualityMetrics().getFailedFields();
                 }
-                
+
                 canGenerateDraft = status == ExtractionQualityStatus.REVIEWED;
             }
-            
+
             WorkbenchDocumentResponse wDoc = WorkbenchDocumentResponse.workbenchBuilder()
                     .id(doc.getId())
                     .projectId(doc.getProjectId())
@@ -337,10 +367,10 @@ public class ProjectTaskService {
         // 3. Fetch drafts (Candidate / ProfileUpdateProposal) and map to summaries
         List<CandidateDraftSummary> candidateSummaries = new ArrayList<>();
         List<ProposalDraftSummary> proposalSummaries = new ArrayList<>();
-        
+
         // 4. Fetch submissions (needed for both display and draft-linking)
         List<ProjectTaskSubmission> submissionsEntities = submissionRepository.findByProjectTask_Id(taskId);
-        
+
         if (tType == TaskType.COMPANY_DATA_PREPARATION) {
             List<CompanyCandidate> candidates = candidateRepository.findByTaskId(taskId);
             candidateSummaries = candidates.stream().map(c -> {
@@ -362,10 +392,7 @@ public class ProjectTaskService {
                         .isApproved(linkedSub != null && linkedSub.getStatus() == SubmissionStatus.APPROVED)
                         .linkedSubmissionId(linkedSub != null ? linkedSub.getId() : null)
                         .build();
-            }).sorted(Comparator
-                    .comparingInt((CandidateDraftSummary draft) -> candidateDraftStatusRank(draft.getStatus()))
-                    .thenComparing(CandidateDraftSummary::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
-                    .toList();
+            }).toList();
 
             List<CompanyProfileUpdateProposal> proposals = proposalRepository.findByTaskId(taskId);
             proposalSummaries = proposals.stream().map(p -> {
@@ -391,7 +418,7 @@ public class ProjectTaskService {
         }
 
         // 5. Map submissions to response DTOs
-        List<ProjectTaskSubmissionResponse> submissions = submissionsEntities.stream().map(sub -> 
+        List<ProjectTaskSubmissionResponse> submissions = submissionsEntities.stream().map(sub ->
                 ProjectTaskSubmissionResponse.builder()
                 .id(sub.getId())
                 .projectTaskId(sub.getProjectTask().getId())
@@ -528,6 +555,8 @@ public class ProjectTaskService {
                     actions.add(TaskAction.SUBMIT_WORK);
                 } else if (taskType == TaskType.COMPANY_DATA_PREPARATION) {
                     actions.add(TaskAction.VIEW_DOCUMENTS);
+                    actions.add(TaskAction.UPLOAD_DOCUMENT);
+                    actions.add(TaskAction.ADD_MANUAL_DOCUMENT);
                     actions.add(TaskAction.RUN_AI_EXTRACTION);
                     actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
                     actions.add(TaskAction.EDIT_EXTRACTION_RESULT);
@@ -540,6 +569,20 @@ public class ProjectTaskService {
                         actions.add(TaskAction.VIEW_PROFILE_UPDATE_PROPOSAL_DRAFTS);
                     }
                     actions.add(TaskAction.SUBMIT_SELECTED_DRAFT);
+                } else if (taskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
+                    actions.add(TaskAction.VIEW_DOCUMENTS);
+                    actions.add(TaskAction.UPLOAD_DOCUMENT);
+                    actions.add(TaskAction.RUN_AI_EXTRACTION);
+                    actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
+                    actions.add(TaskAction.EDIT_EXTRACTION_RESULT);
+                    actions.add(TaskAction.REVIEW_EXTRACTION_RESULT);
+                    actions.add(TaskAction.SUBMIT_SELECTED_DRAFT);
+                } else if (taskType == TaskType.COMPANY_NEWS_RESEARCH) {
+                    actions.add(TaskAction.CREATE_NEWS_DRAFT);
+                    actions.add(TaskAction.VIEW_NEWS_DRAFTS);
+                    actions.add(TaskAction.EDIT_NEWS_DRAFT);
+                    actions.add(TaskAction.UPLOAD_NEWS_IMAGE);
+                    actions.add(TaskAction.SUBMIT_NEWS_DRAFTS);
                 } else {
                     // GENERAL_TASK
                     actions.add(TaskAction.SUBMIT_WORK);
@@ -560,6 +603,11 @@ public class ProjectTaskService {
                 } else if (project.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY) {
                     actions.add(TaskAction.VIEW_PROFILE_UPDATE_PROPOSAL_DRAFTS);
                 }
+            } else if (taskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
+                actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
+                actions.add(TaskAction.REVIEW_EXTRACTION_RESULT);
+            } else if (taskType == TaskType.COMPANY_NEWS_RESEARCH) {
+                actions.add(TaskAction.VIEW_NEWS_DRAFTS);
             }
             if (task.getStatus() == TaskStatus.IN_REVIEW) {
                 actions.add(TaskAction.VIEW_SUBMISSIONS);

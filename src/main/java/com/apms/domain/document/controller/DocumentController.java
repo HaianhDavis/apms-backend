@@ -39,8 +39,7 @@ public class DocumentController {
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "taskId", required = false) Long taskId,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-
-        ImportJobResponse response = documentService.uploadDocument(projectId, file, currentUser.getId(), taskId);
+        ImportJobResponse response = documentService.uploadDocument(projectId, taskId, file, currentUser.getId());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(response, "Document uploaded successfully"));
     }
@@ -53,10 +52,11 @@ public class DocumentController {
     @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#projectId)")
     public ResponseEntity<ApiResponse<ImportJobResponse>> manualInput(
             @PathVariable Long projectId,
+            @RequestParam(required = false) Long taskId,
             @Valid @RequestBody ManualInputRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
-        ImportJobResponse response = documentService.manualInput(projectId, request, currentUser.getId());
+        ImportJobResponse response = documentService.manualInput(projectId, taskId, request, currentUser.getId());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(response, "Manual input created successfully"));
     }

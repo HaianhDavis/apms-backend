@@ -113,6 +113,15 @@ public class CompanyCandidate {
     private Deduplication deduplication;
     private ExtractionSource extractionSource;
     private Review review;
+    
+    /**
+     * Maps a dot-path field name (e.g., "identity.legalName") to a list of source evidences.
+     */
+    private java.util.Map<String, java.util.List<DocumentEvidence>> fieldEvidence;
+    private java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> fieldResults;
+    private com.apms.domain.ai.dto.ExtractionQualityStatus qualityStatus;
+    private com.apms.domain.ai.dto.ExtractionQualityMetrics qualityMetrics;
+    private String rawAiOutput;
     /**
      * AI-generated score preview (advisory). This is a rough estimate produced
      * during extraction to assist the reviewer. It is not an official score and
@@ -314,5 +323,15 @@ public class CompanyCandidate {
         private LocalDateTime createdAt;
         private String lastModifiedBy;
         private LocalDateTime updatedAt;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DocumentEvidence {
+        private String rawDocumentId;
+        private String fileName;
+        private Integer page;
     }
 }

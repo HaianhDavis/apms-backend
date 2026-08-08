@@ -14,5 +14,8 @@ import java.util.Map;
 public class RawExtractionOutput {
     private ExtractedCompanyData extractedData;
     private Map<String, ExtractionFieldResult> fieldResults;
+    private ExtractionQualityStatus qualityStatus;
+    private ExtractionQualityMetrics qualityMetrics;
+    private String rawAiOutput;
     private String rawAiOutputString;
 }

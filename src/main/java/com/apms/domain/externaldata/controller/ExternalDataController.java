@@ -27,6 +27,7 @@ public class ExternalDataController {
     public ResponseEntity<ApiResponse<PageResponse<ExternalDataItemResponse>>> getNews(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String source,
+            @RequestParam(required = false) String companyName,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @RequestParam(defaultValue = "0") int page,
@@ -34,7 +35,7 @@ public class ExternalDataController {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "publishedAt"));
         PageResponse<ExternalDataItemResponse> response = PageResponse.of(
-                externalDataService.getExternalData(ExternalDataCategory.NEWS, keyword, source, fromDate, toDate, pageable));
+                externalDataService.getExternalData(ExternalDataCategory.NEWS, keyword, source, companyName, fromDate, toDate, pageable));
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }
@@ -44,6 +45,7 @@ public class ExternalDataController {
     public ResponseEntity<ApiResponse<PageResponse<ExternalDataItemResponse>>> getOpportunities(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String source,
+            @RequestParam(required = false) String companyName,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @RequestParam(defaultValue = "0") int page,
@@ -51,7 +53,7 @@ public class ExternalDataController {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "publishedAt"));
         PageResponse<ExternalDataItemResponse> response = PageResponse.of(
-                externalDataService.getExternalData(ExternalDataCategory.OPPORTUNITY, keyword, source, fromDate, toDate, pageable));
+                externalDataService.getExternalData(ExternalDataCategory.OPPORTUNITY, keyword, source, companyName, fromDate, toDate, pageable));
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }
@@ -61,6 +63,7 @@ public class ExternalDataController {
     public ResponseEntity<ApiResponse<PageResponse<ExternalDataItemResponse>>> getRisks(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String source,
+            @RequestParam(required = false) String companyName,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @RequestParam(defaultValue = "0") int page,
@@ -68,7 +71,7 @@ public class ExternalDataController {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "publishedAt"));
         PageResponse<ExternalDataItemResponse> response = PageResponse.of(
-                externalDataService.getExternalData(ExternalDataCategory.RISK, keyword, source, fromDate, toDate, pageable));
+                externalDataService.getExternalData(ExternalDataCategory.RISK, keyword, source, companyName, fromDate, toDate, pageable));
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }

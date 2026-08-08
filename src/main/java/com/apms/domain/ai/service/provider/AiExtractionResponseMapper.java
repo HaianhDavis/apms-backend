@@ -53,12 +53,19 @@ public class AiExtractionResponseMapper {
                 Object normalizedValue = normalizeValue(fieldName, value);
 
                 flatMap.put(fieldName, normalizedValue);
+                Double rawConfidence = doubleValue(fieldNode, "confidence");
+                Double confidence = rawConfidence;
+                if (confidence != null) {
+                    if (confidence < 0.0) confidence = 0.0;
+                    if (confidence > 1.0) confidence = 1.0;
+                }
+
                 fieldResults.put(fieldName, ExtractionFieldResult.builder()
                         .fieldName(fieldName)
                         .value(normalizedValue)
-                        .confidence(doubleValue(fieldNode, "confidence"))
+                        .confidence(confidence)
                         .evidenceText(textValue(fieldNode, "evidenceText"))
-                        .pageNumber(integerValue(fieldNode, "pageNumber"))
+                        .sourceDocumentIds(stringListValue(fieldNode, "sourceDocumentIds"))
                         .build());
             });
 
@@ -67,6 +74,7 @@ public class AiExtractionResponseMapper {
             return RawExtractionOutput.builder()
                     .extractedData(extractedData)
                     .fieldResults(fieldResults)
+                    .rawAiOutput(rawAiOutput)
                     .rawAiOutputString(rawAiOutput)
                     .build();
         } catch (JsonProcessingException e) {
@@ -136,6 +144,10 @@ public class AiExtractionResponseMapper {
 
         if (STRING_LIST_FIELDS.contains(fieldName)) {
             return normalizeStringList(value);
+        }
+
+        if ("employeeCount".equals(fieldName)) {
+            return normalizeInteger(value);
         }
 
         if ("products".equals(fieldName)) {
@@ -394,11 +406,26 @@ public class AiExtractionResponseMapper {
         return value != null && value.canConvertToInt() ? value.asInt() : null;
     }
 
+    private List<String> stringListValue(JsonNode fieldNode, String key) {
+        if (fieldNode == null || !fieldNode.isObject()) {
+            return null;
+        }
+        JsonNode arrayNode = fieldNode.get(key);
+        if (arrayNode != null && arrayNode.isArray()) {
+            List<String> list = new ArrayList<>();
+            arrayNode.forEach(node -> list.add(node.asText()));
+            return list;
+        }
+        return null;
+    }
+
     private static final Set<String> STRING_FIELDS = Set.of(
             "legalName",
+            "tradeName",
             "taxCode",
             "businessModel",
             "employeeTier",
+            "revenueTier",
             "website",
             "address",
             "companySize",
@@ -419,6 +446,7 @@ public class AiExtractionResponseMapper {
 
     private static final Set<String> ALLOWED_FIELDS = Set.of(
             "legalName",
+            "tradeName",
             "taxCode",
             "industries",
             "businessModel",
@@ -426,6 +454,8 @@ public class AiExtractionResponseMapper {
             "markets",
             "targetCustomers",
             "employeeTier",
+            "employeeCount",
+            "revenueTier",
             "website",
             "email",
             "phone",
@@ -434,7 +464,12 @@ public class AiExtractionResponseMapper {
             "strengths",
             "weaknesses",
             "opportunities",
-            "threats"
+            "threats",
+            "financial",
+            "market",
+            "innovation",
+            "risk",
+            "compliance"
     );
 
     private static final Set<String> RISK_STRING_FIELDS = Set.of(

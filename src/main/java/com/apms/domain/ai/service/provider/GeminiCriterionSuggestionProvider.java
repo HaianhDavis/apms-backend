@@ -31,11 +31,11 @@ public class GeminiCriterionSuggestionProvider implements CriterionSuggestionPro
 
     public GeminiCriterionSuggestionProvider(ObjectMapper objectMapper,
                                              @Value("${app.ai.gemini.api-key:dummy-key}") String geminiApiKey,
-                                             @Value("${app.ai.gemini.model:gemini-2.5-flash}") String geminiModel) {
+                                             @Value("${app.ai.gemini.model:gemini-3.6-flash}") String geminiModel) {
         this.restClient = RestClient.builder().build();
         this.objectMapper = objectMapper;
         this.geminiApiKey = geminiApiKey;
-        this.geminiModel = geminiModel;
+        this.geminiModel = geminiModel != null && geminiModel.startsWith("models/") ? geminiModel.substring(7) : geminiModel;
     }
 
     @Override
@@ -84,21 +84,31 @@ public class GeminiCriterionSuggestionProvider implements CriterionSuggestionPro
                 return parseAndValidate(rawAiOutput, context);
 
             } catch (RestClientResponseException e) {
-                if (e.getStatusCode().value() == 429) {
-                    log.warn("Gemini API rate limit exceeded (429). Attempt {} of {}", attempt, maxRetries);
+                int statusCode = e.getStatusCode().value();
+                if (statusCode == 429 || statusCode >= 500) {
+                    log.warn("Gemini API rate limit or server error ({}). Attempt {} of {}", statusCode, attempt, maxRetries);
                     if (attempt >= maxRetries) {
-                        log.error("Gemini API rate limit exceeded after {} attempts.", maxRetries, e);
-                        throw new BusinessValidationException("Gemini AI rate limit exceeded.");
+                        log.error("Gemini API error after {} attempts.", maxRetries, e);
+                        throw new BusinessValidationException(statusCode == 429 ? "GEMINI_RATE_LIMITED" : "GEMINI_SERVICE_UNAVAILABLE");
                     }
                     try {
-                        Thread.sleep((long) Math.pow(2, attempt) * 1000); // exponential backoff
+                        Thread.sleep((long) Math.pow(2, attempt) * 1000);
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
-                        throw new BusinessValidationException("Suggestion generation interrupted");
+                        throw new BusinessValidationException("Suggestion interrupted");
                     }
+                } else if (statusCode == 404) {
+                    log.error("Gemini model unavailable (404): {}", e.getResponseBodyAsString());
+                    throw new BusinessValidationException("GEMINI_MODEL_UNAVAILABLE");
+                } else if (statusCode == 400) {
+                    log.error("Gemini invalid request (400): {}", e.getResponseBodyAsString());
+                    throw new BusinessValidationException("GEMINI_INVALID_REQUEST");
+                } else if (statusCode == 401 || statusCode == 403) {
+                    log.error("Gemini authentication failed ({}): {}", statusCode, e.getResponseBodyAsString());
+                    throw new BusinessValidationException("GEMINI_AUTHENTICATION_FAILED");
                 } else {
                     log.error("Gemini API call failed: {}", e.getResponseBodyAsString(), e);
-                    throw new BusinessValidationException("Gemini API call failed: " + e.getStatusCode());
+                    throw new BusinessValidationException("Gemini API call failed: " + statusCode);
                 }
             } catch (BusinessValidationException e) {
                 // Re-throw validation exceptions so they bubble up

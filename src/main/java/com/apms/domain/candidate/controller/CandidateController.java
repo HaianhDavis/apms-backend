@@ -166,4 +166,18 @@ public class CandidateController {
         return ResponseEntity.ok(ApiResponse.success(
                 candidateService.approveCandidate(candidateId, request, currentUser.getId()), "Candidate approved"));
     }
+
+    // ─────────────────────────────────────────────
+    // PATCH /api/v1/projects/{projectId}/candidates/{candidateId}/review
+    // ─────────────────────────────────────────────
+    @PatchMapping("/projects/{projectId}/candidates/{candidateId}/review")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> reviewCandidate(
+            @PathVariable Long projectId,
+            @PathVariable String candidateId,
+            @RequestBody com.apms.domain.candidate.dto.CandidateReviewRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(ApiResponse.success(
+                candidateService.reviewCandidate(String.valueOf(projectId), candidateId, request, currentUser.getId()), "Candidate fields reviewed successfully"));
+    }
 }

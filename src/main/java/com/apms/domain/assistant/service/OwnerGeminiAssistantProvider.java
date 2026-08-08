@@ -47,7 +47,7 @@ public class OwnerGeminiAssistantProvider implements AssistantProvider {
     public OwnerGeminiAssistantProvider(
             ObjectMapper objectMapper,
             @Value("${app.ai.gemini.api-key:dummy-key}") String geminiApiKey,
-            @Value("${app.ai.gemini.model:gemini-2.5-flash}") String geminiModel) {
+            @Value("${app.ai.gemini.model:gemini-3.6-flash}") String geminiModel) {
         this.restClient = RestClient.builder().build();
         this.objectMapper = objectMapper;
         this.geminiApiKey = geminiApiKey;

@@ -12,6 +12,8 @@ import java.util.Optional;
 @Repository
 public interface CrawledArticleRepository extends MongoRepository<CrawledArticle, String> {
 
+    List<CrawledArticle> findByCrawledAtAfter(java.time.LocalDateTime date);
+
     /**
      * Find article by URL for deduplication â€” avoid re-crawling the same article.
      */

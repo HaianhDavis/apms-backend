@@ -52,9 +52,12 @@ public class ProjectTaskSubmissionService {
     private final com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository versionRepository;
     private final AuditLogService auditLogService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final List<ProjectTaskSubmissionApprovalHandler> approvalHandlers;
     @org.springframework.beans.factory.annotation.Autowired
     @org.springframework.context.annotation.Lazy
     private com.apms.domain.companymember.service.CompanyMemberResearchService companyMemberResearchService;
+    
+    private final com.apms.domain.document.service.CompanyDocumentPublisher companyDocumentPublisher;
 
     @Transactional
     public ProjectTaskSubmissionResponse submitTask(Long projectId, Long taskId, CreateProjectTaskSubmissionRequest request) {
@@ -278,9 +281,33 @@ public class ProjectTaskSubmissionService {
                         proposalRepository.save(proposal);
 
                         auditLogService.log(currentUser.getId(), AuditAction.PROFILE_UPDATE_PROPOSAL_APPLIED, "CompanyProfileUpdateProposal", proposal.getId(), "Proposal applied and profile updated");
+                        
+                        // Publish documents
+                        if (proposal.getSourceDocumentIds() != null && !proposal.getSourceDocumentIds().isEmpty()) {
+                            for (String docId : proposal.getSourceDocumentIds()) {
+                                companyDocumentPublisher.publishApprovedDocument(
+                                    profile.getCompanyId(),
+                                    docId,
+                                    reviewer.getId(),
+                                    now,
+                                    com.apms.domain.document.dto.PublicationContext.builder()
+                                        .sourceProjectId(String.valueOf(proposal.getProjectId()))
+                                        .sourceTaskId(String.valueOf(proposal.getTaskId()))
+                                        .sourceSubmissionId(String.valueOf(submission.getId()))
+                                        .build()
+                                );
+                            }
+                        }
                     }
                 } else if (submission.getSubmissionType() == com.apms.common.enums.SubmissionType.COMPANY_MEMBER_RESEARCH) {
                     companyMemberResearchService.handleApproval(submission, reviewer.getId(), request.getComment());
+                } else {
+                    for (ProjectTaskSubmissionApprovalHandler handler : approvalHandlers) {
+                        if (handler.supports(submission.getSubmissionType())) {
+                            handler.handleApproval(submission, reviewer.getId(), request.getComment());
+                            break;
+                        }
+                    }
                 }
                 break;
 
@@ -296,6 +323,13 @@ public class ProjectTaskSubmissionService {
                         proposal.setReviewComment(request.getComment());
                         proposalRepository.save(proposal);
                     });
+                } else {
+                    for (ProjectTaskSubmissionApprovalHandler handler : approvalHandlers) {
+                        if (handler.supports(submission.getSubmissionType())) {
+                            handler.handleRejection(submission, reviewer.getId(), request.getComment());
+                            break;
+                        }
+                    }
                 }
                 break;
         }

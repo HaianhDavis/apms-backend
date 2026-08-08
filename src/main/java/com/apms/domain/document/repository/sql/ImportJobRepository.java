@@ -13,4 +13,6 @@ public interface ImportJobRepository extends JpaRepository<ImportJob, Long> {
     java.util.List<ImportJob> findByProject_IdAndRawDocumentIdIn(Long projectId, java.util.Collection<String> rawDocumentIds);
 
     void deleteByProject_Id(Long projectId);
+
+    Page<ImportJob> findByProject_IdAndRawDocumentIdIn(Long projectId, java.util.Collection<String> rawDocumentIds, Pageable pageable);
 }

@@ -8,6 +8,7 @@ import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectMember;
 import com.apms.domain.project.dto.*;
+import com.apms.domain.project.dto.DuplicateCompanyCheckResponse;
 import com.apms.domain.project.repository.sql.ProjectMemberRepository;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.user.Account;
@@ -30,6 +31,7 @@ import com.apms.domain.notification.service.NotificationService;
 import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.TaskStatus;
 import com.apms.domain.project.dto.UpdateProjectStatusRequest;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -97,6 +99,10 @@ public class ProjectService {
                 request.getTargetCompanyName(),
                 resolvedRelationshipType);
 
+        if (request.getPlannedEndDate().isBefore(LocalDate.now())) {
+            throw new com.apms.common.exception.BusinessValidationException("Planned end date cannot be before today");
+        }
+
         Project project = Project.builder()
                 .projectName(request.getProjectName())
                 .projectType(request.getProjectType())
@@ -104,6 +110,7 @@ public class ProjectService {
                 .targetCompanyName(request.getTargetCompanyName())
                 .targetRelationshipType(resolvedRelationshipType)
                 .description(request.getDescription())
+                .plannedEndDate(request.getPlannedEndDate())
                 .status(ProjectStatus.DRAFT)
                 .createdByAccount(accountRepository.getReferenceById(creatorAccountId))
                 .build();
@@ -154,9 +161,14 @@ public class ProjectService {
             page = projectRepository.findAll(pageable);
         }
 
+        List<Long> projectIds = page.getContent().stream().map(Project::getId).collect(Collectors.toList());
+        Map<Long, ProjectTaskRepository.ProjectTaskStats> statsMap = projectIds.isEmpty() ? java.util.Collections.emptyMap() :
+                projectTaskRepository.getProjectTaskStatsIn(projectIds, TaskStatus.DONE, TaskStatus.CANCELLED)
+                        .stream().collect(Collectors.toMap(ProjectTaskRepository.ProjectTaskStats::getProjectId, s -> s));
+
         return page.map(p -> {
             List<ProjectMember> members = projectMemberRepository.findByProject_Id(p.getId());
-            return toResponse(p, members);
+            return toResponse(p, members, statsMap.get(p.getId()));
         });
     }
 
@@ -185,6 +197,13 @@ public class ProjectService {
         }
         if (request.getTargetRelationshipType() != null) {
             project.setTargetRelationshipType(request.getTargetRelationshipType());
+        }
+        if (request.getPlannedEndDate() != null) {
+            LocalDate logicalStartDate = project.getCreatedAt() != null ? project.getCreatedAt().toLocalDate() : LocalDate.now();
+            if (request.getPlannedEndDate().isBefore(logicalStartDate)) {
+                throw new com.apms.common.exception.BusinessValidationException("Planned end date cannot be before project start date");
+            }
+            project.setPlannedEndDate(request.getPlannedEndDate());
         }
         project = projectRepository.save(project);
         List<ProjectMember> members = projectMemberRepository.findByProject_Id(id);
@@ -400,6 +419,24 @@ public class ProjectService {
     }
 
     private ProjectResponse toResponse(Project project, List<ProjectMember> members) {
+        ProjectTaskRepository.ProjectTaskStats stats = projectTaskRepository.getProjectTaskStatsIn(
+                List.of(project.getId()), TaskStatus.DONE, TaskStatus.CANCELLED)
+                .stream().findFirst().orElse(null);
+        return toResponse(project, members, stats);
+    }
+
+    private ProjectResponse toResponse(Project project, List<ProjectMember> members, ProjectTaskRepository.ProjectTaskStats stats) {
+        int totalTasks = stats != null && stats.getTotalTasks() != null ? stats.getTotalTasks().intValue() : 0;
+        int completedTasks = stats != null && stats.getCompletedTasks() != null ? stats.getCompletedTasks().intValue() : 0;
+        int progressPercentage = totalTasks == 0 ? 0 : Math.min(100, (completedTasks * 100) / totalTasks);
+
+        boolean isOverdue = false;
+        if (project.getPlannedEndDate() != null && progressPercentage < 100) {
+            if (LocalDate.now().isAfter(project.getPlannedEndDate())) {
+                isOverdue = true;
+            }
+        }
+
         return ProjectResponse.builder()
                 .id(project.getId())
                 .projectName(project.getProjectName())
@@ -412,6 +449,11 @@ public class ProjectService {
                 .createdBy(project.getCreatedById())
                 .createdAt(project.getCreatedAt())
                 .updatedAt(project.getUpdatedAt())
+                .plannedEndDate(project.getPlannedEndDate())
+                .totalTasks(totalTasks)
+                .completedTasks(completedTasks)
+                .progressPercentage(progressPercentage)
+                .isOverdue(isOverdue)
                 .members(members.stream().map(this::toMemberResponse).collect(Collectors.toList()))
                 .build();
     }
@@ -432,6 +474,33 @@ public class ProjectService {
                 .fullName(fullName)
                 .memberRole(m.getMemberRole())
                 .joinedAt(m.getJoinedAt())
+                .build();
+    }
+
+    public DuplicateCompanyCheckResponse checkDuplicateCompanyName(String companyName, Long excludeProjectId) {
+        if (!StringUtils.hasText(companyName) || companyName.trim().length() < 2) {
+            return DuplicateCompanyCheckResponse.builder()
+                    .duplicate(false)
+                    .matchingProjects(List.of())
+                    .build();
+        }
+
+        List<Project> matches = projectRepository.findByTargetCompanyNameContainingIgnoreCase(
+                companyName.trim(), excludeProjectId);
+
+        List<DuplicateCompanyCheckResponse.MatchingProject> matchingProjects = matches.stream()
+                .map(p -> DuplicateCompanyCheckResponse.MatchingProject.builder()
+                        .id(p.getId())
+                        .projectName(p.getProjectName())
+                        .targetCompanyName(p.getTargetCompanyName())
+                        .status(p.getStatus().name())
+                        .projectType(p.getProjectType().name())
+                        .build())
+                .toList();
+
+        return DuplicateCompanyCheckResponse.builder()
+                .duplicate(!matchingProjects.isEmpty())
+                .matchingProjects(matchingProjects)
                 .build();
     }
 }

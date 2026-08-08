@@ -3,6 +3,7 @@ package com.apms.domain.project.dto;
 import com.apms.common.enums.RelationshipType;
 import com.apms.common.enums.ProjectStatus;
 import lombok.Data;
+import java.time.LocalDate;
 
 @Data
 public class UpdateProjectRequest {
@@ -12,4 +13,6 @@ public class UpdateProjectRequest {
     private String description;
 
     private RelationshipType targetRelationshipType;
+
+    private LocalDate plannedEndDate;
 }

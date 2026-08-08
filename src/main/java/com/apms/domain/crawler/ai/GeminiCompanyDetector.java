@@ -39,7 +39,7 @@ public class GeminiCompanyDetector {
     @Value("${crawler.ai.gemini.api-key:dummy-key}")
     private String geminiApiKey;
 
-    @Value("${crawler.ai.gemini.model:gemini-2.5-flash}")
+    @Value("${crawler.ai.gemini.model:gemini-3.6-flash}")
     private String geminiModel;
 
     public GeminiCompanyDetector(RestClient restClient,

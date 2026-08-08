@@ -21,6 +21,7 @@ public class ExternalDataItemResponse {
     private String opportunityLevel;
     private String relatedCompanyName;
     private String relatedCompanyId;
+    private String imageUrl;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

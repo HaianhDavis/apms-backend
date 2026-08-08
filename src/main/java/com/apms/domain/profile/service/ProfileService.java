@@ -15,6 +15,9 @@ import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.common.enums.AuditAction;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.security.UserDetailsImpl;
+import com.apms.domain.crawler.repository.TrackedCompanyRepository;
+import com.apms.domain.crawler.service.TrackedCompanyCache;
+import com.apms.domain.crawler.domain.TrackedCompany;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -30,12 +33,6 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.stereotype.Service;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.event.EventListener;
-import org.springframework.core.annotation.Order;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -55,6 +52,9 @@ public class ProfileService {
     private final Neo4jClient neo4jClient;
     private final AuditLogService auditLogService;
     private final OwnerOrganizationService ownerOrganizationService;
+    private final TrackedCompanyRepository trackedCompanyRepository;
+    private final TrackedCompanyCache trackedCompanyCache;
+    private final com.apms.domain.document.service.CompanyDocumentPublisher companyDocumentPublisher;
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER
@@ -80,6 +80,52 @@ public class ProfileService {
             updateExistingProfile(project, candidate);
         } else {
             createNewProfile(project, candidate);
+        }
+
+        // Add to TrackedCompany if not exists
+        if (candidate.getIdentity() != null) {
+            String legalName = candidate.getIdentity().getLegalName();
+            String tradeName = candidate.getIdentity().getTradeName();
+            
+            String primaryName = null;
+            if (StringUtils.hasText(legalName)) {
+                primaryName = legalName.trim();
+            } else if (StringUtils.hasText(tradeName)) {
+                primaryName = tradeName.trim();
+            }
+            
+            if (StringUtils.hasText(primaryName)) {
+                if (!trackedCompanyRepository.existsByCompanyNameIgnoreCase(primaryName)) {
+                    java.util.List<String> aliases = new java.util.ArrayList<>();
+                    if (StringUtils.hasText(tradeName) && !tradeName.trim().equalsIgnoreCase(primaryName)) {
+                        aliases.add(tradeName.trim());
+                    }
+                    
+                    TrackedCompany newTracked = TrackedCompany.builder()
+                            .companyName(primaryName)
+                            .aliases(aliases)
+                            .isActive(true)
+                            .build();
+                    trackedCompanyRepository.save(newTracked);
+                    trackedCompanyCache.forceRefresh();
+                    log.info("Added new TrackedCompany from Candidate: {} with aliases {}", primaryName, aliases);
+                }
+            }
+        }
+        
+        // Publish documents
+        String profileId = project.getTargetCompanyProfileId();
+        if (StringUtils.hasText(profileId) && StringUtils.hasText(candidate.getRawDocumentId())) {
+            companyDocumentPublisher.publishApprovedDocument(
+                profileId,
+                candidate.getRawDocumentId(),
+                null, // System or extracted from event
+                LocalDateTime.now(),
+                com.apms.domain.document.dto.PublicationContext.builder()
+                    .sourceProjectId(String.valueOf(project.getId()))
+                    .sourceCandidateId(candidate.getId())
+                    .build()
+            );
         }
     }
 

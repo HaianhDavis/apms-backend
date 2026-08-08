@@ -125,7 +125,23 @@ public class CrawlerScheduler {
         int duplicateCount = 0;
         int thumbnailUpdatedCount = 0;
 
+        List<CrawledArticle> recentArticles = new java.util.ArrayList<>(articleRepository.findByCrawledAtAfter(java.time.LocalDateTime.now().minusDays(7)));
+
         for (CrawledArticle article : articles) {
+            boolean isDuplicate = false;
+            for (CrawledArticle recent : recentArticles) {
+                double sim = com.apms.domain.crawler.util.TextSimilarityUtils.calculateJaccardSimilarity(article.getTitle(), recent.getTitle());
+                if (sim > 0.75) {
+                    isDuplicate = true;
+                    log.info("CrawlerScheduler: Skipping semantic duplicate: {}", article.getTitle());
+                    break;
+                }
+            }
+            if (isDuplicate) {
+                duplicateCount++;
+                continue;
+            }
+
             var existingArticle = articleRepository.findByUrl(article.getUrl());
             if (existingArticle.isPresent()) {
                 duplicateCount++;
@@ -136,10 +152,11 @@ public class CrawlerScheduler {
                     articleRepository.save(existing);
                     thumbnailUpdatedCount++;
                 }
-                log.debug("CrawlerScheduler: Skipping duplicate: {}", article.getUrl());
+                log.debug("CrawlerScheduler: Skipping duplicate URL: {}", article.getUrl());
                 continue;
             }
 
+            recentArticles.add(article);
             articleRepository.save(articleTriageService.triage(article));
             totalNew++;
         }

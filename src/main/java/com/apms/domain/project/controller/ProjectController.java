@@ -66,6 +66,20 @@ public class ProjectController {
     }
 
     // ─────────────────────────────────────────────
+    // GET /api/v1/projects/check-duplicate-company
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER
+    // ─────────────────────────────────────────────
+    @GetMapping("/check-duplicate-company")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<ApiResponse<DuplicateCompanyCheckResponse>> checkDuplicateCompany(
+            @RequestParam String companyName,
+            @RequestParam(required = false) Long excludeProjectId) {
+
+        DuplicateCompanyCheckResponse response = projectService.checkDuplicateCompanyName(companyName, excludeProjectId);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    // ─────────────────────────────────────────────
     // GET /api/v1/projects/{id}
     // Role: All authenticated
     // ─────────────────────────────────────────────

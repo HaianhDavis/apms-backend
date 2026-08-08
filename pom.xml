@@ -199,6 +199,11 @@
             <artifactId>firebase-admin</artifactId>
             <version>9.5.0</version>
         </dependency>
+        <dependency>
+            <groupId>dev.samstevens.totp</groupId>
+            <artifactId>totp</artifactId>
+            <version>1.7.1</version>
+        </dependency>
     </dependencies>
 
     <build>

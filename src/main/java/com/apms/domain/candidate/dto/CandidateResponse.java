@@ -39,6 +39,10 @@ public class CandidateResponse {
     private CompanyCandidate.Deduplication deduplication;
     private CompanyCandidate.ExtractionSource extractionSource;
     private CompanyCandidate.Review review;
+    private java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> fieldResults;
+    private com.apms.domain.ai.dto.ExtractionQualityStatus qualityStatus;
+    private com.apms.domain.ai.dto.ExtractionQualityMetrics qualityMetrics;
+    private String rawAiOutput;
     private CompanyCandidate.ScorePreview scorePreview;
     private CompanyCandidate.AiMetadata aiMetadata;
     private CompanyCandidate.Metadata metadata;

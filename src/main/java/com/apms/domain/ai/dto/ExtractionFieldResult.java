@@ -17,7 +17,7 @@ public class ExtractionFieldResult {
     private Object normalizedValue;
     private Double confidence;
     private String evidenceText;
-    private String sourceDocumentId;
+    private java.util.List<String> sourceDocumentIds;
     private Integer pageNumber;
 
     @Builder.Default
