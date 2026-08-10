@@ -4,7 +4,7 @@ import com.apms.common.response.ApiResponse;
 import com.apms.domain.dashboard.dto.DashboardSummaryDto;
 import com.apms.domain.dashboard.service.DashboardService;
 import com.apms.domain.graph.dto.GraphCompanyDto;
-import com.apms.domain.score.dto.ScoreSnapshotDto;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -51,9 +51,5 @@ public class DashboardController {
         return ResponseEntity.ok(ApiResponse.success(dashboardService.getPotentialPartners()));
     }
 
-    @GetMapping("/recent-scores")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
-    public ResponseEntity<ApiResponse<List<ScoreSnapshotDto>>> getRecentScores() {
-        return ResponseEntity.ok(ApiResponse.success(dashboardService.getRecentScores()));
-    }
+
 }

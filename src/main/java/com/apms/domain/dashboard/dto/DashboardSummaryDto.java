@@ -15,5 +15,13 @@ public class DashboardSummaryDto {
     private long partnerCount;
     private long competitorCount;
     private long supplierCount;
+    private long customerCount;
     private long potentialPartnerCount;
+
+    private long totalRelatedCompanies;
+    private RelationshipClosenessOverviewDto relationshipClosenessOverview;
+    private java.util.List<RelationshipCompositionDto> relationshipComposition;
+    private SignalOverviewDto riskOverview;
+    private SignalOverviewDto opportunityOverview;
+    private java.util.List<RecentActivityDto> recentActivities;
 }

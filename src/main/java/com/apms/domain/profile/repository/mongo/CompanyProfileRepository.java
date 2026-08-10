@@ -11,6 +11,8 @@ import java.util.Optional;
 public interface CompanyProfileRepository extends MongoRepository<CompanyProfile, String> {
 
     Optional<CompanyProfile> findByCompanyId(String companyId);
+    
+    java.util.List<CompanyProfile> findByCompanyIdIn(java.util.Collection<String> companyIds);
 
     @Query("{ 'identity.name': { $regex: ?0, $options: 'i' } }")
     Page<CompanyProfile> searchByName(String name, Pageable pageable);

@@ -10,4 +10,5 @@ public interface CompanyRelationshipClosenessRepository extends JpaRepository<Co
 
     Optional<CompanyRelationshipCloseness> findByOwnerCompanyProfileIdAndTargetCompanyProfileId(String ownerCompanyProfileId, String targetCompanyProfileId);
 
+    java.util.List<CompanyRelationshipCloseness> findByOwnerCompanyProfileIdAndTargetCompanyProfileIdIn(String ownerCompanyProfileId, java.util.Collection<String> targetCompanyProfileIds);
 }
