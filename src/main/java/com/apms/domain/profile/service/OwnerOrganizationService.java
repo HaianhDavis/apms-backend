@@ -25,8 +25,17 @@ public class OwnerOrganizationService {
 
     /**
      * Gets the configured ID of the APMS Owner Organization.
+     * @deprecated Use {@link #getOwnerCompanyProfileId()} to explicitly indicate this returns a CompanyProfile document ID.
      */
+    @Deprecated
     public String getOwnerCompanyId() {
+        return getOwnerCompanyProfileId();
+    }
+
+    /**
+     * Gets the explicit CompanyProfile document ID of the APMS Owner Organization.
+     */
+    public String getOwnerCompanyProfileId() {
         return properties.getCompanyProfileId().trim();
     }
 

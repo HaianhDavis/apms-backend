@@ -148,17 +148,17 @@ public class TaskExtractionOrchestrator {
                     qualityMetrics.getFieldsWithValue(),
                     qualityMetrics.getAverageConfidence());
 
-            // 3c. Initialize reviewedValue = value for each field result, doing deep copy for lists
+            // 3c. Initialize staffReviewedValue = value for each field result, doing deep copy for lists
             if (output.getFieldResults() != null) {
                 output.getFieldResults().values().forEach(result -> {
-                    if (result.getReviewedValue() == null && result.getValue() != null) {
+                    if (result.getStaffReviewedValue() == null && result.getValue() != null) {
                         Object val = result.getValue();
                         if (val instanceof java.util.List) {
-                            result.setReviewedValue(new java.util.ArrayList<>((java.util.List<?>) val));
+                            result.setStaffReviewedValue(new java.util.ArrayList<>((java.util.List<?>) val));
                         } else if (val instanceof java.util.Map) {
-                            result.setReviewedValue(new java.util.LinkedHashMap<>((java.util.Map<?, ?>) val));
+                            result.setStaffReviewedValue(new java.util.LinkedHashMap<>((java.util.Map<?, ?>) val));
                         } else {
-                            result.setReviewedValue(val);
+                            result.setStaffReviewedValue(val);
                         }
                     }
                 });
@@ -180,8 +180,13 @@ public class TaskExtractionOrchestrator {
                     .contact(mapContact(output.getExtractedData()))
                     .companySize(mapCompanySize(output.getExtractedData()))
                     .insights(mapInsights(output.getExtractedData()))
-                    .fieldEvidence(fieldEvidence)
-                    .fieldResults(output.getFieldResults())
+                    .financial(output.getExtractedData().getFinancial())
+                    .market(output.getExtractedData().getMarket())
+                    .innovation(output.getExtractedData().getInnovation())
+                    .risk(output.getExtractedData().getRisk())
+                    .compliance(output.getExtractedData().getCompliance())
+                    .fieldEvidence(encodeFieldEvidence(fieldEvidence))
+                    .fieldResults(encodeFieldResults(output.getFieldResults()))
                     .qualityStatus(qualityStatus)
                     .qualityMetrics(qualityMetrics)
                     .rawAiOutput(output.getRawAiOutput())
@@ -211,23 +216,62 @@ public class TaskExtractionOrchestrator {
 
         } catch (Exception e) {
             log.error("Failed async extraction for job {}", jobId, e);
-            job.setStatus(AiExtractionJobStatus.FAILED);
-            job.setStage(AiExtractionJobStage.FAILED);
             
-            if (e.getMessage() != null && e.getMessage().contains("GEMINI_JSON_PARSE_FAILED")) {
-                job.setErrorMessage("AI returned an invalid structured response.");
-            } else {
-                job.setErrorMessage(e.getMessage() != null ? e.getMessage() : "Unknown error");
+            // Check if failure is due to application context closing (e.g. during restart)
+            boolean isContextClosed = e instanceof IllegalStateException && 
+                                    e.getMessage() != null && 
+                                    (e.getMessage().contains("has been closed already") || 
+                                     e.getMessage().contains("ApplicationContext"));
+                                     
+            if (isContextClosed || Thread.currentThread().isInterrupted()) {
+                log.warn("Extraction job {} interrupted due to application shutdown.", jobId);
+                return; // Do not attempt to save, the DB context/datasource might already be closed
             }
             
-            job.setCompletedAt(LocalDateTime.now());
-            jobRepository.save(job);
+            try {
+                job.setStatus(AiExtractionJobStatus.FAILED);
+                job.setStage(AiExtractionJobStage.FAILED);
+                
+                if (e.getMessage() != null && e.getMessage().contains("GEMINI_JSON_PARSE_FAILED")) {
+                    job.setErrorMessage("AI returned an invalid structured response.");
+                } else {
+                    job.setErrorMessage(e.getMessage() != null ? e.getMessage() : "Unknown error");
+                }
+                
+                job.setCompletedAt(LocalDateTime.now());
+                jobRepository.save(job);
+            } catch (Exception secondaryError) {
+                log.error("Failed to update job status after extraction failure. Job: {}", jobId, secondaryError);
+            }
         }
     }
 
     public AiExtractionJob getExtractionJob(String jobId) {
         return jobRepository.findById(jobId)
                 .orElseThrow(() -> new ResourceNotFoundException("Job not found: " + jobId));
+    }
+
+    private java.util.Map<String, java.util.List<CompanyCandidate.DocumentEvidence>> encodeFieldEvidence(
+            java.util.Map<String, java.util.List<CompanyCandidate.DocumentEvidence>> fieldEvidence) {
+        if (fieldEvidence == null) return null;
+        java.util.Map<String, java.util.List<CompanyCandidate.DocumentEvidence>> encoded = new java.util.HashMap<>();
+        fieldEvidence.forEach((flatKey, evidenceList) -> {
+            String path = CandidateFieldRegistry.toPath(flatKey);
+            encoded.put(FieldKeyCodec.encode(path), evidenceList);
+        });
+        return encoded;
+    }
+
+    private java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> encodeFieldResults(
+            java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> fieldResults) {
+        if (fieldResults == null) return null;
+        java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> encoded = new java.util.HashMap<>();
+        fieldResults.forEach((flatKey, result) -> {
+            String path = CandidateFieldRegistry.toPath(flatKey);
+            result.setFieldName(path); // Update original fieldName to Canonical Domain Path
+            encoded.put(FieldKeyCodec.encode(path), result);
+        });
+        return encoded;
     }
 
     private String extractTextFromDocument(RawDocument rawDocument) {

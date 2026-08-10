@@ -118,6 +118,8 @@ public class ExtractionMergeService {
                 .revisionNumber(1)
                 .build();
 
+        candidate.setFieldResults(initializeCandidateFieldResults(candidate));
+
         candidate = candidateRepository.save(candidate);
 
         auditLogService.log(creatorId, AuditAction.EXTRACTION_MERGED_TO_CANDIDATE, "CompanyCandidate", candidate.getId(),
@@ -255,6 +257,64 @@ public class ExtractionMergeService {
     // PRIVATE HELPERS
     // ─────────────────────────────────────────────
 
+    private static final Set<String> STAFF_REVIEWABLE_FIELDS = Set.of(
+            "identity.legalName", "identity.tradeName", "identity.taxCode",
+            "contact.address", "contact.website", "contact.emails", "contact.phones",
+            "business.businessModel", "business.industries", "business.markets", "business.targetCustomers", "business.products",
+            "companySize.employeeTier", "companySize.employeeCount", "companySize.revenueTier",
+            "insights.strengths", "insights.weaknesses", "insights.opportunities", "insights.threats",
+            "financial", "innovation", "market", "risk", "compliance"
+    );
+
+    private Map<String, ExtractionFieldResult> initializeCandidateFieldResults(CompanyCandidate candidate) {
+        Map<String, ExtractionFieldResult> results = new HashMap<>();
+        for (String fieldPath : STAFF_REVIEWABLE_FIELDS) {
+            results.put(FieldKeyCodec.encode(fieldPath), ExtractionFieldResult.builder()
+                    .fieldName(fieldPath)
+                    .value(readEmbeddedField(candidate, fieldPath))
+                    .staffReviewStatus(StaffFieldReviewStatus.PENDING)
+                    .managerReviewStatus(ExtractionReviewStatus.PENDING)
+                    .build());
+        }
+        return results;
+    }
+
+    private Object readEmbeddedField(CompanyCandidate candidate, String fieldName) {
+        if (candidate == null || fieldName == null) return null;
+        return switch (fieldName) {
+            case "identity.legalName" -> candidate.getIdentity() != null ? candidate.getIdentity().getLegalName() : null;
+            case "identity.tradeName" -> candidate.getIdentity() != null ? candidate.getIdentity().getTradeName() : null;
+            case "identity.taxCode" -> candidate.getIdentity() != null ? candidate.getIdentity().getTaxCode() : null;
+            case "contact.address" -> {
+                if (candidate.getContact() == null || candidate.getContact().getAddresses() == null || candidate.getContact().getAddresses().isEmpty()) {
+                    yield null;
+                }
+                yield candidate.getContact().getAddresses().get(0).getFullAddress();
+            }
+            case "contact.website" -> candidate.getContact() != null ? candidate.getContact().getWebsite() : null;
+            case "contact.emails" -> candidate.getContact() != null ? candidate.getContact().getEmails() : null;
+            case "contact.phones" -> candidate.getContact() != null ? candidate.getContact().getPhones() : null;
+            case "business.businessModel" -> candidate.getBusiness() != null ? candidate.getBusiness().getBusinessModel() : null;
+            case "business.industries" -> candidate.getBusiness() != null ? candidate.getBusiness().getIndustries() : null;
+            case "business.markets" -> candidate.getBusiness() != null ? candidate.getBusiness().getMarkets() : null;
+            case "business.targetCustomers" -> candidate.getBusiness() != null ? candidate.getBusiness().getTargetCustomers() : null;
+            case "business.products" -> candidate.getBusiness() != null ? candidate.getBusiness().getProducts() : null;
+            case "companySize.employeeTier" -> candidate.getCompanySize() != null ? candidate.getCompanySize().getEmployeeTier() : null;
+            case "companySize.employeeCount" -> candidate.getCompanySize() != null ? candidate.getCompanySize().getEmployeeCount() : null;
+            case "companySize.revenueTier" -> candidate.getCompanySize() != null ? candidate.getCompanySize().getRevenueTier() : null;
+            case "insights.strengths" -> candidate.getInsights() != null ? candidate.getInsights().getStrengths() : null;
+            case "insights.weaknesses" -> candidate.getInsights() != null ? candidate.getInsights().getWeaknesses() : null;
+            case "insights.opportunities" -> candidate.getInsights() != null ? candidate.getInsights().getOpportunities() : null;
+            case "insights.threats" -> candidate.getInsights() != null ? candidate.getInsights().getThreats() : null;
+            case "financial" -> candidate.getFinancial();
+            case "innovation" -> candidate.getInnovation();
+            case "market" -> candidate.getMarket();
+            case "risk" -> candidate.getRisk();
+            case "compliance" -> candidate.getCompliance();
+            default -> null;
+        };
+    }
+
     private List<AiExtractionCache> loadExtractions(List<String> extractionIds) {
         List<AiExtractionCache> result = new ArrayList<>();
         for (String id : extractionIds) {
@@ -271,12 +331,13 @@ public class ExtractionMergeService {
         }
         if (ex.getFieldResults() != null && ex.getFieldResults().containsKey(fieldName)) {
             ExtractionFieldResult fr = ex.getFieldResults().get(fieldName);
-            if (fr.getReviewStatus() == ExtractionReviewStatus.REJECTED) return null;
-            if (fr.getReviewStatus() == ExtractionReviewStatus.EDITED) return fr.getReviewedValue();
-            if (fr.getReviewStatus() == ExtractionReviewStatus.ACCEPTED) return fr.getValue();
-            // If PENDING or NEEDS_REVIEW, technically it shouldn't be here since the extraction is REVIEWED,
-            // but just in case, we'll return the value.
-            return fr.getValue();
+            if (fr.getManagerReviewStatus() == ExtractionReviewStatus.REJECTED) return null;
+            if (fr.getManagerReviewStatus() == ExtractionReviewStatus.EDITED) return fr.getStaffReviewedValue();
+            if (fr.getManagerReviewStatus() == ExtractionReviewStatus.ACCEPTED) {
+                return fr.getStaffReviewedValue() != null ? fr.getStaffReviewedValue() : fr.getValue();
+            }
+            // If PENDING or NEEDS_REVIEW, return staffReviewedValue if available, else value
+            return fr.getStaffReviewedValue() != null ? fr.getStaffReviewedValue() : fr.getValue();
         }
         return fallbackValue;
     }

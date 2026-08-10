@@ -21,6 +21,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import com.apms.domain.project.fieldapproval.ProfileProposalFieldAccessor;
+import com.apms.domain.project.fieldapproval.FieldApprovalService;
 
 @Slf4j
 @Service
@@ -31,6 +33,7 @@ public class CompanyProfileUpdateProposalService {
     private final CompanyProfileRepository companyProfileRepository;
     private final ProjectRepository projectRepository;
     private final AuditLogService auditLogService;
+    private final FieldApprovalService fieldApprovalService;
 
     @Transactional
     public CompanyProfileUpdateProposalResponse createProposal(Long projectId, Long taskId, CreateCompanyProfileUpdateProposalRequest request) {
@@ -75,6 +78,153 @@ public class CompanyProfileUpdateProposalService {
         return toResponse(proposal);
     }
 
+    @Transactional
+    public CompanyProfileUpdateProposalResponse submitProposal(String id, Long submitterId) {
+        CompanyProfileUpdateProposal proposal = proposalRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Proposal not found"));
+
+        if (proposal.getStatus() == SubmissionStatus.IN_REVIEW) {
+            // Might be a retry of a successful Mongo save that failed in SQL.
+            return toResponse(proposal);
+        }
+
+        if (proposal.getStatus() != SubmissionStatus.DRAFT) {
+            throw new com.apms.common.exception.BusinessValidationException("Only DRAFT proposals can be submitted");
+        }
+
+        boolean isFirstSubmission = (proposal.getFieldApprovals() == null || proposal.getFieldApprovals().isEmpty());
+
+        if (isFirstSubmission) {
+            proposal.setRevisionNumber(1);
+            proposal.setFieldApprovals(new java.util.ArrayList<>());
+            fieldApprovalService.initializeFirstSubmission(proposal, ProfileProposalFieldAccessor.getAllDefinitions(), proposal.getFieldApprovals());
+        } else {
+            // Resubmission
+            proposal.setRevisionNumber(proposal.getRevisionNumber() != null ? proposal.getRevisionNumber() + 1 : 1);
+            if (proposal.getChangedFieldPaths() != null) {
+                java.util.Map<String, com.apms.domain.project.fieldapproval.FieldApprovalRecord> map = com.apms.domain.project.fieldapproval.FieldApprovalUtils.toMap(proposal.getFieldApprovals());
+                for (String path : proposal.getChangedFieldPaths()) {
+                    com.apms.domain.project.fieldapproval.FieldApprovalRecord record = map.get(path);
+                    if (record == null) {
+                        record = com.apms.domain.project.fieldapproval.FieldApprovalRecord.builder().fieldPath(path).build();
+                        proposal.getFieldApprovals().add(record);
+                        map.put(path, record);
+                    }
+                    if (record.getStatus() == com.apms.common.enums.FieldApprovalStatus.REVISION_REQUIRED) {
+                        record.setPreviousStatus(record.getStatus());
+                        record.setPreviousComment(record.getComment());
+                    }
+                    record.setStatus(com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW);
+                    record.setChangedInRevision(proposal.getRevisionNumber());
+                    record.setReviewedByAccountId(null);
+                    record.setReviewedAt(null);
+                }
+            }
+        }
+
+        proposal.setChangedFieldPaths(new java.util.ArrayList<>());
+        proposal.setLastSubmittedAt(LocalDateTime.now());
+        proposal.setLastSubmittedByAccountId(submitterId);
+
+        proposal.setStatus(SubmissionStatus.IN_REVIEW);
+
+        proposal = proposalRepository.save(proposal);
+        return toResponse(proposal);
+    }
+
+    @Transactional
+    public void reviewFields(String proposalId, com.apms.domain.project.dto.FieldReviewRequest request, Long reviewerId) {
+        CompanyProfileUpdateProposal proposal = proposalRepository.findById(proposalId)
+                .orElseThrow(() -> new ResourceNotFoundException("Proposal not found"));
+        if (!java.util.Objects.equals(proposal.getRevisionNumber(), request.getExpectedRevisionNumber())) {
+            throw new com.apms.common.exception.BusinessValidationException("Revision mismatch. Expected: " + request.getExpectedRevisionNumber() + ", Actual: " + proposal.getRevisionNumber());
+        }
+        if (!java.util.Objects.equals(proposal.getDocumentVersion(), request.getExpectedDocumentVersion())) {
+            throw new com.apms.common.exception.BusinessValidationException("Document version mismatch. Expected: " + request.getExpectedDocumentVersion() + ", Actual: " + proposal.getDocumentVersion());
+        }
+
+        fieldApprovalService.processBatchReview(
+                proposal, request, reviewerId,
+                "CompanyProfileUpdateProposal", proposalId,
+                proposal.getFieldApprovals(),
+                com.apms.domain.project.fieldapproval.ProfileProposalFieldAccessor.getAllDefinitions(),
+                proposal.getRevisionNumber()
+        );
+
+        proposalRepository.save(proposal);
+    }
+
+    @Transactional
+    public void reopenField(String proposalId, String fieldPath, com.apms.domain.project.dto.FieldReopenRequest request, Long reviewerId) {
+        CompanyProfileUpdateProposal proposal = proposalRepository.findById(proposalId)
+                .orElseThrow(() -> new ResourceNotFoundException("Proposal not found"));
+        if (!java.util.Objects.equals(proposal.getRevisionNumber(), request.getExpectedRevisionNumber())) {
+            throw new com.apms.common.exception.BusinessValidationException("Revision mismatch.");
+        }
+        if (!java.util.Objects.equals(proposal.getDocumentVersion(), request.getExpectedDocumentVersion())) {
+            throw new com.apms.common.exception.BusinessValidationException("Document version mismatch.");
+        }
+
+        fieldApprovalService.processReopen(
+                fieldPath, request, reviewerId,
+                "CompanyProfileUpdateProposal", proposalId,
+                proposal.getFieldApprovals()
+        );
+
+        proposalRepository.save(proposal);
+    }
+
+    @Transactional(readOnly = true)
+    public void validateFinalReviewReadiness(String proposalId, com.apms.common.enums.ReviewDecision decision) {
+        CompanyProfileUpdateProposal proposal = proposalRepository.findById(proposalId)
+                .orElseThrow(() -> new ResourceNotFoundException("Proposal not found"));
+        fieldApprovalService.validateFinalReviewReadiness(proposal, proposal.getFieldApprovals(), com.apms.domain.project.fieldapproval.ProfileProposalFieldAccessor.getAllDefinitions(), decision);
+    }
+
+    @Transactional(readOnly = true)
+    public com.apms.domain.project.dto.ReviewSummaryResponse getReviewSummary(String proposalId, Integer submittedRevisionNumber) {
+        CompanyProfileUpdateProposal proposal = proposalRepository.findById(proposalId)
+                .orElseThrow(() -> new ResourceNotFoundException("Proposal not found"));
+
+        boolean readyForApproval = true;
+        java.util.List<String> blockingFields = new java.util.ArrayList<>();
+        if (proposal.getFieldApprovals() != null) {
+            for (com.apms.domain.project.fieldapproval.FieldApprovalRecord record : proposal.getFieldApprovals()) {
+                if (record.getStatus() == com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW || record.getStatus() == com.apms.common.enums.FieldApprovalStatus.REVISION_REQUIRED) {
+                    readyForApproval = false;
+                    blockingFields.add(record.getFieldPath());
+                }
+            }
+        }
+
+        java.util.Map<String, com.apms.domain.project.dto.FieldApprovalResponse> mappedApprovals = new java.util.HashMap<>();
+        if (proposal.getFieldApprovals() != null) {
+            proposal.getFieldApprovals().forEach(v -> {
+                mappedApprovals.put(v.getFieldPath(), com.apms.domain.project.dto.FieldApprovalResponse.builder()
+                        .status(v.getStatus())
+                        .reviewedRevision(v.getReviewedRevision())
+                        .comment(v.getComment())
+                        .previousComment(v.getPreviousComment())
+                        .previousStatus(v.getPreviousStatus())
+                        .changedInRevision(v.getChangedInRevision())
+                        .staleReason(v.getStaleReason())
+                        .pendingValue(v.getPendingValue())
+                        .pendingEvidenceIds(v.getPendingEvidenceIds())
+                        .build());
+            });
+        }
+
+        return com.apms.domain.project.dto.ReviewSummaryResponse.builder()
+                .revisionNumber(proposal.getRevisionNumber())
+                .documentVersion(proposal.getDocumentVersion())
+                .submittedRevisionNumber(submittedRevisionNumber)
+                .fieldApprovals(mappedApprovals)
+                .changedFieldPaths(proposal.getChangedFieldPaths())
+                .readyForApproval(readyForApproval)
+                .blockingFields(blockingFields)
+                .build();
+    }
+
     @Transactional(readOnly = true)
     public CompanyProfileUpdateProposalResponse getProposal(String id) {
         CompanyProfileUpdateProposal proposal = proposalRepository.findById(id)
@@ -98,6 +248,7 @@ public class CompanyProfileUpdateProposalService {
                 .id(proposal.getId())
                 .projectId(proposal.getProjectId())
                 .taskId(proposal.getTaskId())
+                .revisionNumber(proposal.getRevisionNumber())
                 .companyProfileId(proposal.getCompanyProfileId())
                 .proposedIdentity(proposal.getProposedIdentity())
                 .proposedBusiness(proposal.getProposedBusiness())

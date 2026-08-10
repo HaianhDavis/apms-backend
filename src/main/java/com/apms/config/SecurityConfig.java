@@ -65,7 +65,8 @@ public class SecurityConfig {
                                         "/swagger-resources/**",
                                         "/webjars/**",
                                         "/favicon.ico",
-                                        "/ws/**"
+                                        "/ws/**",
+                                        "/health"
                                 ).permitAll()
                                 .anyRequest().authenticated()
                 );

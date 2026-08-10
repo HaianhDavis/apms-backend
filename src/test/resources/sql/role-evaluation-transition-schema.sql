@@ -57,6 +57,7 @@ CREATE TABLE project_task_submissions (
     submission_type VARCHAR(255) NOT NULL,
     target_entity_type VARCHAR(255),
     target_entity_id VARCHAR(255),
+    submitted_revision_number INT NULL,
     status VARCHAR(255) NOT NULL,
     note NVARCHAR(MAX),
     submitted_at DATETIME2 NOT NULL,

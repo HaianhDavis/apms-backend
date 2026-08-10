@@ -53,11 +53,24 @@ public class ProjectTaskSubmissionService {
     private final AuditLogService auditLogService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final List<ProjectTaskSubmissionApprovalHandler> approvalHandlers;
+
     @org.springframework.beans.factory.annotation.Autowired
     @org.springframework.context.annotation.Lazy
     private com.apms.domain.companymember.service.CompanyMemberResearchService companyMemberResearchService;
-    
+
     private final com.apms.domain.document.service.CompanyDocumentPublisher companyDocumentPublisher;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.beans.factory.annotation.Qualifier("transactionManager")
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.apms.domain.candidate.service.CandidateService candidateService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.apms.domain.profile.service.CompanyProfileUpdateProposalService proposalService;
 
     @Transactional
     public ProjectTaskSubmissionResponse submitTask(Long projectId, Long taskId, CreateProjectTaskSubmissionRequest request) {
@@ -102,6 +115,40 @@ public class ProjectTaskSubmissionService {
 
         LocalDateTime now = LocalDateTime.now();
 
+        // 1. Ask the target entity to prepare its field approvals and return the submittedRevisionNumber
+        Integer revision = null;
+        if (StringUtils.hasText(request.getTargetEntityId())) {
+            if ("CompanyCandidate".equals(request.getTargetEntityType())) {
+                com.apms.domain.candidate.dto.CandidateResponse draft = candidateService.submitCandidate(request.getTargetEntityId(), submitter.getId());
+                revision = draft.getRevisionNumber();
+            } else if ("CompanyProfileUpdateProposal".equals(request.getTargetEntityType())) {
+                com.apms.domain.profile.dto.CompanyProfileUpdateProposalResponse draft = proposalService.submitProposal(request.getTargetEntityId(), submitter.getId());
+                revision = draft.getRevisionNumber();
+            }
+        }
+
+        // 2. Idempotency Check: if this exact revision was already submitted, just return it
+        if (revision != null) {
+            final Integer finalRevision = revision;
+            java.util.Optional<ProjectTaskSubmission> existingSub = submissionRepository.findByProjectTask_Id(taskId).stream()
+                    .filter(s -> java.util.Objects.equals(s.getTargetEntityType(), request.getTargetEntityType())
+                              && java.util.Objects.equals(s.getTargetEntityId(), request.getTargetEntityId())
+                              && java.util.Objects.equals(s.getSubmittedRevisionNumber(), finalRevision))
+                    .findFirst();
+            if (existingSub.isPresent()) {
+                // If it exists but the task is not IN_REVIEW, just sync the task status
+                if (task.getStatus() != TaskStatus.IN_REVIEW) {
+                    task.setStatus(TaskStatus.IN_REVIEW);
+                    task.setCompletedAt(null);
+                    taskRepository.saveAndFlush(task);
+                }
+                return toResponse(existingSub.get());
+            }
+        }
+
+        // Ensure no other active IN_REVIEW submissions exist for the SAME task
+        // But we already checked that at the top of the method.
+
         ProjectTaskSubmission submission = ProjectTaskSubmission.builder()
                 .projectTask(task)
                 .project(project)
@@ -112,22 +159,41 @@ public class ProjectTaskSubmissionService {
                 .status(SubmissionStatus.IN_REVIEW)
                 .note(request.getNote())
                 .submittedAt(now)
+                .submittedRevisionNumber(revision)
+                .submittedAt(LocalDateTime.now())
                 .build();
 
-        submission = submissionRepository.save(submission);
+        ProjectTaskSubmission finalSubmission = submission;
+        final Integer finalRevision = revision;
+        try {
+            org.springframework.transaction.support.TransactionTemplate template = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+            template.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+            submission = template.execute(status -> submissionRepository.saveAndFlush(finalSubmission));
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            log.warn("Concurrent duplicate submission detected for task {} and revision {}, fetching existing...", taskId, finalRevision);
+            java.util.Optional<ProjectTaskSubmission> existingSub = submissionRepository.findByProjectTask_Id(taskId).stream()
+                    .filter(s -> java.util.Objects.equals(s.getTargetEntityType(), request.getTargetEntityType())
+                              && java.util.Objects.equals(s.getTargetEntityId(), request.getTargetEntityId())
+                              && java.util.Objects.equals(s.getSubmittedRevisionNumber(), finalRevision))
+                    .findFirst();
+            if (existingSub.isPresent()) {
+                if (task.getStatus() != TaskStatus.IN_REVIEW) {
+                    task.setStatus(TaskStatus.IN_REVIEW);
+                    task.setCompletedAt(null);
+                    taskRepository.saveAndFlush(task);
+                }
+                return toResponse(existingSub.get());
+            } else {
+                throw e; // if we can't find it, rethrow
+            }
+        }
 
         // Update task status
         task.setStatus(TaskStatus.IN_REVIEW);
         task.setCompletedAt(null);
-        taskRepository.save(task);
+        taskRepository.saveAndFlush(task);
 
-        // Update target entity if it's a proposal
-        if (StringUtils.hasText(request.getTargetEntityId()) && "CompanyProfileUpdateProposal".equals(request.getTargetEntityType())) {
-            proposalRepository.findById(request.getTargetEntityId()).ifPresent(proposal -> {
-                proposal.setStatus(SubmissionStatus.IN_REVIEW);
-                proposalRepository.save(proposal);
-            });
-        }
+        // Target entity is already updated by the delegated submit call above.
 
         auditLogService.log(
                 currentUser.getId(),
@@ -170,12 +236,25 @@ public class ProjectTaskSubmissionService {
         ProjectTaskSubmission submission = submissionRepository.findById(submissionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Submission not found"));
 
-        if (!submission.getProject().getId().equals(projectId) || !submission.getProjectTask().getId().equals(taskId)) {
-            throw new IllegalArgumentException("Submission does not belong to specified project/task");
-        }
-
         UserDetailsImpl currentUser = getCurrentUser();
         if (currentUser == null) throw new AccessDeniedException("Unauthorized");
+
+        if (!submission.getProject().getId().equals(projectId)) {
+            throw new IllegalArgumentException("Submission does not belong to specified project");
+        }
+        if (!submission.getProjectTask().getId().equals(taskId)) {
+            throw new IllegalArgumentException("Submission does not belong to specified task");
+        }
+
+        if (submission.getProjectTask().getTaskType() == com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION) {
+            validateManagerAuthorization(submission, currentUser, projectId, taskId);
+
+            if ("CompanyCandidate".equals(submission.getTargetEntityType())) {
+                candidateService.validateFinalReviewReadiness(submission.getTargetEntityId(), request.getDecision());
+            } else if ("CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
+                proposalService.validateFinalReviewReadiness(submission.getTargetEntityId(), request.getDecision());
+            }
+        }
 
         Account reviewer = accountRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
@@ -281,12 +360,12 @@ public class ProjectTaskSubmissionService {
                         proposalRepository.save(proposal);
 
                         auditLogService.log(currentUser.getId(), AuditAction.PROFILE_UPDATE_PROPOSAL_APPLIED, "CompanyProfileUpdateProposal", proposal.getId(), "Proposal applied and profile updated");
-                        
+
                         // Publish documents
                         if (proposal.getSourceDocumentIds() != null && !proposal.getSourceDocumentIds().isEmpty()) {
                             for (String docId : proposal.getSourceDocumentIds()) {
                                 companyDocumentPublisher.publishApprovedDocument(
-                                    profile.getCompanyId(),
+                                    profile.getId(),
                                     docId,
                                     reviewer.getId(),
                                     now,
@@ -299,6 +378,11 @@ public class ProjectTaskSubmissionService {
                             }
                         }
                     }
+                } else if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyCandidate".equals(submission.getTargetEntityType())) {
+                    candidateService.approveCandidate(
+                            submission.getTargetEntityId(),
+                            new com.apms.domain.candidate.dto.ApproveCandidateRequest(),
+                            reviewer.getId());
                 } else if (submission.getSubmissionType() == com.apms.common.enums.SubmissionType.COMPANY_MEMBER_RESEARCH) {
                     companyMemberResearchService.handleApproval(submission, reviewer.getId(), request.getComment());
                 } else {
@@ -312,7 +396,7 @@ public class ProjectTaskSubmissionService {
                 break;
 
             case REJECT:
-                submission.setStatus(SubmissionStatus.REJECTED);
+                submission.setStatus(SubmissionStatus.CHANGES_REQUESTED);
                 task.setStatus(TaskStatus.IN_PROGRESS);
                 task.setCompletedAt(null);
                 auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMISSION_REJECTED, "ProjectTaskSubmission", String.valueOf(submissionId), "Submission rejected");
@@ -323,6 +407,8 @@ public class ProjectTaskSubmissionService {
                         proposal.setReviewComment(request.getComment());
                         proposalRepository.save(proposal);
                     });
+                } else if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyCandidate".equals(submission.getTargetEntityType())) {
+                    candidateService.sendBackCandidate(submission.getTargetEntityId(), reviewer.getId());
                 } else {
                     for (ProjectTaskSubmissionApprovalHandler handler : approvalHandlers) {
                         if (handler.supports(submission.getSubmissionType())) {
@@ -332,12 +418,117 @@ public class ProjectTaskSubmissionService {
                     }
                 }
                 break;
+
+            case REQUEST_REVISION:
+                submission.setStatus(SubmissionStatus.REVISION_REQUESTED);
+                task.setStatus(TaskStatus.IN_PROGRESS);
+                task.setCompletedAt(null);
+                auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMISSION_REVISION_REQUESTED, "ProjectTaskSubmission", String.valueOf(submissionId), "Revision requested");
+                if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
+                    proposalRepository.findById(submission.getTargetEntityId()).ifPresent(proposal -> {
+                        proposal.setStatus(SubmissionStatus.REVISION_REQUESTED);
+                        proposal.setReviewedBy(reviewer.getId());
+                        proposal.setReviewComment(request.getComment());
+                        proposalRepository.save(proposal);
+                    });
+                }
+                break;
         }
 
         submissionRepository.save(submission);
         taskRepository.save(task);
 
         return toResponse(submission);
+    }
+
+    @Transactional
+    public void reviewFields(Long projectId, Long taskId, Long submissionId, com.apms.domain.project.dto.FieldReviewRequest request) {
+        ProjectTaskSubmission submission = submissionRepository.findById(submissionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Submission not found"));
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
+
+        validateManagerAuthorization(submission, currentUser, projectId, taskId);
+
+        bindLegacyRevisionIfNecessary(submission, request.getExpectedRevisionNumber());
+
+        if ("CompanyCandidate".equals(submission.getTargetEntityType())) {
+            candidateService.reviewFields(submission.getTargetEntityId(), request, currentUser.getId());
+        } else if ("CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
+            proposalService.reviewFields(submission.getTargetEntityId(), request, currentUser.getId());
+        } else {
+            throw new com.apms.common.exception.BusinessValidationException("Field review not supported for this submission type");
+        }
+    }
+
+    @Transactional
+    public void reopenField(Long projectId, Long taskId, Long submissionId, String fieldPath, com.apms.domain.project.dto.FieldReopenRequest request) {
+        ProjectTaskSubmission submission = submissionRepository.findById(submissionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Submission not found"));
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
+
+        validateManagerAuthorization(submission, currentUser, projectId, taskId);
+
+        bindLegacyRevisionIfNecessary(submission, request.getExpectedRevisionNumber());
+
+        if ("CompanyCandidate".equals(submission.getTargetEntityType())) {
+            candidateService.reopenField(submission.getTargetEntityId(), fieldPath, request, currentUser.getId());
+        } else if ("CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
+            proposalService.reopenField(submission.getTargetEntityId(), fieldPath, request, currentUser.getId());
+        } else {
+            throw new com.apms.common.exception.BusinessValidationException("Field reopen not supported for this submission type");
+        }
+    }
+
+    @Transactional(readOnly = true)
+    public com.apms.domain.project.dto.ReviewSummaryResponse getReviewSummary(Long projectId, Long taskId, Long submissionId) {
+        ProjectTaskSubmission submission = submissionRepository.findById(submissionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Submission not found"));
+
+        if (!submission.getProject().getId().equals(projectId) || !submission.getProjectTask().getId().equals(taskId)) {
+            throw new IllegalArgumentException("Submission does not belong to specified project/task");
+        }
+
+        if ("CompanyCandidate".equals(submission.getTargetEntityType())) {
+            return candidateService.getReviewSummary(submission.getTargetEntityId(), submission.getSubmittedRevisionNumber());
+        } else if ("CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
+            return proposalService.getReviewSummary(submission.getTargetEntityId(), submission.getSubmittedRevisionNumber());
+        } else {
+            throw new com.apms.common.exception.BusinessValidationException("Review summary not supported for this submission type");
+        }
+    }
+
+    private void bindLegacyRevisionIfNecessary(ProjectTaskSubmission submission, Integer expectedRevisionNumber) {
+        if (submission.getSubmittedRevisionNumber() == null) {
+            if (submission.getStatus() == SubmissionStatus.IN_REVIEW && expectedRevisionNumber != null) {
+                submission.setSubmittedRevisionNumber(expectedRevisionNumber);
+                submissionRepository.save(submission);
+            } else {
+                throw new com.apms.common.exception.BusinessValidationException("Cannot review a legacy submission that is not IN_REVIEW or without an expected revision");
+            }
+        }
+    }
+
+    private void validateManagerAuthorization(ProjectTaskSubmission submission, UserDetailsImpl currentUser, Long projectId, Long taskId) {
+        if (!hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
+            throw new AccessDeniedException("Only BUSINESS_DEVELOPMENT_MANAGER can perform this action");
+        }
+        if (!submission.getProject().getId().equals(projectId)) {
+            throw new IllegalArgumentException("Submission does not belong to specified project");
+        }
+        if (!submission.getProjectTask().getId().equals(taskId)) {
+            throw new IllegalArgumentException("Submission does not belong to specified task");
+        }
+        if (submission.getProjectTask().getTaskType() != com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION) {
+            throw new com.apms.common.exception.BusinessValidationException("Task type must be COMPANY_DATA_PREPARATION for field approval");
+        }
+        if (submission.getTargetEntityType() == null || submission.getTargetEntityId() == null) {
+            throw new com.apms.common.exception.BusinessValidationException("Submission target entity is missing");
+        }
+        if (!projectRepository.existsByIdAndMembersAccountId(projectId, currentUser.getId())) {
+            throw new AccessDeniedException("Manager must be a member of the project");
+        }
     }
 
     private ProjectTaskSubmissionResponse toResponse(ProjectTaskSubmission sub) {

@@ -15,6 +15,11 @@ public class CompanyDocumentResponse {
     private String id;
     private String companyProfileId;
     private String sourceDocumentId;
+    private String sourceProjectId;
+    private String sourceProjectName;
+    private String sourceTaskId;
+    private String sourceSubmissionId;
+    private String sourceCandidateId;
     private String displayName;
     private String originalFileName;
     private String documentType;

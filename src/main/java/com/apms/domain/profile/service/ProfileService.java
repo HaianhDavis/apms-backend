@@ -76,11 +76,9 @@ public class ProfileService {
         Project project = projectRepository.findById(Long.valueOf(event.getProjectId()))
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + event.getProjectId()));
 
-        if (project.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY) {
-            updateExistingProfile(project, candidate);
-        } else {
-            createNewProfile(project, candidate);
-        }
+        CompanyProfile approvedProfile = project.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY
+                ? updateExistingProfile(project, candidate)
+                : createNewProfile(project, candidate);
 
         // Add to TrackedCompany if not exists
         if (candidate.getIdentity() != null) {
@@ -113,23 +111,21 @@ public class ProfileService {
             }
         }
         
-        // Publish documents
-        String profileId = project.getTargetCompanyProfileId();
-        if (StringUtils.hasText(profileId) && StringUtils.hasText(candidate.getRawDocumentId())) {
-            companyDocumentPublisher.publishApprovedDocument(
-                profileId,
-                candidate.getRawDocumentId(),
-                null, // System or extracted from event
-                LocalDateTime.now(),
-                com.apms.domain.document.dto.PublicationContext.builder()
-                    .sourceProjectId(String.valueOf(project.getId()))
-                    .sourceCandidateId(candidate.getId())
-                    .build()
-            );
-        }
+        publishCandidateSourceDocuments(approvedProfile, project, candidate);
     }
 
-    private void createNewProfile(Project project, CompanyCandidate candidate) {
+    private CompanyProfile createNewProfile(Project project, CompanyCandidate candidate) {
+        java.util.Optional<CompanyProfile> existingProfile = profileRepository.findByCandidateId(candidate.getId());
+        if (existingProfile.isPresent()) {
+            CompanyProfile profile = existingProfile.get();
+            log.info("Reusing existing CompanyProfile {} for candidate {}", profile.getCompanyId(), candidate.getId());
+            addSourceRefs(profile, project, candidate);
+            profile = profileRepository.save(profile);
+            linkProjectToProfile(project, profile);
+            linkCandidateToProfile(candidate, profile);
+            return profile;
+        }
+
         String newCompanyId = UUID.randomUUID().toString();
         log.info("Creating NEW CompanyProfile with companyId: {}", newCompanyId);
 
@@ -156,22 +152,21 @@ public class ProfileService {
         addSourceRefs(profile, project, candidate);
 
         profile = profileRepository.save(profile);
-        if (!StringUtils.hasText(project.getTargetCompanyProfileId())) {
-            project.setTargetCompanyProfileId(profile.getCompanyId());
-            projectRepository.save(project);
-            log.info("Linked project {} to new CompanyProfile companyId {}", project.getId(), profile.getCompanyId());
-        }
+        linkProjectToProfile(project, profile);
+        linkCandidateToProfile(candidate, profile);
         log.info("Successfully created CompanyProfile for companyId: {}", newCompanyId);
+        return profile;
     }
 
-    private void updateExistingProfile(Project project, CompanyCandidate candidate) {
+    private CompanyProfile updateExistingProfile(Project project, CompanyCandidate candidate) {
         String targetProfileId = project.getTargetCompanyProfileId();
         if (!StringUtils.hasText(targetProfileId)) {
             log.error("UPDATE_EXISTING_COMPANY project missing targetCompanyProfileId");
-            return;
+            throw new ResourceNotFoundException("UPDATE_EXISTING_COMPANY project missing targetCompanyProfileId");
         }
 
         CompanyProfile profile = profileRepository.findById(targetProfileId)
+                .or(() -> profileRepository.findByCompanyId(targetProfileId))
                 .orElseThrow(() -> new ResourceNotFoundException("Target CompanyProfile not found: " + targetProfileId));
 
         log.info("Updating EXISTING CompanyProfile with companyId: {}", profile.getCompanyId());
@@ -196,19 +191,95 @@ public class ProfileService {
 
         addSourceRefs(profile, project, candidate);
 
-        profileRepository.save(profile);
+        profile = profileRepository.save(profile);
+        linkCandidateToProfile(candidate, profile);
         log.info("Successfully updated CompanyProfile for companyId: {}, new version: {}", profile.getCompanyId(), profile.getVersion());
+        return profile;
     }
 
     private void addSourceRefs(CompanyProfile profile, Project project, CompanyCandidate candidate) {
+        if (profile.getSourceRefs() == null) {
+            profile.setSourceRefs(new CompanyProfile.SourceRefs());
+        }
         profile.getSourceRefs().getProjectIds().add(String.valueOf(project.getId()));
         profile.getSourceRefs().getCandidateIds().add(candidate.getId());
 
         if (StringUtils.hasText(candidate.getImportJobId())) {
             profile.getSourceRefs().getImportJobIds().add(candidate.getImportJobId());
         }
+        profile.getSourceRefs().getRawDocumentIds().addAll(resolveSourceDocumentIds(candidate));
+    }
+
+    private void linkProjectToProfile(Project project, CompanyProfile profile) {
+        if (!StringUtils.hasText(project.getTargetCompanyProfileId())) {
+            project.setTargetCompanyProfileId(profile.getCompanyId());
+            projectRepository.save(project);
+            log.info("Linked project {} to CompanyProfile companyId {}", project.getId(), profile.getCompanyId());
+        }
+    }
+
+    private void linkCandidateToProfile(CompanyCandidate candidate, CompanyProfile profile) {
+        CompanyCandidate.Lifecycle lifecycle = candidate.getLifecycle();
+        if (lifecycle == null) {
+            lifecycle = new CompanyCandidate.Lifecycle();
+            candidate.setLifecycle(lifecycle);
+        }
+        lifecycle.setStatus(candidate.getStatus());
+        lifecycle.setConvertedCompanyProfileId(profile.getCompanyId());
+        candidateRepository.save(candidate);
+    }
+
+    private void publishCandidateSourceDocuments(CompanyProfile profile, Project project, CompanyCandidate candidate) {
+        java.util.List<String> sourceDocumentIds = resolveSourceDocumentIds(candidate);
+        if (sourceDocumentIds.isEmpty()) {
+            log.warn("Approved candidate {} has no source documents to publish", candidate.getId());
+            return;
+        }
+
+        Long approvedBy = resolveApprovedBy(candidate);
+        LocalDateTime approvedAt = candidate.getReview() != null && candidate.getReview().getReviewedAt() != null
+                ? candidate.getReview().getReviewedAt()
+                : LocalDateTime.now();
+
+        for (String sourceDocumentId : sourceDocumentIds) {
+            companyDocumentPublisher.publishApprovedDocument(
+                    profile.getId(),
+                    sourceDocumentId,
+                    approvedBy,
+                    approvedAt,
+                    com.apms.domain.document.dto.PublicationContext.builder()
+                            .sourceProjectId(String.valueOf(project.getId()))
+                            .sourceTaskId(candidate.getTaskId() != null ? String.valueOf(candidate.getTaskId()) : null)
+                            .sourceCandidateId(candidate.getId())
+                            .documentType("AI_EXTRACTION_SOURCE")
+                            .description("Used for Candidate Extraction")
+                            .build()
+            );
+        }
+    }
+
+    private java.util.List<String> resolveSourceDocumentIds(CompanyCandidate candidate) {
+        java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
+        if (candidate.getSourceDocumentIds() != null) {
+            candidate.getSourceDocumentIds().stream()
+                    .filter(StringUtils::hasText)
+                    .map(String::trim)
+                    .forEach(ids::add);
+        }
         if (StringUtils.hasText(candidate.getRawDocumentId())) {
-            profile.getSourceRefs().getRawDocumentIds().add(candidate.getRawDocumentId());
+            ids.add(candidate.getRawDocumentId().trim());
+        }
+        return new java.util.ArrayList<>(ids);
+    }
+
+    private Long resolveApprovedBy(CompanyCandidate candidate) {
+        if (candidate.getReview() == null || !StringUtils.hasText(candidate.getReview().getReviewedBy())) {
+            return null;
+        }
+        try {
+            return Long.valueOf(candidate.getReview().getReviewedBy());
+        } catch (NumberFormatException ex) {
+            return null;
         }
     }
 

@@ -39,6 +39,9 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
     @Query("SELECT CASE WHEN COUNT(m) > 0 THEN true ELSE false END FROM ProjectMember m WHERE m.project.id = :projectId AND m.account.id = :accountId")
     boolean existsByIdAndMembersAccountId(@Param("projectId") Long projectId, @Param("accountId") Long accountId);
 
+    @Query("SELECT CASE WHEN COUNT(p) > 0 THEN true ELSE false END FROM Project p JOIN p.members m WHERE p.targetCompanyProfileId = :targetCompanyProfileId AND m.account.id = :accountId AND p.status IN :allowedStatuses")
+    boolean existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(@Param("targetCompanyProfileId") String targetCompanyProfileId, @Param("accountId") Long accountId, @Param("allowedStatuses") java.util.List<ProjectStatus> allowedStatuses);
+
     Optional<Project> findFirstByCreatedByAccountIdOrderByIdAsc(Long accountId);
 
     @Query("""

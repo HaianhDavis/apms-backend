@@ -54,11 +54,11 @@ class ExtractionMergeServiceGuardTest {
         fieldResults.put("legalName", ExtractionFieldResult.builder()
                 .fieldName("legalName").value("Test Corp").evidenceText("Header")
                 .validationStatus(ExtractionValidationStatus.PASS)
-                .reviewStatus(ExtractionReviewStatus.ACCEPTED).build());
+                .managerReviewStatus(ExtractionReviewStatus.ACCEPTED).build());
         fieldResults.put("industries", ExtractionFieldResult.builder()
                 .fieldName("industries").value(List.of("Tech"))
                 .validationStatus(ExtractionValidationStatus.PASS)
-                .reviewStatus(ExtractionReviewStatus.ACCEPTED).build());
+                .managerReviewStatus(ExtractionReviewStatus.ACCEPTED).build());
 
         ExtractedCompanyData data = ExtractedCompanyData.builder()
                 .legalName("Test Corp")
@@ -173,8 +173,8 @@ class ExtractionMergeServiceGuardTest {
         @DisplayName("EDITED field uses reviewedValue instead of original value")
         void editedField_usesReviewedValue() {
             AiExtractionCache cache = buildExtraction("ext-edited", ExtractionQualityStatus.REVIEWED);
-            cache.getFieldResults().get("legalName").setReviewStatus(ExtractionReviewStatus.EDITED);
-            cache.getFieldResults().get("legalName").setReviewedValue("Corrected Name");
+            cache.getFieldResults().get("legalName").setManagerReviewStatus(ExtractionReviewStatus.EDITED);
+            cache.getFieldResults().get("legalName").setStaffReviewedValue("Corrected Name");
 
             when(extractionCacheRepository.findById("ext-edited")).thenReturn(Optional.of(cache));
             when(candidateRepository.save(any())).thenAnswer(i -> i.getArgument(0));
@@ -191,7 +191,7 @@ class ExtractionMergeServiceGuardTest {
         @DisplayName("REJECTED field is excluded from merge (null)")
         void rejectedField_excluded() {
             AiExtractionCache cache = buildExtraction("ext-rejected", ExtractionQualityStatus.REVIEWED);
-            cache.getFieldResults().get("legalName").setReviewStatus(ExtractionReviewStatus.REJECTED);
+            cache.getFieldResults().get("legalName").setManagerReviewStatus(ExtractionReviewStatus.REJECTED);
 
             when(extractionCacheRepository.findById("ext-rejected")).thenReturn(Optional.of(cache));
             when(candidateRepository.save(any())).thenAnswer(i -> i.getArgument(0));

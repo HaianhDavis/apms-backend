@@ -218,6 +218,116 @@ public class GeminiExtractionProvider implements ExtractionProvider {
                 "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
         );
 
+        Map<String, Object> financialSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of(
+                                "type", "OBJECT",
+                                "properties", Map.of(
+                                        "revenue", Map.of("type", "NUMBER"),
+                                        "revenueCurrency", Map.of("type", "STRING"),
+                                        "revenueGrowth", Map.of("type", "NUMBER"),
+                                        "profitMargin", Map.of("type", "NUMBER"),
+                                        "debtRatio", Map.of("type", "NUMBER"),
+                                        "fundingStage", Map.of("type", "STRING"),
+                                        "profitability", Map.of("type", "STRING")
+                                )
+                        ),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER"),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> innovationSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of(
+                                "type", "OBJECT",
+                                "properties", Map.of(
+                                        "patents", Map.of("type", "INTEGER"),
+                                        "rdInvestmentPercent", Map.of("type", "NUMBER"),
+                                        "techStack", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")),
+                                        "technologyCapabilities", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")),
+                                        "techMaturityLevel", Map.of("type", "INTEGER"),
+                                        "productInnovationRate", Map.of("type", "NUMBER")
+                                )
+                        ),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER"),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> marketSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of(
+                                "type", "OBJECT",
+                                "properties", Map.of(
+                                        "marketShare", Map.of("type", "NUMBER"),
+                                        "brandRank", Map.of("type", "INTEGER"),
+                                        "clientCount", Map.of("type", "INTEGER"),
+                                        "mainMarkets", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                                )
+                        ),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER"),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> riskSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of(
+                                "type", "OBJECT",
+                                "properties", Map.of(
+                                        "overallRiskLevel", Map.of("type", "STRING"),
+                                        "financialRisk", Map.of("type", "STRING"),
+                                        "legalRisk", Map.of("type", "STRING"),
+                                        "reputationRisk", Map.of("type", "STRING"),
+                                        "securityRisk", Map.of("type", "STRING"),
+                                        "supplyInterruptionRisk", Map.of("type", "STRING"),
+                                        "dependencyRisk", Map.of("type", "STRING")
+                                )
+                        ),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER"),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> complianceSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of(
+                                "type", "OBJECT",
+                                "properties", Map.of(
+                                        "status", Map.of("type", "STRING"),
+                                        "qualityCertifications", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")),
+                                        "securityCertifications", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")),
+                                        "antiCorruptionPolicy", Map.of("type", "STRING"),
+                                        "laborCompliance", Map.of("type", "STRING"),
+                                        "environmentalPolicy", Map.of("type", "STRING")
+                                )
+                        ),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER"),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
         Map<String, Object> properties = new java.util.HashMap<>();
         
         List<String> stringFields = List.of(
@@ -239,17 +349,18 @@ public class GeminiExtractionProvider implements ExtractionProvider {
         properties.put("products", productSchema);
         properties.put("employeeCount", integerFieldSchema);
         
-        List<String> objectFields = List.of("financial", "market", "innovation", "risk", "compliance");
-        for (String field : objectFields) {
-            properties.put(field, fallbackObjectSchema);
-        }
+        properties.put("financial", financialSchema);
+        properties.put("market", marketSchema);
+        properties.put("innovation", innovationSchema);
+        properties.put("risk", riskSchema);
+        properties.put("compliance", complianceSchema);
 
         List<String> allRequiredFields = new java.util.ArrayList<>();
         allRequiredFields.addAll(stringFields);
         allRequiredFields.addAll(stringListFields);
         allRequiredFields.add("products");
         allRequiredFields.add("employeeCount");
-        allRequiredFields.addAll(objectFields);
+        allRequiredFields.addAll(List.of("financial", "market", "innovation", "risk", "compliance"));
 
         return Map.of(
                 "type", "OBJECT",

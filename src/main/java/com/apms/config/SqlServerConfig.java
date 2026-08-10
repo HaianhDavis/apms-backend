@@ -25,7 +25,9 @@ import jakarta.persistence.EntityManagerFactory;
         "com.apms.domain.contract.repository.sql",
         "com.apms.domain.rolemetric.repository",
         "com.apms.domain.security.repository",
-        "com.apms.domain.ai.repository"
+        "com.apms.domain.ai.repository",
+        "com.apms.domain.security.repository",
+        "com.apms.domain.profile.closeness"
     },
     includeFilters = @Filter(type = FilterType.ASSIGNABLE_TYPE, classes = JpaRepository.class)
 )

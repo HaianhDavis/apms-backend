@@ -114,10 +114,11 @@ public class CandidateController {
     @PostMapping("/candidates/{candidateId}/submit")
     @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> submitCandidate(
-            @PathVariable String candidateId) {
+            @PathVariable String candidateId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         return ResponseEntity.ok(ApiResponse.success(
-                candidateService.submitCandidate(candidateId), "Candidate submitted for review"));
+                candidateService.submitCandidate(candidateId, currentUser.getId()), "Candidate submitted for review"));
     }
 
     // ─────────────────────────────────────────────
@@ -171,7 +172,7 @@ public class CandidateController {
     // PATCH /api/v1/projects/{projectId}/candidates/{candidateId}/review
     // ─────────────────────────────────────────────
     @PatchMapping("/projects/{projectId}/candidates/{candidateId}/review")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId)")
+    @PreAuthorize("(hasRole('BUSINESS_DEVELOPMENT_STAFF') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')) and @projectSecurity.isMemberOrOwner(#projectId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> reviewCandidate(
             @PathVariable Long projectId,
             @PathVariable String candidateId,
@@ -179,5 +180,31 @@ public class CandidateController {
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
         return ResponseEntity.ok(ApiResponse.success(
                 candidateService.reviewCandidate(String.valueOf(projectId), candidateId, request, currentUser.getId()), "Candidate fields reviewed successfully"));
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/v1/projects/{projectId}/candidates/{candidateId}/review/complete
+    // ─────────────────────────────────────────────
+    @PostMapping("/projects/{projectId}/candidates/{candidateId}/review/complete")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> completeCandidateReview(
+            @PathVariable Long projectId,
+            @PathVariable String candidateId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(ApiResponse.success(
+                candidateService.completeCandidateFieldReview(candidateId, currentUser.getId()), "Candidate field review completed successfully"));
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/v1/projects/{projectId}/candidates/{candidateId}/send-back
+    // ─────────────────────────────────────────────
+    @PostMapping("/projects/{projectId}/candidates/{candidateId}/send-back")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> sendBackCandidate(
+            @PathVariable Long projectId,
+            @PathVariable String candidateId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(ApiResponse.success(
+                candidateService.sendBackCandidate(candidateId, currentUser.getId()), "Candidate sent back for revision successfully"));
     }
 }

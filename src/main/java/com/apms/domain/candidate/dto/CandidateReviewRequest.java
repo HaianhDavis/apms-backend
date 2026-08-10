@@ -9,6 +9,17 @@ public class CandidateReviewRequest {
     @Data
     public static class FieldReviewUpdate {
         private Object reviewedValue;
-        private com.apms.domain.ai.dto.ExtractionReviewStatus reviewStatus;
+        @com.fasterxml.jackson.annotation.JsonIgnore
+        private boolean reviewedValuePresent;
+        private com.apms.domain.ai.dto.StaffFieldReviewStatus staffReviewStatus;
+        private com.apms.domain.ai.dto.ExtractionReviewStatus managerReviewStatus;
+        private String staffReviewComment;
+        private String managerReviewComment;
+        private boolean isManager;
+
+        public void setReviewedValue(Object reviewedValue) {
+            this.reviewedValue = reviewedValue;
+            this.reviewedValuePresent = true;
+        }
     }
 }

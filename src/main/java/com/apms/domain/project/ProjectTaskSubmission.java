@@ -48,6 +48,8 @@ public class ProjectTaskSubmission {
 
     private String targetEntityId;
 
+    private Integer submittedRevisionNumber;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private SubmissionStatus status;

@@ -31,10 +31,11 @@ Required fields:
 - opportunities (array of strings)
 - weaknesses (array of strings)
 - threats (array of strings)
-- financial (object with fields: revenue, profit, growth)
-- innovation (object with fields: rAndD, patents)
-- risk (object with fields: overallRiskLevel, riskFactors array)
-- compliance (object with fields: status, issues array)
+- financial (object with fields: revenue, revenueCurrency, revenueGrowth, profitMargin, debtRatio, fundingStage, profitability)
+- innovation (object with fields: patents, rdInvestmentPercent, techStack array, technologyCapabilities array, techMaturityLevel, productInnovationRate)
+- market (object with fields: marketShare, brandRank, clientCount, mainMarkets array)
+- risk (object with fields: overallRiskLevel, financialRisk, legalRisk, reputationRisk, securityRisk, supplyInterruptionRisk, dependencyRisk)
+- compliance (object with fields: status, qualityCertifications array, securityCertifications array, antiCorruptionPolicy, laborCompliance, environmentalPolicy)
 
 Format example for a field:
 "legalName": {

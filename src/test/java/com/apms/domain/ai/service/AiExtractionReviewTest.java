@@ -53,13 +53,13 @@ class AiExtractionReviewTest {
                 .fieldName("legalName").value("Test Corp")
                 .evidenceText("Page 1 header")
                 .validationStatus(ExtractionValidationStatus.PASS)
-                .reviewStatus(ExtractionReviewStatus.PENDING)
+                .managerReviewStatus(ExtractionReviewStatus.PENDING)
                 .build());
         fieldResults.put("taxCode", ExtractionFieldResult.builder()
                 .fieldName("taxCode").value("1234567890")
                 .evidenceText("Tax registration document")
                 .validationStatus(ExtractionValidationStatus.PASS)
-                .reviewStatus(ExtractionReviewStatus.PENDING)
+                .managerReviewStatus(ExtractionReviewStatus.PENDING)
                 .build());
 
         return AiExtractionCache.builder()
@@ -86,7 +86,7 @@ class AiExtractionReviewTest {
             when(extractionCacheRepository.findById("ext-1")).thenReturn(Optional.of(cache));
 
             ExtractionReviewRequest request = new ExtractionReviewRequest();
-            request.setReviewStatus(ExtractionReviewStatus.EDITED);
+            request.setStaffReviewStatus(StaffFieldReviewStatus.EDITED); request.setManager(false);
             request.setReviewedValue(null); // Missing!
 
             assertThrows(BusinessValidationException.class, () ->
@@ -101,18 +101,18 @@ class AiExtractionReviewTest {
             when(extractionCacheRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
             ExtractionReviewRequest request = new ExtractionReviewRequest();
-            request.setReviewStatus(ExtractionReviewStatus.EDITED);
+            request.setStaffReviewStatus(StaffFieldReviewStatus.EDITED); request.setManager(false);
             request.setReviewedValue("Corrected Company Name");
             request.setComment("Fixed typo");
 
             AiExtractionCache result = extractionService.reviewField("ext-2", "legalName", request, 100L);
 
             ExtractionFieldResult reviewed = result.getFieldResults().get("legalName");
-            assertEquals(ExtractionReviewStatus.EDITED, reviewed.getReviewStatus());
-            assertEquals("Corrected Company Name", reviewed.getReviewedValue());
-            assertEquals("Fixed typo", reviewed.getReviewComment());
-            assertEquals(100L, reviewed.getReviewedByUserId());
-            assertNotNull(reviewed.getReviewedAt());
+            assertEquals(StaffFieldReviewStatus.EDITED, reviewed.getStaffReviewStatus());
+            assertEquals("Corrected Company Name", reviewed.getStaffReviewedValue());
+            assertEquals("Fixed typo", reviewed.getStaffReviewComment());
+            assertEquals(100L, reviewed.getStaffReviewedByUserId());
+            assertNotNull(reviewed.getStaffReviewedAt());
         }
 
         @Test
@@ -123,11 +123,11 @@ class AiExtractionReviewTest {
             when(extractionCacheRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
             ExtractionReviewRequest request = new ExtractionReviewRequest();
-            request.setReviewStatus(ExtractionReviewStatus.ACCEPTED);
+            request.setManagerReviewStatus(ExtractionReviewStatus.ACCEPTED); request.setManager(true);
 
             AiExtractionCache result = extractionService.reviewField("ext-3", "legalName", request, 200L);
 
-            assertEquals(ExtractionReviewStatus.ACCEPTED, result.getFieldResults().get("legalName").getReviewStatus());
+            assertEquals(ExtractionReviewStatus.ACCEPTED, result.getFieldResults().get("legalName").getManagerReviewStatus());
         }
 
         @Test
@@ -138,12 +138,12 @@ class AiExtractionReviewTest {
             when(extractionCacheRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
             ExtractionReviewRequest request = new ExtractionReviewRequest();
-            request.setReviewStatus(ExtractionReviewStatus.ACCEPTED);
+            request.setManagerReviewStatus(ExtractionReviewStatus.ACCEPTED); request.setManager(true);
 
             AiExtractionCache result = extractionService.reviewField("ext-4", "newField", request, 300L);
 
             assertTrue(result.getFieldResults().containsKey("newField"));
-            assertEquals(ExtractionReviewStatus.ACCEPTED, result.getFieldResults().get("newField").getReviewStatus());
+            assertEquals(ExtractionReviewStatus.ACCEPTED, result.getFieldResults().get("newField").getManagerReviewStatus());
         }
     }
 
@@ -160,8 +160,8 @@ class AiExtractionReviewTest {
         void completeReview_setsReviewed() {
             AiExtractionCache cache = buildCache("ext-5", ExtractionQualityStatus.VALIDATED);
             // Mark critical fields as ACCEPTED
-            cache.getFieldResults().get("legalName").setReviewStatus(ExtractionReviewStatus.ACCEPTED);
-            cache.getFieldResults().get("taxCode").setReviewStatus(ExtractionReviewStatus.ACCEPTED);
+            cache.getFieldResults().get("legalName").setManagerReviewStatus(ExtractionReviewStatus.ACCEPTED);
+            cache.getFieldResults().get("taxCode").setManagerReviewStatus(ExtractionReviewStatus.ACCEPTED);
 
             when(extractionCacheRepository.findById("ext-5")).thenReturn(Optional.of(cache));
             when(extractionCacheRepository.save(any())).thenAnswer(i -> i.getArgument(0));
@@ -177,8 +177,8 @@ class AiExtractionReviewTest {
         @DisplayName("completeReview fails when a critical field has NEEDS_REVIEW status")
         void completeReview_failsOnNeedsReview() {
             AiExtractionCache cache = buildCache("ext-6", ExtractionQualityStatus.VALIDATED);
-            cache.getFieldResults().get("legalName").setReviewStatus(ExtractionReviewStatus.NEEDS_REVIEW);
-            cache.getFieldResults().get("taxCode").setReviewStatus(ExtractionReviewStatus.ACCEPTED);
+            cache.getFieldResults().get("legalName").setManagerReviewStatus(ExtractionReviewStatus.NEEDS_REVIEW);
+            cache.getFieldResults().get("taxCode").setManagerReviewStatus(ExtractionReviewStatus.ACCEPTED);
 
             when(extractionCacheRepository.findById("ext-6")).thenReturn(Optional.of(cache));
 
@@ -190,9 +190,9 @@ class AiExtractionReviewTest {
         @DisplayName("completeReview fails when a critical field is PENDING and validation is FAIL")
         void completeReview_failsOnPendingWithFail() {
             AiExtractionCache cache = buildCache("ext-7", ExtractionQualityStatus.NEEDS_REVIEW);
-            cache.getFieldResults().get("legalName").setReviewStatus(ExtractionReviewStatus.PENDING);
+            cache.getFieldResults().get("legalName").setManagerReviewStatus(ExtractionReviewStatus.PENDING);
             cache.getFieldResults().get("legalName").setValidationStatus(ExtractionValidationStatus.FAIL);
-            cache.getFieldResults().get("taxCode").setReviewStatus(ExtractionReviewStatus.ACCEPTED);
+            cache.getFieldResults().get("taxCode").setManagerReviewStatus(ExtractionReviewStatus.ACCEPTED);
 
             when(extractionCacheRepository.findById("ext-7")).thenReturn(Optional.of(cache));
 
@@ -206,9 +206,9 @@ class AiExtractionReviewTest {
         void completeReview_succeedsWhenPendingButPassed() {
             AiExtractionCache cache = buildCache("ext-8", ExtractionQualityStatus.VALIDATED);
             // Validation PASS but review still PENDING is allowed
-            cache.getFieldResults().get("legalName").setReviewStatus(ExtractionReviewStatus.PENDING);
+            cache.getFieldResults().get("legalName").setManagerReviewStatus(ExtractionReviewStatus.PENDING);
             cache.getFieldResults().get("legalName").setValidationStatus(ExtractionValidationStatus.PASS);
-            cache.getFieldResults().get("taxCode").setReviewStatus(ExtractionReviewStatus.PENDING);
+            cache.getFieldResults().get("taxCode").setManagerReviewStatus(ExtractionReviewStatus.PENDING);
             cache.getFieldResults().get("taxCode").setValidationStatus(ExtractionValidationStatus.PASS);
 
             when(extractionCacheRepository.findById("ext-8")).thenReturn(Optional.of(cache));
