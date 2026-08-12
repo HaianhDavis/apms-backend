@@ -16,6 +16,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -94,6 +96,24 @@ class ProjectChatServiceTest {
         request.setContent("Hello World");
 
         assertThrows(AccessDeniedException.class, () -> service.sendMessage(10L, request));
+    }
+
+    @Test
+    void getHistory_BusinessOwner_DoesNotRequireMembership() {
+        UserDetailsImpl owner = new UserDetailsImpl(
+                2L, "owner@example.com", "pass",
+                List.of(new SimpleGrantedAuthority("ROLE_BUSINESS_OWNER")), true
+        );
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(owner, null, owner.getAuthorities())
+        );
+        PageRequest pageable = PageRequest.of(0, 20);
+        when(messageRepository.findByProjectIdOrderByCreatedAtDesc(10L, pageable)).thenReturn(Page.empty(pageable));
+
+        Page<ChatMessageResponse> result = service.getHistory(10L, pageable);
+
+        assertTrue(result.isEmpty());
+        verify(projectMemberRepository, never()).existsByProject_IdAndAccount_Id(anyLong(), anyLong());
     }
 
     @Test

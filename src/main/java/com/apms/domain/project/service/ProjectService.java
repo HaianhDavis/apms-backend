@@ -10,6 +10,8 @@ import com.apms.domain.project.ProjectMember;
 import com.apms.domain.project.dto.*;
 import com.apms.domain.project.repository.sql.ProjectMemberRepository;
 import com.apms.domain.project.repository.sql.ProjectRepository;
+import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.user.repository.sql.AccountRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +34,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -46,6 +51,7 @@ public class ProjectService {
     private final ProjectTaskRepository projectTaskRepository;
     private final AuditLogService auditLogService;
     private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
+    private final CompanyProfileRepository companyProfileRepository;
 
     // ─────────────────────────────────────────────
     // CREATE
@@ -106,6 +112,7 @@ public class ProjectService {
                 .build();
 
         project = projectRepository.save(project);
+        linkCompanyProfile(project, creatorAccountId);
 
         // Creator is automatically added as MANAGER
         ProjectMember creator = ProjectMember.builder()
@@ -117,6 +124,49 @@ public class ProjectService {
 
         log.info("Project created: id={}, type={}, createdBy={}", project.getId(), project.getProjectType(), creatorAccountId);
         return toResponse(project, List.of(creator));
+    }
+
+    private void linkCompanyProfile(Project project, Long creatorAccountId) {
+        String projectId = String.valueOf(project.getId());
+
+        if (project.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY) {
+            CompanyProfile profile = companyProfileRepository.findById(project.getTargetCompanyProfileId())
+                    .or(() -> companyProfileRepository.findByCompanyId(project.getTargetCompanyProfileId()))
+                    .orElseThrow(() -> new ResourceNotFoundException(
+                            "Target CompanyProfile not found: " + project.getTargetCompanyProfileId()));
+            if (profile.getSourceRefs() == null) {
+                profile.setSourceRefs(new CompanyProfile.SourceRefs());
+            }
+            if (profile.getSourceRefs().getProjectIds() == null) {
+                profile.getSourceRefs().setProjectIds(new HashSet<>());
+            }
+            profile.getSourceRefs().getProjectIds().add(projectId);
+            companyProfileRepository.save(profile);
+            return;
+        }
+
+        String companyProfileId = UUID.randomUUID().toString();
+        CompanyProfile profile = CompanyProfile.builder()
+                .id(companyProfileId)
+                .companyId(companyProfileId)
+                .identity(CompanyProfile.Identity.builder()
+                        .legalName(project.getTargetCompanyName().trim())
+                        .tradeName(project.getTargetCompanyName().trim())
+                        .build())
+                .reviewStatus("PENDING_RESEARCH")
+                .sourceRefs(CompanyProfile.SourceRefs.builder()
+                        .projectIds(new HashSet<>(Set.of(projectId)))
+                        .build())
+                .metadata(CompanyProfile.Metadata.builder()
+                        .createdBy(String.valueOf(creatorAccountId))
+                        .createdAt(LocalDateTime.now())
+                        .updatedAt(LocalDateTime.now())
+                        .build())
+                .build();
+        companyProfileRepository.save(profile);
+
+        project.setTargetCompanyProfileId(companyProfileId);
+        projectRepository.save(project);
     }
 
     // ─────────────────────────────────────────────
@@ -132,9 +182,20 @@ public class ProjectService {
 
     @Transactional(readOnly = true)
     public Page<ProjectResponse> getAllProjects(ProjectStatus status, ProjectType type, Pageable pageable) {
+        return getAllProjects(status, type, pageable, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ProjectResponse> getAllProjects(
+            ProjectStatus status,
+            ProjectType type,
+            Pageable pageable,
+            Long memberAccountId) {
         Page<Project> page;
 
-        if (status != null && type != null) {
+        if (memberAccountId != null) {
+            page = projectRepository.findAccessibleProjects(memberAccountId, status, type, pageable);
+        } else if (status != null && type != null) {
             page = projectRepository.findByStatusAndProjectType(status, type, pageable);
         } else if (status != null) {
             page = projectRepository.findByStatus(status, pageable);

@@ -82,33 +82,51 @@ public class ProfileService {
     }
 
     private void createNewProfile(Project project, CompanyCandidate candidate) {
-        String newCompanyId = UUID.randomUUID().toString();
-        log.info("Creating NEW CompanyProfile with companyId: {}", newCompanyId);
+        CompanyProfile profile = null;
+        if (StringUtils.hasText(project.getTargetCompanyProfileId())) {
+            profile = profileRepository.findById(project.getTargetCompanyProfileId())
+                    .orElse(null);
+        }
 
-        CompanyProfile profile = CompanyProfile.builder()
-                .companyId(newCompanyId)
-                .identity(mapIdentity(candidate.getIdentity()))
-                .business(mapBusiness(candidate.getBusiness()))
-                .companySize(mapCompanySize(candidate.getCompanySize()))
-                .contact(mapContact(candidate.getContact()))
-                .insights(mapInsights(candidate.getInsights()))
-                .financial(candidate.getFinancial())
-                .market(candidate.getMarket())
-                .innovation(candidate.getInnovation())
-                .risk(candidate.getRisk())
-                .compliance(candidate.getCompliance())
-                .reviewStatus("VERIFIED")
-                .metadata(CompanyProfile.Metadata.builder()
-                        .createdBy("SYSTEM")
-                        .createdAt(LocalDateTime.now())
-                        .updatedAt(LocalDateTime.now())
-                        .build())
-                .build();
+        if (profile == null) {
+            String newCompanyId = UUID.randomUUID().toString();
+            log.info("Creating NEW CompanyProfile with companyId: {}", newCompanyId);
+            profile = CompanyProfile.builder()
+                    .id(newCompanyId)
+                    .companyId(newCompanyId)
+                    .metadata(CompanyProfile.Metadata.builder()
+                            .createdBy("SYSTEM")
+                            .createdAt(LocalDateTime.now())
+                            .build())
+                    .build();
+            project.setTargetCompanyProfileId(newCompanyId);
+            projectRepository.save(project);
+        } else {
+            log.info("Completing pending CompanyProfile with companyId: {}", profile.getCompanyId());
+        }
+
+        if (candidate.getIdentity() != null) profile.setIdentity(mapIdentity(candidate.getIdentity()));
+        if (candidate.getBusiness() != null) profile.setBusiness(mapBusiness(candidate.getBusiness()));
+        if (candidate.getCompanySize() != null) profile.setCompanySize(mapCompanySize(candidate.getCompanySize()));
+        if (candidate.getContact() != null) profile.setContact(mapContact(candidate.getContact()));
+        if (candidate.getInsights() != null) profile.setInsights(mapInsights(candidate.getInsights()));
+        if (candidate.getFinancial() != null) profile.setFinancial(candidate.getFinancial());
+        if (candidate.getMarket() != null) profile.setMarket(candidate.getMarket());
+        if (candidate.getInnovation() != null) profile.setInnovation(candidate.getInnovation());
+        if (candidate.getRisk() != null) profile.setRisk(candidate.getRisk());
+        if (candidate.getCompliance() != null) profile.setCompliance(candidate.getCompliance());
+        profile.setReviewStatus("VERIFIED");
+        if (profile.getMetadata() == null) {
+            profile.setMetadata(new CompanyProfile.Metadata());
+            profile.getMetadata().setCreatedBy("SYSTEM");
+            profile.getMetadata().setCreatedAt(LocalDateTime.now());
+        }
+        profile.getMetadata().setUpdatedAt(LocalDateTime.now());
 
         addSourceRefs(profile, project, candidate);
 
         profileRepository.save(profile);
-        log.info("Successfully created CompanyProfile for companyId: {}", newCompanyId);
+        log.info("Successfully verified CompanyProfile for companyId: {}", profile.getCompanyId());
     }
 
     private void updateExistingProfile(Project project, CompanyCandidate candidate) {
@@ -147,6 +165,9 @@ public class ProfileService {
     }
 
     private void addSourceRefs(CompanyProfile profile, Project project, CompanyCandidate candidate) {
+        if (profile.getSourceRefs() == null) {
+            profile.setSourceRefs(new CompanyProfile.SourceRefs());
+        }
         profile.getSourceRefs().getProjectIds().add(String.valueOf(project.getId()));
         profile.getSourceRefs().getCandidateIds().add(candidate.getId());
 
@@ -197,11 +218,7 @@ public class ProfileService {
 
     @Transactional(readOnly = true)
     public Page<ProfileResponse> searchCompanyProfiles(String keyword, String industry, String market, String reviewStatus, String relationshipType, boolean excludeOwner, Pageable pageable) {
-        Criteria criteria = Criteria.where("isDeleted").ne(true);
-
-        if (excludeOwner) {
-            criteria.and("companyId").ne(ownerOrganizationService.getOwnerCompanyId());
-        }
+        Criteria criteria = visibleProfileCriteria(excludeOwner);
 
         if (StringUtils.hasText(keyword)) {
             criteria.orOperator(
@@ -227,7 +244,7 @@ public class ProfileService {
             }
 
             // 2. Query Neo4j
-            String cypher = String.format("MATCH (c:CompanyNode)-[:%s]-(:CompanyNode) RETURN DISTINCT c.companyId AS companyId", relationshipType);
+            String cypher = String.format("MATCH (c:Company)-[:%s]-(:Company) RETURN DISTINCT c.companyId AS companyId", relationshipType);
             java.util.List<String> neo4jCompanyIds = new java.util.ArrayList<>(neo4jClient.query(cypher)
                     .fetchAs(String.class)
                     .mappedBy((typeSystem, record) -> record.get("companyId").asString())
@@ -238,7 +255,7 @@ public class ProfileService {
             }
 
             // 3. Add to Mongo criteria
-            criteria.and("companyId").in(neo4jCompanyIds);
+            criteria.andOperator(Criteria.where("companyId").in(neo4jCompanyIds));
         }
 
         Query query = new Query(criteria);
@@ -251,11 +268,7 @@ public class ProfileService {
 
     @Transactional(readOnly = true)
     public Page<ProfileResponse> searchProfilesByName(String name, boolean excludeOwner, Pageable pageable) {
-        Criteria criteria = Criteria.where("isDeleted").ne(true);
-
-        if (excludeOwner) {
-            criteria.and("companyId").ne(ownerOrganizationService.getOwnerCompanyId());
-        }
+        Criteria criteria = visibleProfileCriteria(excludeOwner);
 
         if (StringUtils.hasText(name)) {
             criteria.orOperator(
@@ -267,6 +280,14 @@ public class ProfileService {
         java.util.List<CompanyProfile> profiles = mongoTemplate.find(query, CompanyProfile.class);
         long total = mongoTemplate.count(new Query(criteria), CompanyProfile.class);
         return new PageImpl<>(profiles, pageable, total).map(this::toResponse);
+    }
+
+    private Criteria visibleProfileCriteria(boolean excludeOwner) {
+        Criteria criteria = Criteria.where("isDeleted").ne(true);
+        if (excludeOwner) {
+            criteria.and("_id").ne(ownerOrganizationService.getOwnerCompanyProfileId());
+        }
+        return criteria;
     }
 
     @Transactional(readOnly = true)
@@ -303,6 +324,8 @@ public class ProfileService {
         if (profile.getIdentity() == null) profile.setIdentity(new CompanyProfile.Identity());
         if (StringUtils.hasText(request.getLegalName())) profile.getIdentity().setLegalName(request.getLegalName());
         if (StringUtils.hasText(request.getTradeName())) profile.getIdentity().setTradeName(request.getTradeName());
+        if (StringUtils.hasText(request.getStockTicker())) profile.getIdentity().setStockTicker(request.getStockTicker().trim().toUpperCase());
+        if (request.getStockExchange() != null) profile.getIdentity().setStockExchange(request.getStockExchange());
 
         if (profile.getBusiness() == null) profile.setBusiness(new CompanyProfile.Business());
         if (request.getIndustries() != null) profile.getBusiness().setIndustries(request.getIndustries());
@@ -319,6 +342,8 @@ public class ProfileService {
         if (request.getPhones() != null) profile.getContact().setPhones(request.getPhones());
 
         if (request.getTags() != null) profile.setTags(request.getTags());
+        if (request.getFinancial() != null) profile.setFinancial(request.getFinancial());
+        if (request.getCompanyMembers() != null) profile.setCompanyMembers(request.getCompanyMembers());
 
         profile.setVersion(profile.getVersion() + 1);
         profile.getMetadata().setUpdatedAt(LocalDateTime.now());
@@ -375,6 +400,7 @@ public class ProfileService {
                 .companySize(p.getCompanySize())
                 .contact(p.getContact())
                 .insights(p.getInsights())
+                .companyMembers(p.getCompanyMembers())
                 .financial(p.getFinancial())
                 .market(p.getMarket())
                 .innovation(p.getInnovation())
@@ -384,6 +410,8 @@ public class ProfileService {
                 .tags(p.getTags())
                 .metadata(p.getMetadata())
                 .version(p.getVersion())
+                .stockTicker(p.getIdentity() != null ? p.getIdentity().getStockTicker() : null)
+                .stockExchange(p.getIdentity() != null ? p.getIdentity().getStockExchange() : null)
                 .build();
     }
 

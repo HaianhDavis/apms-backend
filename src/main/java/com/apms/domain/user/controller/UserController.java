@@ -30,6 +30,12 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @GetMapping("/users")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<List<UserProfileResponse>>> getAllUsers() {
+        return ResponseEntity.ok(ApiResponse.success(userService.getAllUsers()));
+    }
+
     @PostMapping("/users")
     @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<UserProfileResponse>> createUser(
@@ -52,6 +58,22 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(response, "User updated successfully"));
     }
 
+    /**
+     * Admin password reset. Accepts only newPassword (BCrypt hashed server-side).
+     * Password is NEVER returned in response and NEVER logged in audit detail.
+     * Only SYSTEM_ADMIN can call this endpoint.
+     */
+    @PatchMapping("/users/{userId}/password")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> resetUserPassword(
+            @PathVariable Long userId,
+            @Valid @RequestBody ResetPasswordRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        userService.resetUserPassword(userId, request.getNewPassword(), currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(null, "Password reset successfully"));
+    }
+
     @PatchMapping("/users/{userId}/status")
     @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<Void>> updateUserStatus(
@@ -61,6 +83,20 @@ public class UserController {
 
         userService.updateUserStatus(userId, request, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(null, "User status updated"));
+    }
+
+    /**
+     * Soft delete a user. Sets deletedAt timestamp and deactivates the account.
+     * Cannot delete own account or the last SYSTEM_ADMIN.
+     */
+    @DeleteMapping("/users/{userId}")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> deleteUser(
+            @PathVariable Long userId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        userService.softDeleteUser(userId, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(null, "User deleted successfully"));
     }
 
     @GetMapping("/roles")

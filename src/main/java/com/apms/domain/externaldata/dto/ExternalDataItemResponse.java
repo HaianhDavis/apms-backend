@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @Builder
@@ -19,8 +20,12 @@ public class ExternalDataItemResponse {
     private String sentiment;
     private String riskLevel;
     private String opportunityLevel;
+    private String aiSummary;
+    private List<String> topics;
     private String relatedCompanyName;
     private String relatedCompanyId;
+    private Long projectId;
+    private String companyProfileId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

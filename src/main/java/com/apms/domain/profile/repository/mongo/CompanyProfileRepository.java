@@ -22,4 +22,15 @@ public interface CompanyProfileRepository extends MongoRepository<CompanyProfile
 
     @Query("{ 'sourceRefs.projectIds': ?0 }")
     java.util.List<CompanyProfile> findByProjectId(String projectId);
+
+    @Query("{ 'sourceRefs.projectIds': { $exists: true, $ne: [] } }")
+    java.util.List<CompanyProfile> findCompaniesInAnyProject();
+
+    @Query("{ $and: [ { 'identity.stockTicker': { $exists: true, $ne: '' } }, "
+            + "{ 'identity.stockExchange': { $exists: true, $nin: [null, 'NONE'] } } ] }")
+    java.util.List<CompanyProfile> findListedCompanies();
+
+    @Query(value = "{ 'isDeleted': { $ne: true }, '_id': { $ne: ?0 }, "
+            + "'sourceRefs.projectIds.0': { $exists: true } }", count = true)
+    long countProjectScopedProfilesExcludingCompany(String companyProfileId);
 }

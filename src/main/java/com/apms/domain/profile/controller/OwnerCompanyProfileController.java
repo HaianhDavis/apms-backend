@@ -6,10 +6,12 @@ import com.apms.domain.profile.dto.CompanyProfileVersionResponse;
 import com.apms.domain.profile.dto.OwnerProfileReadinessResponse;
 import com.apms.domain.profile.dto.ProfileResponse;
 import com.apms.domain.profile.dto.ReferenceCompanyContextResponse;
+import com.apms.domain.profile.OwnerCompanyProfileSnapshot;
 import com.apms.domain.profile.service.CompanyProfileVersionService;
 import com.apms.domain.profile.service.OwnerOrganizationService;
 import com.apms.domain.profile.service.ProfileService;
 import com.apms.domain.profile.service.ReferenceCompanyContextService;
+import com.apms.domain.profile.service.OwnerCompanyProfileSnapshotService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -27,6 +29,7 @@ public class OwnerCompanyProfileController {
     private final ProfileService profileService;
     private final CompanyProfileVersionService versionService;
     private final ReferenceCompanyContextService referenceCompanyContextService;
+    private final OwnerCompanyProfileSnapshotService snapshotService;
 
     // ─────────────────────────────────────────────
     // GET /api/v1/owner/company-profile
@@ -38,6 +41,12 @@ public class OwnerCompanyProfileController {
         String ownerId = ownerOrganizationService.getOwnerCompanyId();
         ProfileResponse response = profileService.getApprovedProfileResponse(ownerId);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @GetMapping("/company-profile/snapshot")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<OwnerCompanyProfileSnapshot>> getOwnerCompanyProfileSnapshot() {
+        return ResponseEntity.ok(ApiResponse.success(snapshotService.getCurrentSnapshot()));
     }
 
     // ─────────────────────────────────────────────

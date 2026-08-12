@@ -16,6 +16,8 @@ import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.profile.service.OwnerOrganizationService;
+import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
+import org.mockito.ArgumentCaptor;
 
 @ExtendWith(MockitoExtension.class)
 public class ProjectServiceProgressTest {
@@ -55,6 +58,8 @@ public class ProjectServiceProgressTest {
     private AuditLogService auditLogService;
     @Mock
     private OwnerOrganizationService ownerOrganizationService;
+    @Mock
+    private CompanyProfileRepository companyProfileRepository;
 
     @InjectMocks
     private ProjectService projectService;
@@ -104,10 +109,19 @@ public class ProjectServiceProgressTest {
             p.setId(200L);
             return p;
         });
+        when(companyProfileRepository.save(any(CompanyProfile.class))).thenAnswer(i -> i.getArgument(0));
 
         ProjectResponse res = projectService.createProject(req, 1L);
         assertNotNull(res);
         assertEquals(req.getPlannedEndDate(), res.getPlannedEndDate());
+        assertNotNull(res.getTargetCompanyProfileId());
+
+        ArgumentCaptor<CompanyProfile> profileCaptor = ArgumentCaptor.forClass(CompanyProfile.class);
+        verify(companyProfileRepository).save(profileCaptor.capture());
+        CompanyProfile profile = profileCaptor.getValue();
+        assertEquals("PENDING_RESEARCH", profile.getReviewStatus());
+        assertEquals("Target", profile.getIdentity().getLegalName());
+        assertTrue(profile.getSourceRefs().getProjectIds().contains("200"));
     }
 
     @Test

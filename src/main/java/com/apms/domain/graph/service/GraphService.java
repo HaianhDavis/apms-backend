@@ -1,6 +1,7 @@
 package com.apms.domain.graph.service;
 
 import com.apms.common.enums.RelationshipType;
+import com.apms.common.enums.CandidateStatus;
 import com.apms.common.event.CandidateApprovedEvent;
 import com.apms.domain.candidate.CompanyCandidate;
 import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
@@ -16,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.annotation.Order;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -43,6 +45,90 @@ public class GraphService {
     private final ProjectRepository projectRepository;
     private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /**
+     * Rebuilds graph data for profiles created before graph synchronization was
+     * introduced. Nodes are always safe to merge; a relationship is restored
+     * only when an approved candidate and an explicit project relationship exist.
+     */
+    @EventListener(ApplicationReadyEvent.class)
+    public void synchronizeExistingProfiles() {
+        int nodesSynchronized = 0;
+        int relationshipsSynchronized = 0;
+
+        mergeOwnerNode();
+
+        for (CompanyProfile profile : profileRepository.findAll()) {
+            if (Boolean.TRUE.equals(profile.getIsDeleted()) || ownerOrganizationService.isOwnerCompany(profile.getId())) {
+                continue;
+            }
+
+            mergeCompanyNode(profile);
+            nodesSynchronized++;
+
+            if (profile.getSourceRefs() == null || profile.getSourceRefs().getCandidateIds() == null) {
+                continue;
+            }
+
+            for (String candidateId : profile.getSourceRefs().getCandidateIds()) {
+                CompanyCandidate candidate = candidateRepository.findById(candidateId).orElse(null);
+                if (candidate == null || candidate.getStatus() != CandidateStatus.APPROVED) {
+                    continue;
+                }
+
+                Project project = null;
+                try {
+                    if (StringUtils.hasText(candidate.getProjectId())) {
+                        project = projectRepository.findById(Long.valueOf(candidate.getProjectId())).orElse(null);
+                    }
+                } catch (NumberFormatException ex) {
+                    log.warn("Skipping graph relationship sync for candidate {} with invalid project ID {}",
+                            candidate.getId(), candidate.getProjectId());
+                }
+                RelationshipType relationshipType = candidate.getRelationshipTypeOverride() != null
+                        ? candidate.getRelationshipTypeOverride()
+                        : project != null ? project.getTargetRelationshipType() : null;
+                if (relationshipType == null) {
+                    continue;
+                }
+
+                createRelationship(
+                        ownerOrganizationService.getOwnerCompanyId(),
+                        profile.getCompanyId(),
+                        relationshipType.name(),
+                        candidate.getReview() != null ? candidate.getReview().getReviewedBy() : "SYSTEM_SYNC",
+                        candidate.getProjectId(),
+                        candidate.getId(),
+                        candidate.getRelationshipConfidenceScore() != null ? candidate.getRelationshipConfidenceScore() : 1.0
+                );
+                relationshipsSynchronized++;
+                break;
+            }
+        }
+
+        log.info("Synchronized {} company graph nodes and {} FPT relationships", nodesSynchronized, relationshipsSynchronized);
+    }
+
+    private void mergeOwnerNode() {
+        ownerOrganizationService.findOwnerCompanyProfile().ifPresent(profile -> {
+            String name = profile.getIdentity() != null && StringUtils.hasText(profile.getIdentity().getLegalName())
+                    ? profile.getIdentity().getLegalName() : "Owner Organization";
+            String industry = profile.getBusiness() != null && profile.getBusiness().getIndustries() != null
+                    && !profile.getBusiness().getIndustries().isEmpty()
+                    ? profile.getBusiness().getIndustries().get(0) : "Unknown";
+
+            neo4jClient.query("""
+                    MERGE (c:Company {companyId: $ownerCompanyId})
+                    ON CREATE SET c.name = $name, c.industry = $industry, c.createdAt = datetime()
+                    ON MATCH SET c.name = $name, c.industry = $industry, c.updatedAt = datetime()
+                    """)
+                    .bindAll(Map.of(
+                            "ownerCompanyId", ownerOrganizationService.getOwnerCompanyId(),
+                            "name", name,
+                            "industry", industry))
+                    .run();
+        });
+    }
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER
@@ -219,13 +305,27 @@ public class GraphService {
         log.info("Updated relationship metadata ({})-[:{}]->({})", sourceCompanyId, relType, targetCompanyId);
     }
 
+
     // ─────────────────────────────────────────────
     // READ OPERATIONS
     // ─────────────────────────────────────────────
 
     public GraphCompanyDto getCompanyNodeWithRelationships(String companyId) {
-        CompanyNode node = companyNodeRepository.findByCompanyId(companyId)
+        String cypher = "MATCH (c:Company {companyId: $companyId}) RETURN c";
+        CompanyNode node = neo4jClient.query(cypher)
+                .bind(companyId).to("companyId")
+                .fetchAs(CompanyNode.class)
+                .mappedBy((typeSystem, record) -> {
+                    var n = record.get("c").asNode();
+                    CompanyNode company = new CompanyNode();
+                    company.setCompanyId(n.get("companyId").asString());
+                    company.setName(n.get("name").asString("Unknown"));
+                    company.setIndustry(n.get("industry").asString("Unknown"));
+                    return company;
+                })
+                .one()
                 .orElse(null);
+
         if (node == null) return null;
 
         List<CompanyRelationshipDto> relationships = getOutgoingRelationships(companyId);
@@ -241,13 +341,25 @@ public class GraphService {
     }
 
     public List<GraphCompanyDto> getNetwork() {
-        return companyNodeRepository.findAllNodes().stream()
-                .map(node -> GraphCompanyDto.builder()
-                        .companyId(node.getCompanyId())
-                        .name(node.getName())
-                        .industry(node.getIndustry())
-                        .createdAt(node.getCreatedAt())
-                        .updatedAt(node.getUpdatedAt())
+        String cypher = "MATCH (c:Company) RETURN c";
+        return neo4jClient.query(cypher)
+                .fetchAs(CompanyNode.class)
+                .mappedBy((typeSystem, record) -> {
+                    var node = record.get("c").asNode();
+                    CompanyNode company = new CompanyNode();
+                    company.setCompanyId(node.get("companyId").asString());
+                    company.setName(node.get("name").asString("Unknown"));
+                    company.setIndustry(node.get("industry").asString("Unknown"));
+                    return company;
+                })
+                .all().stream()
+                // The network consumer needs both nodes and persisted edges. Returning
+                // nodes alone made a populated ecosystem appear disconnected in the UI.
+                .map(company -> GraphCompanyDto.builder()
+                        .companyId(company.getCompanyId())
+                        .name(company.getName())
+                        .industry(company.getIndustry())
+                        .relationships(getOutgoingRelationships(company.getCompanyId()))
                         .build())
                 .toList();
     }
@@ -257,9 +369,18 @@ public class GraphService {
             return List.of();
         }
 
-        String cypher = String.format("MATCH (c:Company)-[:%s]->() RETURN DISTINCT c", relType);
+        // Relationships are modeled from the owner organization to the target company.
+        // Returning the source node here would incorrectly surface FPT as its own partner,
+        // competitor, supplier, or customer.
+        String cypher = String.format("""
+            MATCH (owner:Company)-[:%s]-(c:Company)
+            WHERE owner.companyId IN $ownerCompanyIds
+              AND NOT c.companyId IN $ownerCompanyIds
+            RETURN DISTINCT c
+            """, relType);
 
         return neo4jClient.query(cypher)
+                .bind(ownerOrganizationService.getOwnerGraphCompanyIds()).to("ownerCompanyIds")
                 .fetchAs(CompanyNode.class)
                 .mappedBy((typeSystem, record) -> {
                     var node = record.get("c").asNode();
@@ -287,7 +408,7 @@ public class GraphService {
                    r.startDate as startDate, r.endDate as endDate, r.status as status, r.metadata as metadata
             """;
 
-        return (List<CompanyRelationshipDto>) neo4jClient.query(cypher)
+        return neo4jClient.query(cypher)
                 .bindAll(Map.of("companyId", companyId))
                 .fetch()
                 .all()

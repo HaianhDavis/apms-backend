@@ -49,4 +49,7 @@ public class Account {
     private String phoneNumber;
 
     private LocalDateTime phoneVerifiedAt;
+
+    @Column
+    private LocalDateTime deletedAt;
 }

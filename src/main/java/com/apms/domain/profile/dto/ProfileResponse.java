@@ -17,6 +17,7 @@ public class ProfileResponse {
     private CompanyProfile.CompanySize companySize;
     private CompanyProfile.Contact contact;
     private CompanyProfile.Insights insights;
+    private List<CompanyProfile.CompanyMember> companyMembers;
 
     private com.apms.domain.company.model.FinancialInfo financial;
     private com.apms.domain.company.model.MarketInfo market;
@@ -28,4 +29,6 @@ public class ProfileResponse {
     private List<String> tags;
     private CompanyProfile.Metadata metadata;
     private Integer version;
+    private String stockTicker;
+    private com.apms.common.enums.StockExchange stockExchange;
 }

@@ -1,0 +1,18 @@
+package com.apms.domain.admin.dto;
+
+import lombok.Builder;
+import lombok.Data;
+
+import java.time.LocalDateTime;
+
+@Data
+@Builder
+public class IpWhitelistResponse {
+    private Long id;
+    private String ipAddress;
+    private String description;
+    private Boolean enabled;
+    private Long createdById;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+}

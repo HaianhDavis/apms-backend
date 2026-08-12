@@ -19,6 +19,7 @@ import java.util.List;
 public class GraphController {
 
     private final GraphService graphService;
+    private final com.apms.domain.ai.service.NetworkAiService networkAiService;
 
     @GetMapping("/companies/{companyId}")
     @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
@@ -64,5 +65,11 @@ public class GraphController {
     @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<List<GraphCompanyDto>>> getPotentialPartners() {
         return ResponseEntity.ok(ApiResponse.success(graphService.getCompaniesByRelationshipType("POTENTIAL_PARTNER_OF")));
+    }
+
+    @GetMapping("/companies/{companyId}/ai-recommendations")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<ApiResponse<com.apms.domain.ai.dto.NetworkAiRecommendationDto>> getAiRecommendations(@PathVariable String companyId) {
+        return ResponseEntity.ok(ApiResponse.success(networkAiService.getRecommendationsForCompany(companyId)));
     }
 }

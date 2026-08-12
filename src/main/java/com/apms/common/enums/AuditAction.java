@@ -140,5 +140,25 @@ public enum AuditAction {
     CONFIDENTIAL_NEWS_OTP_SENT,
     CONFIDENTIAL_NEWS_OTP_VERIFIED,
     CONFIDENTIAL_NEWS_ACCESS_DENIED,
-    CONFIDENTIAL_NEWS_ARTICLE_VIEWED
+    CONFIDENTIAL_NEWS_ARTICLE_VIEWED,
+
+    // --- Admin: Password Reset ---
+    ADMIN_RESET_USER_PASSWORD,
+
+    // --- Admin: IP Whitelist ---
+    IP_ADDED_TO_WHITELIST,
+    IP_UPDATED_IN_WHITELIST,
+    IP_REMOVED_FROM_WHITELIST,
+    IP_WHITELIST_ENABLED,
+    IP_WHITELIST_DISABLED,
+
+    // --- Admin: User Lifecycle ---
+    USER_DELETED,
+    USER_RESTORED,
+
+    // --- Admin: System Settings ---
+    SYSTEM_SETTINGS_UPDATED,
+
+    // --- Admin: Permissions ---
+    ROLE_PERMISSIONS_UPDATED
 }

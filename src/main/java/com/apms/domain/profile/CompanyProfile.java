@@ -1,5 +1,6 @@
 package com.apms.domain.profile;
 
+import com.apms.common.enums.StockExchange;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -120,6 +121,19 @@ public class CompanyProfile {
         private String tradeName;
         private String taxCode;
         private String registrationNumber;
+
+        /**
+         * Stock ticker symbol (e.g. FPT, VNM), stored uppercase.
+         * Null/empty when the company is not listed.
+         */
+        @Indexed
+        private String stockTicker;
+
+        /**
+         * Exchange where the company is listed. NONE = not listed.
+         */
+        @Builder.Default
+        private StockExchange stockExchange = StockExchange.NONE;
     }
 
     @Data

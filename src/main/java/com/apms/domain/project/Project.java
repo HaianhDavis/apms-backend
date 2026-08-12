@@ -32,8 +32,9 @@ public class Project {
     private ProjectType projectType;
 
     /**
-     * Nullable. Required only when projectType = UPDATE_EXISTING_COMPANY.
-     * Stores the UUID (companyId) of the target CompanyProfile in MongoDB.
+     * Supplied by the client only when projectType = UPDATE_EXISTING_COMPANY.
+     * For RESEARCH_NEW_COMPANY, the service creates a pending profile and fills
+     * this field after the project receives its generated ID.
      */
     @Column(nullable = true)
     private String targetCompanyProfileId;

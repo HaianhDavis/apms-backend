@@ -31,6 +31,18 @@ public class UserService {
         return getProfileResponse(currentUserId);
     }
 
+    @Transactional(readOnly = true)
+    public List<UserProfileResponse> getAllUsers() {
+        List<Account> accounts = accountRepository.findAllByDeletedAtIsNull();
+        return accounts.stream()
+                .map(account -> {
+                    UserProfile profile = userProfileRepository.findByAccountId(account.getId())
+                            .orElse(UserProfile.builder().firstName("").lastName("").build());
+                    return mapToResponse(account, profile);
+                })
+                .collect(Collectors.toList());
+    }
+
     @Transactional
     public UserProfileResponse createUser(CreateUserRequest request, Long adminId) {
         if (accountRepository.existsByEmail(request.getEmail())) {
@@ -106,6 +118,55 @@ public class UserService {
 
         auditLogService.log(adminId, AuditAction.USER_ROLES_UPDATED, "Account", account.getId().toString(), "Updated roles for: " + account.getEmail());
     }
+
+    @Transactional
+    public void resetUserPassword(Long targetUserId, String newPassword, Long adminId) {
+        // Prevent admin from being locked out of their own account inadvertently
+        Account account = accountRepository.findById(targetUserId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + targetUserId));
+
+        // Hash with BCrypt — never store or log plain text
+        account.setPasswordHash(passwordEncoder.encode(newPassword));
+        accountRepository.save(account);
+
+        // Audit: log actor and target, but NEVER the password itself
+        auditLogService.log(
+                adminId,
+                AuditAction.ADMIN_RESET_USER_PASSWORD,
+                "Account",
+                account.getId().toString(),
+                "Admin reset password for user: " + account.getEmail()
+        );
+    }
+
+    @Transactional
+    public void softDeleteUser(Long targetUserId, Long adminId) {
+        if (targetUserId.equals(adminId)) {
+            throw new IllegalArgumentException("Cannot delete your own account");
+        }
+
+        Account account = accountRepository.findById(targetUserId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        // Protect the last SYSTEM_ADMIN
+        boolean isSystemAdmin = account.getRoles().contains(SystemRole.SYSTEM_ADMIN);
+        if (isSystemAdmin) {
+            long adminCount = accountRepository.findAll().stream()
+                    .filter(a -> a.getDeletedAt() == null && a.getRoles().contains(SystemRole.SYSTEM_ADMIN))
+                    .count();
+            if (adminCount <= 1) {
+                throw new IllegalArgumentException("Cannot delete the last SYSTEM_ADMIN account");
+            }
+        }
+
+        account.setIsActive(false);
+        account.setDeletedAt(java.time.LocalDateTime.now());
+        accountRepository.save(account);
+
+        auditLogService.log(adminId, AuditAction.USER_DELETED, "Account", account.getId().toString(),
+                "Soft-deleted user: " + account.getEmail());
+    }
+
 
     public List<SystemRole> getAllRoles() {
         return Arrays.stream(SystemRole.values())
