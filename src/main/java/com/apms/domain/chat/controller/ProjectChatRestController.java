@@ -23,6 +23,15 @@ public class ProjectChatRestController {
 
     private final ProjectChatService chatService;
 
+    @Operation(summary = "Send a project chat message")
+    @PostMapping
+    public ResponseEntity<ApiResponse<ChatMessageResponse>> sendMessage(
+            @PathVariable Long projectId,
+            @Valid @RequestBody ChatMessageRequest request) {
+        ChatMessageResponse response = chatService.sendMessage(projectId, request);
+        return ResponseEntity.ok(ApiResponse.success(response, "Message sent"));
+    }
+
     @Operation(summary = "Get project chat history")
     @GetMapping
     public ResponseEntity<ApiResponse<Page<ChatMessageResponse>>> getHistory(

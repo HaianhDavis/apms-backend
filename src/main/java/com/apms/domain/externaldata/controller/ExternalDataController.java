@@ -27,7 +27,13 @@ public class ExternalDataController {
     public ResponseEntity<ApiResponse<PageResponse<ExternalDataItemResponse>>> getNews(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String source,
+<<<<<<< HEAD
             @RequestParam(required = false) Long projectId,
+=======
+            @RequestParam(required = false) String companyName,
+            @RequestParam(required = false) String sentiment,
+            @RequestParam(required = false) String importance,
+>>>>>>> origin/nguyen-feature
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @RequestParam(defaultValue = "0") int page,
@@ -35,11 +41,25 @@ public class ExternalDataController {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "publishedAt"));
         PageResponse<ExternalDataItemResponse> response = PageResponse.of(
+<<<<<<< HEAD
                 // A news feed contains every crawled article. RISK and OPPORTUNITY are
                 // intelligence signals, not mutually exclusive article types.
                 externalDataService.getExternalData(null, keyword, source, projectId, fromDate, toDate, pageable));
+=======
+                externalDataService.getExternalData(ExternalDataCategory.NEWS, keyword, source, companyName, fromDate, toDate, sentiment, importance, pageable));
+>>>>>>> origin/nguyen-feature
 
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @GetMapping("/news/{id}")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN','BUSINESS_OWNER','BUSINESS_DEVELOPMENT_MANAGER','BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<ExternalDataItemResponse>> getNewsById(@PathVariable String id) {
+        ExternalDataItemResponse item = externalDataService.getExternalDataById(id);
+        if (item != null) {
+            return ResponseEntity.ok(ApiResponse.success(item));
+        }
+        return ResponseEntity.status(404).body(ApiResponse.error("Article not found"));
     }
 
     @GetMapping("/opportunities")
@@ -47,7 +67,11 @@ public class ExternalDataController {
     public ResponseEntity<ApiResponse<PageResponse<ExternalDataItemResponse>>> getOpportunities(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String source,
+<<<<<<< HEAD
             @RequestParam(required = false) Long projectId,
+=======
+            @RequestParam(required = false) String companyName,
+>>>>>>> origin/nguyen-feature
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @RequestParam(defaultValue = "0") int page,
@@ -55,7 +79,11 @@ public class ExternalDataController {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "publishedAt"));
         PageResponse<ExternalDataItemResponse> response = PageResponse.of(
+<<<<<<< HEAD
                 externalDataService.getExternalData(ExternalDataCategory.OPPORTUNITY, keyword, source, projectId, fromDate, toDate, pageable));
+=======
+                externalDataService.getExternalData(ExternalDataCategory.OPPORTUNITY, keyword, source, companyName, fromDate, toDate, null, null, pageable));
+>>>>>>> origin/nguyen-feature
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }
@@ -65,7 +93,11 @@ public class ExternalDataController {
     public ResponseEntity<ApiResponse<PageResponse<ExternalDataItemResponse>>> getRisks(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String source,
+<<<<<<< HEAD
             @RequestParam(required = false) Long projectId,
+=======
+            @RequestParam(required = false) String companyName,
+>>>>>>> origin/nguyen-feature
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @RequestParam(defaultValue = "0") int page,
@@ -73,7 +105,11 @@ public class ExternalDataController {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "publishedAt"));
         PageResponse<ExternalDataItemResponse> response = PageResponse.of(
+<<<<<<< HEAD
                 externalDataService.getExternalData(ExternalDataCategory.RISK, keyword, source, projectId, fromDate, toDate, pageable));
+=======
+                externalDataService.getExternalData(ExternalDataCategory.RISK, keyword, source, companyName, fromDate, toDate, null, null, pageable));
+>>>>>>> origin/nguyen-feature
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }

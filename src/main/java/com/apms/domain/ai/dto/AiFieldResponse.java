@@ -9,5 +9,5 @@ public class AiFieldResponse {
     private Object value;
     private Double confidence;
     private String evidenceText;
-    private Integer pageNumber;
+    private java.util.List<String> sourceDocumentIds;
 }

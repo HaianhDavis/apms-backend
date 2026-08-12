@@ -59,15 +59,15 @@ public class CandidateController {
     // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
     // ─────────────────────────────────────────────
     @GetMapping("/projects/{projectId}/candidates")
-    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.isMemberOrOwner(#projectId == null ? -1 : Long.parseLong(#projectId))")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.isMemberOrOwner(#projectId)")
     public ResponseEntity<ApiResponse<PageResponse<CandidateResponse>>> getProjectCandidates(
-            @PathVariable String projectId,
+            @PathVariable Long projectId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "candidateOrder"));
         PageResponse<CandidateResponse> response = PageResponse.of(
-                candidateService.getProjectCandidates(projectId, pageable));
+                candidateService.getProjectCandidates(String.valueOf(projectId), pageable));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -102,6 +102,15 @@ public class CandidateController {
     // POST /api/v1/candidates/{candidateId}/submit
     // Role: BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
+    @DeleteMapping("/candidates/{candidateId}")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
+    public ResponseEntity<ApiResponse<Void>> deleteDraftCandidate(
+            @PathVariable String candidateId) {
+
+        candidateService.deleteDraftCandidate(candidateId);
+        return ResponseEntity.ok(ApiResponse.success(null, "Draft candidate deleted successfully"));
+    }
+
     @PostMapping("/candidates/{candidateId}/submit")
     @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> submitCandidate(
@@ -130,7 +139,7 @@ public class CandidateController {
     // Role: BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @PostMapping("/candidates/{candidateId}/reject")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> rejectCandidate(
             @PathVariable String candidateId,
             @Valid @RequestBody RejectCandidateRequest request,
@@ -145,7 +154,7 @@ public class CandidateController {
     // Role: BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @PostMapping("/candidates/{candidateId}/approve")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> approveCandidate(
             @PathVariable String candidateId,
             @RequestBody(required = false) ApproveCandidateRequest request,
@@ -157,5 +166,45 @@ public class CandidateController {
 
         return ResponseEntity.ok(ApiResponse.success(
                 candidateService.approveCandidate(candidateId, request, currentUser.getId()), "Candidate approved"));
+    }
+
+    // ─────────────────────────────────────────────
+    // PATCH /api/v1/projects/{projectId}/candidates/{candidateId}/review
+    // ─────────────────────────────────────────────
+    @PatchMapping("/projects/{projectId}/candidates/{candidateId}/review")
+    @PreAuthorize("(hasRole('BUSINESS_DEVELOPMENT_STAFF') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')) and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> reviewCandidate(
+            @PathVariable Long projectId,
+            @PathVariable String candidateId,
+            @RequestBody com.apms.domain.candidate.dto.CandidateReviewRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(ApiResponse.success(
+                candidateService.reviewCandidate(String.valueOf(projectId), candidateId, request, currentUser.getId()), "Candidate fields reviewed successfully"));
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/v1/projects/{projectId}/candidates/{candidateId}/review/complete
+    // ─────────────────────────────────────────────
+    @PostMapping("/projects/{projectId}/candidates/{candidateId}/review/complete")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> completeCandidateReview(
+            @PathVariable Long projectId,
+            @PathVariable String candidateId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(ApiResponse.success(
+                candidateService.completeCandidateFieldReview(candidateId, currentUser.getId()), "Candidate field review completed successfully"));
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/v1/projects/{projectId}/candidates/{candidateId}/send-back
+    // ─────────────────────────────────────────────
+    @PostMapping("/projects/{projectId}/candidates/{candidateId}/send-back")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> sendBackCandidate(
+            @PathVariable Long projectId,
+            @PathVariable String candidateId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(ApiResponse.success(
+                candidateService.sendBackCandidate(candidateId, currentUser.getId()), "Candidate sent back for revision successfully"));
     }
 }

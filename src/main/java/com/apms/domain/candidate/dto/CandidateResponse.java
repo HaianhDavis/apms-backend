@@ -13,6 +13,7 @@ public class CandidateResponse {
     private String projectId;
     private String importJobId;
     private String rawDocumentId;
+    private java.util.List<String> sourceDocumentIds;
     private Integer candidateOrder;
     private Integer revisionNumber;
     private CandidateStatus status;
@@ -39,6 +40,12 @@ public class CandidateResponse {
     private CompanyCandidate.Deduplication deduplication;
     private CompanyCandidate.ExtractionSource extractionSource;
     private CompanyCandidate.Review review;
+    private java.util.Map<String, java.util.List<CompanyCandidate.DocumentEvidence>> fieldEvidence;
+    private java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> fieldResults;
+    private java.util.List<com.apms.domain.project.fieldapproval.FieldApprovalRecord> fieldApprovals;
+    private com.apms.domain.ai.dto.ExtractionQualityStatus qualityStatus;
+    private com.apms.domain.ai.dto.ExtractionQualityMetrics qualityMetrics;
+    private String rawAiOutput;
     private CompanyCandidate.ScorePreview scorePreview;
     private CompanyCandidate.AiMetadata aiMetadata;
     private CompanyCandidate.Metadata metadata;

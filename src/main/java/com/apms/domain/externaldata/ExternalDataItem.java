@@ -36,11 +36,15 @@ public class ExternalDataItem {
     private String relatedCompanyName;
     private String relatedCompanyId;
 
+<<<<<<< HEAD
     /** SQL project that established the company research scope. */
     private Long projectId;
 
     /** Mongo company profile selected or created when the project was created. */
     private String companyProfileId;
+=======
+    private String imageUrl;
+>>>>>>> origin/nguyen-feature
 
     @CreatedDate
     private LocalDateTime createdAt;

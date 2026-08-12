@@ -20,6 +20,8 @@ import org.springframework.context.annotation.FilterType;
         "com.apms.domain.externaldata.repository.mongo",
         "com.apms.domain.score.repository.mongo",
         "com.apms.domain.contract.repository.mongo",
+        "com.apms.domain.crawler.repository",
+        "com.apms.domain.contract.repository.mongo",
         "com.apms.domain.chat.repository",
         "com.apms.domain.companymember.repository",
         "com.apms.domain.news.repository",

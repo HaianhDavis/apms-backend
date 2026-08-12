@@ -52,7 +52,7 @@ public class AiExtractionService {
     @Value("${spring.ai.openai.api-key:dummy-key}")
     private String openAiApiKey;
 
-    @Value("${app.ai.gemini.model:gemini-2.5-flash}")
+    @Value("${app.ai.gemini.model:gemini-3.6-flash}")
     private String geminiModel;
 
     @Value("${app.storage.upload-dir:uploads/}")
@@ -206,20 +206,47 @@ public class AiExtractionService {
             cache.getFieldResults().put(fieldName, fieldResult);
         }
 
-        fieldResult.setReviewStatus(request.getReviewStatus());
-        if (request.getReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED) {
-            if (request.getReviewedValue() == null) {
-                throw new BusinessValidationException("EDITED review status requires a reviewedValue.");
+        if (request.isManager()) {
+            if (request.getManagerReviewStatus() != null) {
+                fieldResult.setManagerReviewStatus(request.getManagerReviewStatus());
             }
-            fieldResult.setReviewedValue(request.getReviewedValue());
+            if (request.getReviewedValue() != null || request.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED) {
+                if (request.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED && request.getReviewedValue() == null) {
+                    throw new BusinessValidationException("EDITED review status requires a reviewedValue.");
+                }
+                fieldResult.setStaffReviewedValue(request.getReviewedValue());
+            } else {
+                fieldResult.setStaffReviewedValue(request.getReviewedValue());
+            }
+            fieldResult.setManagerReviewComment(request.getComment());
+            fieldResult.setManagerReviewedByUserId(userId);
+            fieldResult.setManagerReviewedAt(LocalDateTime.now());
         } else {
-            // ACCEPTED, REJECTED, NEEDS_REVIEW
-            fieldResult.setReviewedValue(request.getReviewedValue());
-        }
+            if (fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED) {
+                throw new BusinessValidationException("Cannot edit field because manager has already ACCEPTED it.");
+            }
+            if (request.getStaffReviewStatus() != null) {
+                fieldResult.setStaffReviewStatus(request.getStaffReviewStatus());
+            }
+            if (request.getReviewedValue() != null || request.getStaffReviewStatus() == com.apms.domain.ai.dto.StaffFieldReviewStatus.EDITED) {
+                if (request.getStaffReviewStatus() == com.apms.domain.ai.dto.StaffFieldReviewStatus.EDITED && request.getReviewedValue() == null) {
+                    throw new BusinessValidationException("EDITED review status requires a reviewedValue.");
+                }
+                fieldResult.setStaffReviewedValue(request.getReviewedValue());
+            } else {
+                fieldResult.setStaffReviewedValue(request.getReviewedValue());
+            }
+            
+            if ((fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.REJECTED || 
+                 fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW) &&
+                request.getStaffReviewStatus() == com.apms.domain.ai.dto.StaffFieldReviewStatus.EDITED) {
+                fieldResult.setManagerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING);
+            }
 
-        fieldResult.setReviewComment(request.getComment());
-        fieldResult.setReviewedByUserId(userId);
-        fieldResult.setReviewedAt(LocalDateTime.now());
+            fieldResult.setStaffReviewComment(request.getComment());
+            fieldResult.setStaffReviewedByUserId(userId);
+            fieldResult.setStaffReviewedAt(LocalDateTime.now());
+        }
 
         cache.setLastModifiedBy(String.valueOf(userId));
         cache.setUpdatedAt(LocalDateTime.now());
@@ -236,8 +263,8 @@ public class AiExtractionService {
             for (Map.Entry<String, com.apms.domain.ai.dto.ExtractionFieldResult> entry : cache.getFieldResults().entrySet()) {
                 com.apms.domain.ai.dto.ExtractionFieldResult result = entry.getValue();
                 if ("legalName".equals(entry.getKey()) || "taxCode".equals(entry.getKey())) {
-                    if (result.getReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW ||
-                       (result.getReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING &&
+                    if (result.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW ||
+                       (result.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING &&
                         result.getValidationStatus() == com.apms.domain.ai.dto.ExtractionValidationStatus.FAIL)) {
                         throw new BusinessValidationException("Cannot complete review. Critical field '" + entry.getKey() + "' requires review.");
                     }

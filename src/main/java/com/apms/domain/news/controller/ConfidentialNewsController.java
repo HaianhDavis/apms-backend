@@ -11,9 +11,8 @@ import com.apms.domain.news.dto.CompanyIntelligenceArticleResponse;
 import com.apms.domain.news.entity.CompanyIntelligenceArticle;
 import com.apms.domain.news.repository.CompanyIntelligenceArticleRepository;
 import com.apms.domain.profile.CompanyProfile;
-import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
-import com.apms.domain.security.enums.StepUpPurpose;
-import com.apms.domain.security.service.StepUpTokenService;
+import com.apms.domain.profile.service.CompanyProfileAccessService;
+import com.apms.domain.security.service.StepUpAuthenticationService;
 import com.apms.security.UserDetailsImpl;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -44,11 +43,10 @@ import java.nio.file.Path;
 public class ConfidentialNewsController {
 
     private final CompanyIntelligenceArticleRepository articleRepository;
-    private final CompanyProfileRepository companyProfileRepository;
-    private final StepUpTokenService stepUpTokenService;
+    private final CompanyProfileAccessService companyProfileAccessService;
+    private final StepUpAuthenticationService stepUpAuthenticationService;
     private final StorageService storageService;
     private final AuditLogService auditLogService;
-    private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
 
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<CompanyIntelligenceArticleResponse>>> listArticles(
@@ -130,39 +128,19 @@ public class ConfidentialNewsController {
         UserDetailsImpl currentUser = getCurrentUser();
         auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_ACCESS_REQUESTED, "CompanyProfile", companyProfileId, "Confidential news access requested");
 
-        if (!hasRole(currentUser, SystemRole.BUSINESS_OWNER)) {
-            auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_ACCESS_DENIED, "CompanyProfile", companyProfileId, "User is not a BUSINESS_OWNER");
-            throw new AccessDeniedException("Only BUSINESS_OWNER can access confidential news");
-        }
-
-        if (!ownerOrganizationService.isOwnerCompany(companyProfileId)) {
-            throw new AccessDeniedException("Company is not in the Owner organization scope");
-        }
-
-        CompanyProfile profile = companyProfileRepository.findById(companyProfileId)
-                .orElseThrow(() -> new ResourceNotFoundException("Company profile not found"));
-        
-        if (Boolean.TRUE.equals(profile.getIsDeleted())) {
-            auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_ACCESS_DENIED, "CompanyProfile", companyProfileId, "Company profile is deleted");
-            throw new AccessDeniedException("Company profile is deleted");
-        }
-
-        if (Boolean.TRUE.equals(profile.getIsHidden())) {
-            auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_ACCESS_DENIED, "CompanyProfile", companyProfileId, "Company profile is hidden");
-            throw new AccessDeniedException("Company profile is hidden");
-        }
+        CompanyProfile profile = companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile(companyProfileId, currentUser);
 
         // Validate step-up token
         String stepUpToken = request.getHeader("X-Step-Up-Token");
         if (!StringUtils.hasText(stepUpToken)) {
             auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_ACCESS_DENIED, "CompanyProfile", companyProfileId, "Missing step-up token");
-            throw new AccessDeniedException("Missing step-up authentication");
+            throw new AccessDeniedException("STEP_UP_TOKEN_REQUIRED");
         }
 
-        boolean isValid = stepUpTokenService.validateToken(stepUpToken, currentUser.getId(), StepUpPurpose.CONFIDENTIAL_COMPANY_NEWS);
+        boolean isValid = stepUpAuthenticationService.isOwnerSecureSessionActive(currentUser.getId(), stepUpToken);
         if (!isValid) {
-            auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_ACCESS_DENIED, "CompanyProfile", companyProfileId, "Invalid step-up token");
-            throw new AccessDeniedException("Invalid or expired step-up authentication");
+            auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_ACCESS_DENIED, "CompanyProfile", companyProfileId, "Invalid owner secure session");
+            throw new AccessDeniedException("TOTP_STEP_UP_REQUIRED");
         }
     }
 

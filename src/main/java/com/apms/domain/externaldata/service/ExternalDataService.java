@@ -10,16 +10,23 @@ import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.externaldata.ExternalDataItem;
 import com.apms.domain.externaldata.dto.ExternalDataItemResponse;
 import com.apms.domain.externaldata.repository.mongo.ExternalDataRepository;
+<<<<<<< HEAD
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.repository.sql.ProjectRepository;
+=======
+import com.apms.domain.crawler.domain.CrawledArticle;
+import com.apms.domain.crawler.domain.CompanyMatch;
+>>>>>>> origin/nguyen-feature
 import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -30,7 +37,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.HtmlUtils;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+<<<<<<< HEAD
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -44,6 +53,9 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+=======
+import java.util.ArrayList;
+>>>>>>> origin/nguyen-feature
 import java.util.List;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -64,22 +76,33 @@ public class ExternalDataService {
     private final ExternalDataRepository externalDataRepository;
     private final MongoTemplate mongoTemplate;
     private final AuditLogService auditLogService;
+<<<<<<< HEAD
     private final ProjectRepository projectRepository;
     private final CompanyProfileRepository companyProfileRepository;
     private final ProjectSecurityEvaluator projectSecurity;
     private final NewsIntelligenceEnrichmentService newsIntelligenceEnrichmentService;
+=======
+    private final com.apms.domain.crawler.repository.TrackedCompanyRepository trackedCompanyRepository;
+>>>>>>> origin/nguyen-feature
 
     public Page<ExternalDataItemResponse> getExternalData(
             ExternalDataCategory category,
             String keyword,
             String source,
+<<<<<<< HEAD
             Long projectId,
+=======
+            String companyName,
+>>>>>>> origin/nguyen-feature
             LocalDateTime fromDate,
             LocalDateTime toDate,
+            String sentiment,
+            String importance,
             Pageable pageable) {
 
         Criteria criteria = new Criteria();
 
+<<<<<<< HEAD
         // Every record must remain associated with a company profile. Project ownership
         // is optional because the scheduled owner intelligence crawl covers all approved profiles.
         criteria.and("companyProfileId").exists(true).ne(null);
@@ -88,9 +111,27 @@ public class ExternalDataService {
         if (category != null) {
             criteria.and("category").is(category);
         }
+=======
+        // category is ignored because CrawledArticle does not have a category field.
+>>>>>>> origin/nguyen-feature
 
         if (StringUtils.hasText(source)) {
-            criteria.and("source").is(source);
+            criteria.and("sourceName").is(source);
+        }
+
+        if (StringUtils.hasText(companyName)) {
+            List<Criteria> orCriterias = new ArrayList<>();
+            orCriterias.add(Criteria.where("matchedCompanies.companyName").regex(companyName.trim(), "i"));
+            
+            trackedCompanyRepository.findByCompanyNameIgnoreCase(companyName.trim()).ifPresent(tc -> {
+                if (tc.getAliases() != null) {
+                    for (String alias : tc.getAliases()) {
+                        orCriterias.add(Criteria.where("matchedCompanies.companyName").regex(alias.trim(), "i"));
+                    }
+                }
+            });
+            
+            criteria.andOperator(new Criteria().orOperator(orCriterias.toArray(new Criteria[0])));
         }
 
         if (StringUtils.hasText(keyword)) {
@@ -101,23 +142,59 @@ public class ExternalDataService {
         }
 
         if (fromDate != null) {
-            criteria.and("publishedAt").gte(fromDate);
+            criteria.and("publishedDate").gte(fromDate.toString());
         }
         if (toDate != null) {
-            criteria.andOperator(Criteria.where("publishedAt").lte(toDate));
+            criteria.andOperator(Criteria.where("publishedDate").lte(toDate.toString()));
+        }
+        
+        if (StringUtils.hasText(sentiment)) {
+            criteria.and("sentiment").is(sentiment.toUpperCase());
+        }
+        
+        if (StringUtils.hasText(importance)) {
+            criteria.and("priorityLevel").is(importance.toUpperCase());
+        }
+
+        Sort sort = pageable.getSort();
+        if (sort.getOrderFor("publishedAt") != null) {
+            Sort.Order order = sort.getOrderFor("publishedAt");
+            sort = Sort.by(order.getDirection(), "publishedDate");
+            pageable = PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort);
         }
 
         Query query = new Query(criteria);
-        long total = mongoTemplate.count(query, ExternalDataItem.class);
+        long total = mongoTemplate.count(query, CrawledArticle.class, "crawled_articles");
         query.with(pageable);
-        List<ExternalDataItem> items = mongoTemplate.find(query, ExternalDataItem.class);
+        List<CrawledArticle> items = mongoTemplate.find(query, CrawledArticle.class, "crawled_articles");
 
-        List<ExternalDataItemResponse> responses = items.stream().map(this::toResponse).collect(Collectors.toList());
+        List<ExternalDataItemResponse> responses = items.stream().map(this::crawledToResponse).collect(Collectors.toList());
         return new PageImpl<>(responses, pageable, total);
     }
 
+<<<<<<< HEAD
     public String fetch(Long projectId) {
         ProjectCompanyScope scope = requireProjectCompanyScope(projectId);
+=======
+    public ExternalDataItemResponse getExternalDataById(String id) {
+        CrawledArticle article = mongoTemplate.findById(id, CrawledArticle.class, "crawled_articles");
+        if (article != null) {
+            return crawledToResponse(article);
+        }
+        return null;
+    }
+
+    public String simulateFetch() {
+        ExternalDataItem demoNews = ExternalDataItem.builder()
+                .title("Tech Corp announces new strategic AI partnership")
+                .summary("Tech Corp is expanding its operations into the AI space with a new partnership.")
+                .source("TechCrunch Demo")
+                .url("https://example.com/demo-news")
+                .imageUrl("https://example.com/images/demo.jpg")
+                .publishedAt(LocalDateTime.now())
+                .category(ExternalDataCategory.NEWS)
+                .build();
+>>>>>>> origin/nguyen-feature
 
         int saved = crawlGoogleNews(projectId, scope);
 
@@ -311,6 +388,44 @@ public class ExternalDataService {
                 .companyProfileId(item.getCompanyProfileId())
                 .createdAt(item.getCreatedAt())
                 .updatedAt(item.getUpdatedAt())
+                .imageUrl(item.getImageUrl())
+                .build();
+    }
+
+    private ExternalDataItemResponse crawledToResponse(CrawledArticle item) {
+        LocalDateTime pubDate = null;
+        try {
+            if (item.getPublishedDate() != null) {
+                if (item.getPublishedDate().contains("T")) {
+                    pubDate = LocalDateTime.parse(item.getPublishedDate());
+                } else {
+                    pubDate = LocalDate.parse(item.getPublishedDate()).atStartOfDay();
+                }
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+
+        String companyName = null;
+        if (item.getMatchedCompanies() != null && !item.getMatchedCompanies().isEmpty()) {
+            companyName = item.getMatchedCompanies().get(0).getCompanyName();
+        }
+
+        return ExternalDataItemResponse.builder()
+                .id(item.getId())
+                .title(item.getTitle())
+                .summary(item.getSummary())
+                .aiSummary(item.getAiSummary())
+                .content(item.getContent())
+                .source(item.getSourceName())
+                .url(item.getUrl())
+                .publishedAt(pubDate)
+                .category(ExternalDataCategory.NEWS)
+                .sentiment(item.getSentiment())
+                .riskLevel(item.getPriorityLevel())
+                .relatedCompanyName(companyName)
+                .imageUrl(item.getThumbnail())
+                .createdAt(item.getCrawledAt())
                 .build();
     }
 

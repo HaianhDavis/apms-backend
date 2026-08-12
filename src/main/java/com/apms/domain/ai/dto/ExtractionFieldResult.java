@@ -17,7 +17,7 @@ public class ExtractionFieldResult {
     private Object normalizedValue;
     private Double confidence;
     private String evidenceText;
-    private String sourceDocumentId;
+    private java.util.List<String> sourceDocumentIds;
     private Integer pageNumber;
 
     @Builder.Default
@@ -25,9 +25,21 @@ public class ExtractionFieldResult {
     private String validationMessages;
 
     @Builder.Default
-    private ExtractionReviewStatus reviewStatus = ExtractionReviewStatus.PENDING;
-    private Object reviewedValue;
-    private Long reviewedByUserId;
-    private LocalDateTime reviewedAt;
-    private String reviewComment;
+    private StaffFieldReviewStatus staffReviewStatus = StaffFieldReviewStatus.PENDING;
+    private Object staffReviewedValue;
+    private Long staffReviewedByUserId;
+    private LocalDateTime staffReviewedAt;
+    private String staffReviewComment;
+
+    @Builder.Default
+    private ExtractionReviewStatus managerReviewStatus = ExtractionReviewStatus.PENDING;
+    private Long managerReviewedByUserId;
+    private LocalDateTime managerReviewedAt;
+    private String managerReviewComment;
+
+    private ExtractionReviewStatus previousManagerReviewStatus;
+    private String previousManagerReviewComment;
+    private Object previousSubmittedValue;
+    private Integer previousReviewedRevision;
+    private Integer changedInRevision;
 }

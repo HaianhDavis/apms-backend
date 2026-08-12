@@ -34,10 +34,16 @@ import java.util.Map;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class CompanyCandidate {
+public class CompanyCandidate implements org.springframework.data.domain.Persistable<String> {
 
     @Id
     private String id;
+
+    @org.springframework.data.annotation.Transient
+    @Override
+    public boolean isNew() {
+        return id == null;
+    }
 
     @Indexed
     private String projectId; // References SQL projects.id
@@ -105,6 +111,7 @@ public class CompanyCandidate {
      * the semantic boundary documentation.
      */
     private Insights insights;
+    private java.util.List<String> keyPeople;
 
     private com.apms.domain.company.model.FinancialInfo financial;
     private com.apms.domain.company.model.MarketInfo market;
@@ -121,6 +128,15 @@ public class CompanyCandidate {
     private Deduplication deduplication;
     private ExtractionSource extractionSource;
     private Review review;
+    
+    /**
+     * Maps a dot-path field name (e.g., "identity.legalName") to a list of source evidences.
+     */
+    private java.util.Map<String, java.util.List<DocumentEvidence>> fieldEvidence;
+    private java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> fieldResults;
+    private com.apms.domain.ai.dto.ExtractionQualityStatus qualityStatus;
+    private com.apms.domain.ai.dto.ExtractionQualityMetrics qualityMetrics;
+    private String rawAiOutput;
     /**
      * AI-generated score preview (advisory). This is a rough estimate produced
      * during extraction to assist the reviewer. It is not an official score and
@@ -322,5 +338,17 @@ public class CompanyCandidate {
         private LocalDateTime createdAt;
         private String lastModifiedBy;
         private LocalDateTime updatedAt;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DocumentEvidence {
+        private String rawDocumentId;
+        private String fileName;
+        private Integer page;
+        private String evidenceText;
+        private Double confidence;
     }
 }

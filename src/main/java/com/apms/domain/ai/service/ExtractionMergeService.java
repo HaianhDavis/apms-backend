@@ -13,6 +13,11 @@ import com.apms.domain.ai.util.ExtractionMergeUtil;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.candidate.CompanyCandidate;
 import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
+import com.apms.domain.company.model.ComplianceInfo;
+import com.apms.domain.company.model.FinancialInfo;
+import com.apms.domain.company.model.InnovationInfo;
+import com.apms.domain.company.model.MarketInfo;
+import com.apms.domain.company.model.RiskInfo;
 import com.apms.domain.document.ImportJob;
 import com.apms.domain.document.repository.sql.ImportJobRepository;
 import com.apms.domain.profile.CompanyProfile;
@@ -47,9 +52,11 @@ public class ExtractionMergeService {
 
     public MergeCandidateResponse mergeExtractionsIntoCandidate(
             Long projectId, Long taskId, List<String> extractionIds, String note, Long creatorId) {
-
         if (extractionIds == null || extractionIds.isEmpty()) {
             throw new IllegalArgumentException("At least one extractionId must be provided");
+        }
+        if (candidateRepository.existsByTaskIdAndStatus(taskId, CandidateStatus.REVISION_REQUIRED)) {
+            throw new BusinessValidationException("This task already has a Candidate requiring revision. Continue editing the returned Candidate before creating another draft.");
         }
 
         // 1. Load all extractions
@@ -81,7 +88,15 @@ public class ExtractionMergeService {
             auditLogService.log(creatorId, AuditAction.FIELD_EVIDENCE_CONFLICT_DETECTED, "CompanyCandidate", "merge", conflictCount + " conflict(s) detected during merge");
         }
 
-        // 5. Build and save DRAFT CompanyCandidate
+        LocalDateTime now = LocalDateTime.now();
+        CompanyCandidate.Metadata metadata = CompanyCandidate.Metadata.builder()
+                .createdBy(String.valueOf(creatorId))
+                .createdAt(now)
+                .lastModifiedBy(String.valueOf(creatorId))
+                .updatedAt(now)
+                .build();
+
+        // 5. Build and save a new DRAFT CompanyCandidate for this reviewed extraction set.
         CompanyCandidate candidate = CompanyCandidate.builder()
                 .projectId(String.valueOf(projectId))
                 .taskId(taskId)
@@ -93,16 +108,20 @@ public class ExtractionMergeService {
                 .companySize(merged.companySize)
                 .contact(merged.contact)
                 .insights(merged.insights)
+                .keyPeople(merged.keyPeople)
+                .financial(merged.financial)
+                .market(merged.market)
+                .innovation(merged.innovation)
+                .risk(merged.risk)
+                .compliance(merged.compliance)
                 .lifecycle(CompanyCandidate.Lifecycle.builder().status(CandidateStatus.DRAFT).build())
                 .extractionSource(CompanyCandidate.ExtractionSource.builder()
                         .extractionMethod("MULTI_DOCUMENT_MERGE").build())
-                .metadata(CompanyCandidate.Metadata.builder()
-                        .createdBy(String.valueOf(creatorId))
-                        .createdAt(LocalDateTime.now())
-                        .updatedAt(LocalDateTime.now())
-                        .build())
+                .metadata(metadata)
                 .revisionNumber(1)
                 .build();
+
+        candidate.setFieldResults(initializeCandidateFieldResults(candidate));
 
         candidate = candidateRepository.save(candidate);
 
@@ -114,8 +133,15 @@ public class ExtractionMergeService {
                 .candidateId(candidate.getId())
                 .identity(sectionToMap(merged.identity))
                 .business(sectionToMap(merged.business))
+                .companySize(sectionToMap(merged.companySize))
                 .contact(sectionToMap(merged.contact))
                 .insights(sectionToMap(merged.insights))
+                .keyPeople(merged.keyPeople)
+                .financial(sectionToMap(merged.financial))
+                .market(sectionToMap(merged.market))
+                .innovation(sectionToMap(merged.innovation))
+                .risk(sectionToMap(merged.risk))
+                .compliance(sectionToMap(merged.compliance))
                 .fieldEvidence(fieldEvidence)
                 .hasConflicts(hasConflicts)
                 .conflictCount((int) conflictCount)
@@ -234,6 +260,64 @@ public class ExtractionMergeService {
     // PRIVATE HELPERS
     // ─────────────────────────────────────────────
 
+    private static final Set<String> STAFF_REVIEWABLE_FIELDS = Set.of(
+            "identity.legalName", "identity.tradeName", "identity.taxCode",
+            "contact.address", "contact.website", "contact.emails", "contact.phones",
+            "business.businessModel", "business.industries", "business.markets", "business.targetCustomers", "business.products",
+            "companySize.employeeTier", "companySize.employeeCount", "companySize.revenueTier",
+            "insights.strengths", "insights.weaknesses", "insights.opportunities", "insights.threats",
+            "financial", "innovation", "market", "risk", "compliance"
+    );
+
+    private Map<String, ExtractionFieldResult> initializeCandidateFieldResults(CompanyCandidate candidate) {
+        Map<String, ExtractionFieldResult> results = new HashMap<>();
+        for (String fieldPath : STAFF_REVIEWABLE_FIELDS) {
+            results.put(FieldKeyCodec.encode(fieldPath), ExtractionFieldResult.builder()
+                    .fieldName(fieldPath)
+                    .value(readEmbeddedField(candidate, fieldPath))
+                    .staffReviewStatus(StaffFieldReviewStatus.PENDING)
+                    .managerReviewStatus(ExtractionReviewStatus.PENDING)
+                    .build());
+        }
+        return results;
+    }
+
+    private Object readEmbeddedField(CompanyCandidate candidate, String fieldName) {
+        if (candidate == null || fieldName == null) return null;
+        return switch (fieldName) {
+            case "identity.legalName" -> candidate.getIdentity() != null ? candidate.getIdentity().getLegalName() : null;
+            case "identity.tradeName" -> candidate.getIdentity() != null ? candidate.getIdentity().getTradeName() : null;
+            case "identity.taxCode" -> candidate.getIdentity() != null ? candidate.getIdentity().getTaxCode() : null;
+            case "contact.address" -> {
+                if (candidate.getContact() == null || candidate.getContact().getAddresses() == null || candidate.getContact().getAddresses().isEmpty()) {
+                    yield null;
+                }
+                yield candidate.getContact().getAddresses().get(0).getFullAddress();
+            }
+            case "contact.website" -> candidate.getContact() != null ? candidate.getContact().getWebsite() : null;
+            case "contact.emails" -> candidate.getContact() != null ? candidate.getContact().getEmails() : null;
+            case "contact.phones" -> candidate.getContact() != null ? candidate.getContact().getPhones() : null;
+            case "business.businessModel" -> candidate.getBusiness() != null ? candidate.getBusiness().getBusinessModel() : null;
+            case "business.industries" -> candidate.getBusiness() != null ? candidate.getBusiness().getIndustries() : null;
+            case "business.markets" -> candidate.getBusiness() != null ? candidate.getBusiness().getMarkets() : null;
+            case "business.targetCustomers" -> candidate.getBusiness() != null ? candidate.getBusiness().getTargetCustomers() : null;
+            case "business.products" -> candidate.getBusiness() != null ? candidate.getBusiness().getProducts() : null;
+            case "companySize.employeeTier" -> candidate.getCompanySize() != null ? candidate.getCompanySize().getEmployeeTier() : null;
+            case "companySize.employeeCount" -> candidate.getCompanySize() != null ? candidate.getCompanySize().getEmployeeCount() : null;
+            case "companySize.revenueTier" -> candidate.getCompanySize() != null ? candidate.getCompanySize().getRevenueTier() : null;
+            case "insights.strengths" -> candidate.getInsights() != null ? candidate.getInsights().getStrengths() : null;
+            case "insights.weaknesses" -> candidate.getInsights() != null ? candidate.getInsights().getWeaknesses() : null;
+            case "insights.opportunities" -> candidate.getInsights() != null ? candidate.getInsights().getOpportunities() : null;
+            case "insights.threats" -> candidate.getInsights() != null ? candidate.getInsights().getThreats() : null;
+            case "financial" -> candidate.getFinancial();
+            case "innovation" -> candidate.getInnovation();
+            case "market" -> candidate.getMarket();
+            case "risk" -> candidate.getRisk();
+            case "compliance" -> candidate.getCompliance();
+            default -> null;
+        };
+    }
+
     private List<AiExtractionCache> loadExtractions(List<String> extractionIds) {
         List<AiExtractionCache> result = new ArrayList<>();
         for (String id : extractionIds) {
@@ -245,14 +329,18 @@ public class ExtractionMergeService {
     }
 
     private Object getFieldValue(AiExtractionCache ex, String fieldName, Object fallbackValue) {
+        if (ex.getLastModifiedBy() != null && !ex.getLastModifiedBy().isBlank()) {
+            return fallbackValue;
+        }
         if (ex.getFieldResults() != null && ex.getFieldResults().containsKey(fieldName)) {
             ExtractionFieldResult fr = ex.getFieldResults().get(fieldName);
-            if (fr.getReviewStatus() == ExtractionReviewStatus.REJECTED) return null;
-            if (fr.getReviewStatus() == ExtractionReviewStatus.EDITED) return fr.getReviewedValue();
-            if (fr.getReviewStatus() == ExtractionReviewStatus.ACCEPTED) return fr.getValue();
-            // If PENDING or NEEDS_REVIEW, technically it shouldn't be here since the extraction is REVIEWED,
-            // but just in case, we'll return the value.
-            return fr.getValue();
+            if (fr.getManagerReviewStatus() == ExtractionReviewStatus.REJECTED) return null;
+            if (fr.getManagerReviewStatus() == ExtractionReviewStatus.EDITED) return fr.getStaffReviewedValue();
+            if (fr.getManagerReviewStatus() == ExtractionReviewStatus.ACCEPTED) {
+                return fr.getStaffReviewedValue() != null ? fr.getStaffReviewedValue() : fr.getValue();
+            }
+            // If PENDING or NEEDS_REVIEW, return staffReviewedValue if available, else value
+            return fr.getStaffReviewedValue() != null ? fr.getStaffReviewedValue() : fr.getValue();
         }
         return fallbackValue;
     }
@@ -271,7 +359,7 @@ public class ExtractionMergeService {
     // ─────────────────────────────────────────────
 
     private MergedCandidateData mergeCandidateFields(List<AiExtractionCache> extractions,
-            List<String> extractionIds, List<String> sourceDocIds, List<String> importJobIds, List<FieldEvidence> evidence) {
+                                                     List<String> extractionIds, List<String> sourceDocIds, List<String> importJobIds, List<FieldEvidence> evidence) {
 
         String mergedLegalName = null;
         String mergedTradeName = null;
@@ -281,9 +369,14 @@ public class ExtractionMergeService {
         String mergedBusinessModel = null;
         List<String> mergedMarkets = new ArrayList<>();
         List<String> mergedTargetCustomers = new ArrayList<>();
+        List<CompanyCandidate.Product> mergedProducts = new ArrayList<>();
 
         String mergedWebsite = null;
         List<String> mergedEmails = new ArrayList<>();
+        List<String> mergedPhones = new ArrayList<>();
+        String mergedAddress = null;
+        String mergedCompanySize = null;
+        List<String> mergedKeyPeople = new ArrayList<>();
 
         List<String> mergedStrengths = new ArrayList<>();
         List<String> mergedWeaknesses = new ArrayList<>();
@@ -291,6 +384,11 @@ public class ExtractionMergeService {
         List<String> mergedThreats = new ArrayList<>();
 
         String mergedEmployeeTier = null;
+        FinancialInfo mergedFinancial = null;
+        MarketInfo mergedMarket = null;
+        InnovationInfo mergedInnovation = null;
+        RiskInfo mergedRisk = null;
+        ComplianceInfo mergedCompliance = null;
 
         for (AiExtractionCache ex : extractions) {
             if (ex.getExtractedData() == null) continue;
@@ -341,6 +439,7 @@ public class ExtractionMergeService {
             // markets
             mergeStringList(mergedMarkets, getListFieldValue(ex, "markets", data.getMarkets()));
             mergeStringList(mergedTargetCustomers, getListFieldValue(ex, "targetCustomers", data.getTargetCustomers()));
+            mergeProducts(mergedProducts, getFieldValue(ex, "products", data.getProducts()));
 
             // website
             String exWebsite = (String) getFieldValue(ex, "website", data.getWebsite());
@@ -362,12 +461,40 @@ public class ExtractionMergeService {
                             .build());
                 }
             }
+            mergeStringList(mergedEmails, getListFieldValue(ex, "email", data.getEmail()));
+            mergeStringList(mergedPhones, getListFieldValue(ex, "phone", data.getPhone()));
+
+            String exAddress = (String) getFieldValue(ex, "address", data.getAddress());
+            if (!isUnknown(exAddress)) {
+                mergedAddress = bestDisplayValue(mergedAddress, exAddress);
+            }
 
             // employeeTier
             String exEmployeeTier = (String) getFieldValue(ex, "employeeTier", data.getEmployeeTier());
             if (!isUnknown(exEmployeeTier)) {
                 mergedEmployeeTier = bestDisplayValue(mergedEmployeeTier, exEmployeeTier);
             }
+            String exCompanySize = (String) getFieldValue(ex, "companySize", data.getCompanySize());
+            if (!isUnknown(exCompanySize)) {
+                mergedCompanySize = bestDisplayValue(mergedCompanySize, exCompanySize);
+            }
+            mergeStringList(mergedKeyPeople, getListFieldValue(ex, "keyPeople", data.getKeyPeople()));
+
+            Object exFinancial = getFieldValue(ex, "financial", data.getFinancial());
+            FinancialInfo financialInfo = toModel(exFinancial, FinancialInfo.class);
+            mergedFinancial = mergeFinancialInfo(mergedFinancial, financialInfo);
+            Object exMarket = getFieldValue(ex, "market", data.getMarket());
+            MarketInfo marketInfo = toModel(exMarket, MarketInfo.class);
+            mergedMarket = mergeMarketInfo(mergedMarket, marketInfo);
+            Object exInnovation = getFieldValue(ex, "innovation", data.getInnovation());
+            InnovationInfo innovationInfo = toModel(exInnovation, InnovationInfo.class);
+            mergedInnovation = mergeInnovationInfo(mergedInnovation, innovationInfo);
+            Object exRisk = getFieldValue(ex, "risk", data.getRisk());
+            RiskInfo riskInfo = toModel(exRisk, RiskInfo.class);
+            mergedRisk = mergeRiskInfo(mergedRisk, riskInfo);
+            Object exCompliance = getFieldValue(ex, "compliance", data.getCompliance());
+            ComplianceInfo complianceInfo = toModel(exCompliance, ComplianceInfo.class);
+            mergedCompliance = mergeComplianceInfo(mergedCompliance, complianceInfo);
 
             // insights
             mergeStringList(mergedStrengths, getListFieldValue(ex, "strengths", data.getStrengths()));
@@ -379,7 +506,11 @@ public class ExtractionMergeService {
         // Build evidence for merged lists
         if (!mergedIndustries.isEmpty()) evidence.add(listEvidence("business.industries", mergedIndustries, sourceDocIds, importJobIds, extractionIds));
         if (!mergedMarkets.isEmpty()) evidence.add(listEvidence("business.markets", mergedMarkets, sourceDocIds, importJobIds, extractionIds));
+        if (!mergedTargetCustomers.isEmpty()) evidence.add(listEvidence("business.targetCustomers", mergedTargetCustomers, sourceDocIds, importJobIds, extractionIds));
         if (!mergedStrengths.isEmpty()) evidence.add(listEvidence("insights.strengths", mergedStrengths, sourceDocIds, importJobIds, extractionIds));
+        if (!mergedWeaknesses.isEmpty()) evidence.add(listEvidence("insights.weaknesses", mergedWeaknesses, sourceDocIds, importJobIds, extractionIds));
+        if (!mergedOpportunities.isEmpty()) evidence.add(listEvidence("insights.opportunities", mergedOpportunities, sourceDocIds, importJobIds, extractionIds));
+        if (!mergedThreats.isEmpty()) evidence.add(listEvidence("insights.threats", mergedThreats, sourceDocIds, importJobIds, extractionIds));
 
         CompanyCandidate.Identity identity = CompanyCandidate.Identity.builder()
                 .legalName(mergedLegalName)
@@ -390,17 +521,23 @@ public class ExtractionMergeService {
         CompanyCandidate.Business business = CompanyCandidate.Business.builder()
                 .industries(mergedIndustries.isEmpty() ? null : mergedIndustries)
                 .businessModel(mergedBusinessModel)
+                .products(mergedProducts.isEmpty() ? null : mergedProducts)
                 .markets(mergedMarkets.isEmpty() ? null : mergedMarkets)
                 .targetCustomers(mergedTargetCustomers.isEmpty() ? null : mergedTargetCustomers)
                 .build();
 
         CompanyCandidate.CompanySize companySize = CompanyCandidate.CompanySize.builder()
                 .employeeTier(mergedEmployeeTier)
+                .revenueTier(mergedCompanySize)
                 .build();
 
         CompanyCandidate.Contact contact = CompanyCandidate.Contact.builder()
                 .website(mergedWebsite)
                 .emails(mergedEmails.isEmpty() ? null : mergedEmails)
+                .phones(mergedPhones.isEmpty() ? null : mergedPhones)
+                .addresses(mergedAddress != null ? List.of(CompanyCandidate.Address.builder()
+                        .fullAddress(mergedAddress)
+                        .build()) : null)
                 .build();
 
         CompanyCandidate.Insights insights = CompanyCandidate.Insights.builder()
@@ -410,7 +547,9 @@ public class ExtractionMergeService {
                 .threats(mergedThreats.isEmpty() ? null : mergedThreats)
                 .build();
 
-        return new MergedCandidateData(identity, business, companySize, contact, insights);
+        return new MergedCandidateData(identity, business, companySize, contact, insights,
+                mergedKeyPeople.isEmpty() ? null : mergedKeyPeople, mergedFinancial, mergedMarket, mergedInnovation,
+                mergedRisk, mergedCompliance);
     }
 
     // ─────────────────────────────────────────────
@@ -418,13 +557,13 @@ public class ExtractionMergeService {
     // ─────────────────────────────────────────────
 
     private void mergeProfileFields(List<AiExtractionCache> extractions, CompanyProfile current,
-            List<String> extractionIds, List<String> sourceDocIds, List<String> importJobIds,
-            List<FieldEvidence> evidence,
-            Map<String, Object> proposedIdentity, Map<String, Object> proposedBusiness,
-            Map<String, Object> proposedContact, Map<String, Object> proposedInsights,
-            Map<String, Object> proposedFinancial, Map<String, Object> proposedMarket,
-            Map<String, Object> proposedInnovation, Map<String, Object> proposedRisk,
-            Map<String, Object> proposedCompliance) {
+                                    List<String> extractionIds, List<String> sourceDocIds, List<String> importJobIds,
+                                    List<FieldEvidence> evidence,
+                                    Map<String, Object> proposedIdentity, Map<String, Object> proposedBusiness,
+                                    Map<String, Object> proposedContact, Map<String, Object> proposedInsights,
+                                    Map<String, Object> proposedFinancial, Map<String, Object> proposedMarket,
+                                    Map<String, Object> proposedInnovation, Map<String, Object> proposedRisk,
+                                    Map<String, Object> proposedCompliance) {
 
         // Merge across all extractions first
         String mergedLegalName = null, mergedTradeName = null, mergedTaxCode = null;
@@ -545,8 +684,8 @@ public class ExtractionMergeService {
     // ─────────────────────────────────────────────
 
     private void mergeInsightList(String fieldPath, List<String> current, List<String> merged,
-            List<String> sourceDocIds, List<String> importJobIds, List<String> extractionIds,
-            List<FieldEvidence> evidence, Map<String, Object> proposed, String key) {
+                                  List<String> sourceDocIds, List<String> importJobIds, List<String> extractionIds,
+                                  List<FieldEvidence> evidence, Map<String, Object> proposed, String key) {
         if (!merged.isEmpty()) {
             List<String> newOnly = newListItems(merged, current);
             if (!newOnly.isEmpty()) {
@@ -567,6 +706,138 @@ public class ExtractionMergeService {
         }
     }
 
+    private void mergeProducts(List<CompanyCandidate.Product> target, Object rawProducts) {
+        if (!(rawProducts instanceof Iterable<?> products)) return;
+        for (Object item : products) {
+            String name = null;
+            String category = null;
+            String description = null;
+
+            if (item instanceof ExtractedCompanyData.Product product) {
+                name = product.getName();
+                category = product.getCategory();
+                description = product.getDescription();
+            } else if (item instanceof Map<?, ?> map) {
+                name = stringValue(map.get("name"));
+                category = stringValue(map.get("category"));
+                description = stringValue(map.get("description"));
+            } else if (item != null) {
+                name = String.valueOf(item);
+            }
+
+            if (isUnknown(name)) continue;
+            String normalizedName = name.trim().toLowerCase(Locale.ROOT);
+            boolean alreadyPresent = target.stream()
+                    .map(CompanyCandidate.Product::getName)
+                    .filter(Objects::nonNull)
+                    .map(existing -> existing.trim().toLowerCase(Locale.ROOT))
+                    .anyMatch(normalizedName::equals);
+            if (!alreadyPresent) {
+                target.add(CompanyCandidate.Product.builder()
+                        .name(name)
+                        .category(category)
+                        .description(description)
+                        .build());
+            }
+        }
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private <T> T toModel(Object value, Class<T> type) {
+        if (value == null) return null;
+        if (type.isInstance(value)) return type.cast(value);
+        if (value instanceof Map<?, ?>) {
+            try {
+                return new com.fasterxml.jackson.databind.ObjectMapper().convertValue(value, type);
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private FinancialInfo mergeFinancialInfo(FinancialInfo current, FinancialInfo incoming) {
+        if (incoming == null) return current;
+        if (current == null) return incoming;
+
+        return FinancialInfo.builder()
+                .revenue(current.getRevenue() != null ? current.getRevenue() : incoming.getRevenue())
+                .revenueCurrency(bestDisplayValue(current.getRevenueCurrency(), incoming.getRevenueCurrency()))
+                .revenueGrowth(current.getRevenueGrowth() != null ? current.getRevenueGrowth() : incoming.getRevenueGrowth())
+                .debtRatio(current.getDebtRatio() != null ? current.getDebtRatio() : incoming.getDebtRatio())
+                .profitMargin(current.getProfitMargin() != null ? current.getProfitMargin() : incoming.getProfitMargin())
+                .fundingStage(bestDisplayValue(current.getFundingStage(), incoming.getFundingStage()))
+                .profitability(bestDisplayValue(current.getProfitability(), incoming.getProfitability()))
+                .build();
+    }
+
+    private MarketInfo mergeMarketInfo(MarketInfo current, MarketInfo incoming) {
+        if (incoming == null) return current;
+        if (current == null) return incoming;
+
+        List<String> mainMarkets = mergeFullList(current.getMainMarkets(), incoming.getMainMarkets());
+
+        return MarketInfo.builder()
+                .marketShare(current.getMarketShare() != null ? current.getMarketShare() : incoming.getMarketShare())
+                .brandRank(current.getBrandRank() != null ? current.getBrandRank() : incoming.getBrandRank())
+                .clientCount(current.getClientCount() != null ? current.getClientCount() : incoming.getClientCount())
+                .mainMarkets(mainMarkets.isEmpty() ? null : mainMarkets)
+                .build();
+    }
+
+    private InnovationInfo mergeInnovationInfo(InnovationInfo current, InnovationInfo incoming) {
+        if (incoming == null) return current;
+        if (current == null) return incoming;
+
+        List<String> techStack = mergeFullList(current.getTechStack(), incoming.getTechStack());
+        List<String> capabilities = mergeFullList(current.getTechnologyCapabilities(), incoming.getTechnologyCapabilities());
+
+        return InnovationInfo.builder()
+                .patents(current.getPatents() != null ? current.getPatents() : incoming.getPatents())
+                .rdInvestmentPercent(current.getRdInvestmentPercent() != null ? current.getRdInvestmentPercent() : incoming.getRdInvestmentPercent())
+                .techStack(techStack.isEmpty() ? null : techStack)
+                .techMaturityLevel(current.getTechMaturityLevel() != null ? current.getTechMaturityLevel() : incoming.getTechMaturityLevel())
+                .productInnovationRate(current.getProductInnovationRate() != null ? current.getProductInnovationRate() : incoming.getProductInnovationRate())
+                .technologyCapabilities(capabilities.isEmpty() ? null : capabilities)
+                .build();
+    }
+
+    private RiskInfo mergeRiskInfo(RiskInfo current, RiskInfo incoming) {
+        if (incoming == null) return current;
+        if (current == null) return incoming;
+
+        return RiskInfo.builder()
+                .legalRisk(bestDisplayValue(current.getLegalRisk(), incoming.getLegalRisk()))
+                .financialRisk(bestDisplayValue(current.getFinancialRisk(), incoming.getFinancialRisk()))
+                .reputationRisk(bestDisplayValue(current.getReputationRisk(), incoming.getReputationRisk()))
+                .securityRisk(bestDisplayValue(current.getSecurityRisk(), incoming.getSecurityRisk()))
+                .conflictOfInterestRisk(bestDisplayValue(current.getConflictOfInterestRisk(), incoming.getConflictOfInterestRisk()))
+                .supplyInterruptionRisk(bestDisplayValue(current.getSupplyInterruptionRisk(), incoming.getSupplyInterruptionRisk()))
+                .dependencyRisk(bestDisplayValue(current.getDependencyRisk(), incoming.getDependencyRisk()))
+                .overallRiskLevel(bestDisplayValue(current.getOverallRiskLevel(), incoming.getOverallRiskLevel()))
+                .build();
+    }
+
+    private ComplianceInfo mergeComplianceInfo(ComplianceInfo current, ComplianceInfo incoming) {
+        if (incoming == null) return current;
+        if (current == null) return incoming;
+
+        List<String> qualityCertifications = mergeFullList(current.getQualityCertifications(), incoming.getQualityCertifications());
+        List<String> securityCertifications = mergeFullList(current.getSecurityCertifications(), incoming.getSecurityCertifications());
+
+        return ComplianceInfo.builder()
+                .status(bestDisplayValue(current.getStatus(), incoming.getStatus()))
+                .qualityCertifications(qualityCertifications.isEmpty() ? null : qualityCertifications)
+                .securityCertifications(securityCertifications.isEmpty() ? null : securityCertifications)
+                .antiCorruptionPolicy(bestDisplayValue(current.getAntiCorruptionPolicy(), incoming.getAntiCorruptionPolicy()))
+                .laborCompliance(bestDisplayValue(current.getLaborCompliance(), incoming.getLaborCompliance()))
+                .environmentalPolicy(bestDisplayValue(current.getEnvironmentalPolicy(), incoming.getEnvironmentalPolicy()))
+                .build();
+    }
+
     private List<String> newListItems(List<String> newVals, List<String> existing) {
         if (newVals == null) return Collections.emptyList();
         if (existing == null || existing.isEmpty()) return newVals;
@@ -583,7 +854,7 @@ public class ExtractionMergeService {
     }
 
     private FieldEvidence conflictEvidence(String path, Object existing, Object proposed,
-            String docId, String jobId, String exId, String note) {
+                                           String docId, String jobId, String exId, String note) {
         return FieldEvidence.builder()
                 .fieldPath(path)
                 .existingValue(existing)
@@ -598,8 +869,8 @@ public class ExtractionMergeService {
     }
 
     private FieldEvidence evidence(String path, Object existing, Object proposed,
-            List<String> docIds, List<String> jobIds, List<String> exIds,
-            MergeAction action, boolean conflict, String note) {
+                                   List<String> docIds, List<String> jobIds, List<String> exIds,
+                                   MergeAction action, boolean conflict, String note) {
         return FieldEvidence.builder()
                 .fieldPath(path)
                 .existingValue(existing)
@@ -614,7 +885,7 @@ public class ExtractionMergeService {
     }
 
     private FieldEvidence listEvidence(String path, List<String> merged,
-            List<String> docIds, List<String> jobIds, List<String> exIds) {
+                                       List<String> docIds, List<String> jobIds, List<String> exIds) {
         return FieldEvidence.builder()
                 .fieldPath(path)
                 .proposedValue(merged)
@@ -646,10 +917,19 @@ public class ExtractionMergeService {
         final CompanyCandidate.CompanySize companySize;
         final CompanyCandidate.Contact contact;
         final CompanyCandidate.Insights insights;
+        final List<String> keyPeople;
+        final FinancialInfo financial;
+        final MarketInfo market;
+        final InnovationInfo innovation;
+        final RiskInfo risk;
+        final ComplianceInfo compliance;
 
         MergedCandidateData(CompanyCandidate.Identity id, CompanyCandidate.Business b,
-                CompanyCandidate.CompanySize s, CompanyCandidate.Contact c, CompanyCandidate.Insights i) {
+                            CompanyCandidate.CompanySize s, CompanyCandidate.Contact c, CompanyCandidate.Insights i,
+                            List<String> people, FinancialInfo f, MarketInfo m, InnovationInfo n,
+                            RiskInfo r, ComplianceInfo co) {
             identity = id; business = b; companySize = s; contact = c; insights = i;
+            keyPeople = people; financial = f; market = m; innovation = n; risk = r; compliance = co;
         }
     }
 }

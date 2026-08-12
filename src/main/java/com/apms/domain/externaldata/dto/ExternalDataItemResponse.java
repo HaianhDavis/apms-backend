@@ -24,8 +24,14 @@ public class ExternalDataItemResponse {
     private List<String> topics;
     private String relatedCompanyName;
     private String relatedCompanyId;
+<<<<<<< HEAD
     private Long projectId;
     private String companyProfileId;
+=======
+    private String imageUrl;
+    private String content;
+    private String aiSummary;
+>>>>>>> origin/nguyen-feature
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
