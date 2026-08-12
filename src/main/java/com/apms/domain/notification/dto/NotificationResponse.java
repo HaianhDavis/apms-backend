@@ -15,6 +15,12 @@ public class NotificationResponse {
     private String title;
     private String message;
     private NotificationType type;
+    private Long projectId;
+    private Long taskId;
+    private Long submissionId;
+    private String actionType;
+    private String documentId;
+    private String rejectReason;
     private Boolean isRead;
     private LocalDateTime readAt;
     private LocalDateTime createdAt;

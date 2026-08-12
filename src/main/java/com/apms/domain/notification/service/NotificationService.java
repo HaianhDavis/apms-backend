@@ -14,6 +14,7 @@ import com.apms.domain.notification.repository.sql.FcmDeviceTokenRepository;
 import com.apms.domain.notification.repository.sql.NotificationRepository;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectTask;
+import com.apms.domain.project.ProjectTaskSubmission;
 import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
 import com.apms.security.UserDetailsImpl;
@@ -248,6 +249,193 @@ public class NotificationService {
                 )));
     }
 
+    @Transactional
+    public void notifyDocumentRejected(ProjectTaskSubmission submission, String documentId, String documentName, Long reviewerId, String rejectReason) {
+        if (submission == null || reviewerId == null) {
+            return;
+        }
+
+        Account recipient = submission.getSubmittedByAccount();
+        if (recipient == null && submission.getProjectTask() != null) {
+            recipient = submission.getProjectTask().getAssignedToAccount();
+        }
+        if (recipient == null || recipient.getId().equals(reviewerId)) {
+            return;
+        }
+
+        Account reviewer = accountRepository.findById(reviewerId).orElse(null);
+        ProjectTask task = submission.getProjectTask();
+        Project project = submission.getProject();
+        Long projectId = project != null ? project.getId() : null;
+        Long taskId = task != null ? task.getId() : null;
+        String actionType = "DOCUMENT_REJECTED";
+        String normalizedDocumentId = StringUtils.hasText(documentId) ? documentId.trim() : null;
+
+        if (notificationRepository.existsDocumentActionNotification(
+                recipient.getId(),
+                NotificationType.DOCUMENT,
+                actionType,
+                projectId,
+                taskId,
+                submission.getId(),
+                normalizedDocumentId)) {
+            log.debug("Skipping duplicate document rejection notification for submission={}, document={}",
+                    submission.getId(), normalizedDocumentId);
+            return;
+        }
+
+        String safeDocumentName = StringUtils.hasText(documentName)
+                ? documentName.trim()
+                : (StringUtils.hasText(normalizedDocumentId) ? normalizedDocumentId : "Document package");
+        String reviewerLabel = reviewer != null && StringUtils.hasText(reviewer.getEmail())
+                ? reviewer.getEmail()
+                : "the Manager";
+        String title = "Document rejected";
+        String message = safeDocumentName + " was rejected by " + reviewerLabel + ".";
+        if (StringUtils.hasText(rejectReason)) {
+            message += "\nReason: " + rejectReason.trim();
+        }
+        if (project != null && StringUtils.hasText(project.getProjectName())) {
+            message += "\nProject: " + project.getProjectName();
+        }
+
+        Notification notification = Notification.builder()
+                .recipientAccount(recipient)
+                .senderAccount(reviewer)
+                .title(title)
+                .message(message)
+                .type(NotificationType.DOCUMENT)
+                .projectId(projectId)
+                .taskId(taskId)
+                .submissionId(submission.getId())
+                .documentId(normalizedDocumentId)
+                .actionType(actionType)
+                .rejectReason(StringUtils.hasText(rejectReason) ? rejectReason.trim() : null)
+                .isRead(false)
+                .isDeleted(false)
+                .build();
+
+        notification = notificationRepository.save(notification);
+        auditLogService.log(
+                reviewerId,
+                AuditAction.DOCUMENT_REJECTED,
+                "ProjectTaskSubmission",
+                String.valueOf(submission.getId()),
+                "Document rejected notification sent to user " + recipient.getId()
+                        + (normalizedDocumentId != null ? " for document " + normalizedDocumentId : ""));
+
+        Notification savedNotification = notification;
+        Account savedRecipient = recipient;
+        String pushMessage = message;
+        runAfterCommit(() -> pushToUser(
+                savedRecipient.getId(),
+                title,
+                pushMessage,
+                java.util.Map.of(
+                        "type", actionType,
+                        "notificationId", String.valueOf(savedNotification.getId()),
+                        "projectId", projectId != null ? String.valueOf(projectId) : "",
+                        "taskId", taskId != null ? String.valueOf(taskId) : "",
+                        "documentId", normalizedDocumentId != null ? normalizedDocumentId : "",
+                        "submissionId", String.valueOf(submission.getId())
+                )));
+    }
+
+    @Transactional
+    public void notifyTaskChangesRequested(ProjectTask task, ProjectTaskSubmission submission, Account recipient, Account reviewer, String reason) {
+        if (task == null || recipient == null) {
+            return;
+        }
+
+        if (reviewer != null && recipient.getId().equals(reviewer.getId())) {
+            return;
+        }
+
+        Long projectId = task.getProject() != null ? task.getProject().getId() : null;
+        Long taskId = task.getId();
+        Long submissionId = submission != null ? submission.getId() : null;
+        String actionType = "TASK_CHANGES_REQUESTED";
+
+        String projectName = task.getProject() != null ? task.getProject().getProjectName() : "Project";
+        String taskTitle = StringUtils.hasText(task.getTitle()) ? task.getTitle() : "Task";
+        String reviewerLabel = reviewer != null && StringUtils.hasText(reviewer.getEmail())
+                ? reviewer.getEmail()
+                : "the Manager";
+
+        String title = "Changes requested on task";
+        String message = String.format("Manager %s requested changes on task: %s (%s).", reviewerLabel, taskTitle, projectName);
+        if (StringUtils.hasText(reason)) {
+            message += "\nReason: " + reason.trim();
+        }
+
+        Notification notification = Notification.builder()
+                .recipientAccount(recipient)
+                .senderAccount(reviewer)
+                .title(title)
+                .message(message)
+                .type(NotificationType.TASK)
+                .projectId(projectId)
+                .taskId(taskId)
+                .submissionId(submissionId)
+                .actionType(actionType)
+                .rejectReason(StringUtils.hasText(reason) ? reason.trim() : null)
+                .isRead(false)
+                .isDeleted(false)
+                .build();
+
+        notification = notificationRepository.save(notification);
+
+        Notification savedNotification = notification;
+        Account savedRecipient = recipient;
+        String pushMessage = message;
+        runAfterCommit(() -> pushToUser(
+                savedRecipient.getId(),
+                title,
+                pushMessage,
+                java.util.Map.of(
+                        "type", actionType,
+                        "notificationId", String.valueOf(savedNotification.getId()),
+                        "projectId", projectId != null ? String.valueOf(projectId) : "",
+                        "taskId", taskId != null ? String.valueOf(taskId) : ""
+                )));
+    }
+
+    @Transactional
+    public void notifyProjectMemberRemoved(Project project, Account recipient, Account sender) {
+        if (project == null || recipient == null) {
+            return;
+        }
+
+        String title = "Removed from project";
+        String message = String.format("You have been removed from project \"%s\".", project.getProjectName());
+        Notification notification = Notification.builder()
+                .recipientAccount(recipient)
+                .senderAccount(sender)
+                .title(title)
+                .message(message)
+                .type(NotificationType.SYSTEM)
+                .projectId(project.getId())
+                .actionType("PROJECT_MEMBER_REMOVED")
+                .isRead(false)
+                .isDeleted(false)
+                .build();
+
+        notification = notificationRepository.save(notification);
+
+        Notification savedNotification = notification;
+        Account savedRecipient = recipient;
+        String pushMessage = message;
+        runAfterCommit(() -> pushToUser(
+                savedRecipient.getId(),
+                title,
+                pushMessage,
+                java.util.Map.of(
+                        "type", "PROJECT_MEMBER_REMOVED",
+                        "notificationId", String.valueOf(savedNotification.getId()),
+                        "projectId", String.valueOf(project.getId())
+                )));
+    }
+
     private Notification createSystemNotification(Account recipient, Account sender, String title, String message, NotificationType type) {
         Notification notification = Notification.builder()
                 .recipientAccount(recipient)
@@ -330,6 +518,12 @@ public class NotificationService {
                 .title(notification.getTitle())
                 .message(notification.getMessage())
                 .type(notification.getType())
+                .projectId(notification.getProjectId())
+                .taskId(notification.getTaskId())
+                .submissionId(notification.getSubmissionId())
+                .actionType(notification.getActionType())
+                .documentId(notification.getDocumentId())
+                .rejectReason(notification.getRejectReason())
                 .isRead(notification.getIsRead())
                 .readAt(notification.getReadAt())
                 .createdAt(notification.getCreatedAt())

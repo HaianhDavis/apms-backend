@@ -1,6 +1,7 @@
 package com.apms.domain.security.controller;
 
 import com.apms.common.response.ApiResponse;
+import com.apms.domain.security.dto.StepUpVerifyResponse;
 import com.apms.domain.security.dto.TotpDto.TotpEnrollmentConfirmRequest;
 import com.apms.domain.security.dto.TotpDto.TotpEnrollmentStartResponse;
 import com.apms.domain.security.dto.TotpDto.TotpStatusResponse;
@@ -42,10 +43,13 @@ public class TotpEnrollmentController {
 
     @PostMapping("/enrollment/confirm")
     @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'ROLE_BUSINESS_OWNER')")
-    public ResponseEntity<ApiResponse<Void>> confirmEnrollment(@RequestBody TotpEnrollmentConfirmRequest request) {
+    public ResponseEntity<ApiResponse<StepUpVerifyResponse>> confirmEnrollment(@RequestBody TotpEnrollmentConfirmRequest request) {
         UserDetailsImpl currentUser = getCurrentUser();
-        enrollmentService.confirmEnrollment(currentUser.getId(), request.getEnrollmentId(), request.getCode());
-        return ResponseEntity.ok(ApiResponse.success(null, "Mã Authenticator đã được xác minh thành công."));
+        StepUpVerifyResponse response = enrollmentService.confirmEnrollment(currentUser.getId(), request.getEnrollmentId(), request.getCode());
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .header("Pragma", "no-cache")
+                .body(ApiResponse.success(response, "Mã Authenticator đã được xác minh thành công."));
     }
 
     private UserDetailsImpl getCurrentUser() {

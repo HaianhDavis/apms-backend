@@ -2,6 +2,7 @@ package com.apms.domain.project.service;
 
 import com.apms.common.enums.*;
 import com.apms.common.enums.CandidateStatus;
+import com.apms.common.exception.BusinessValidationException;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.ai.AiExtractionCache;
 import com.apms.domain.ai.dto.ExtractionQualityStatus;
@@ -47,6 +48,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -55,6 +58,8 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class ProjectTaskService {
+    private static final DateTimeFormatter PROJECT_END_DATE_FORMATTER =
+            DateTimeFormatter.ofPattern("MMM dd, yyyy", Locale.ENGLISH);
 
     private final ProjectTaskRepository projectTaskRepository;
     private final ProjectRepository projectRepository;
@@ -82,6 +87,8 @@ public class ProjectTaskService {
         Account createdBy = accountRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
 
+        validateTaskDueDateWithinProject(request.getDueDate(), project);
+
         Account assignedTo = null;
         if (request.getAssignedToUserId() != null) {
             if (!projectRepository.existsByIdAndMembersAccountId(projectId, request.getAssignedToUserId())) {
@@ -91,7 +98,7 @@ public class ProjectTaskService {
                     .orElseThrow(() -> new ResourceNotFoundException("Assigned account not found"));
         }
 
-        if (request.getTaskType() == TaskType.PARTNER_CONTRACT_COLLECTION || request.getTaskType() == TaskType.COMPANY_NEWS_RESEARCH) {
+        if (request.getTaskType() == TaskType.COMPANY_NEWS_RESEARCH) {
             if (!org.springframework.util.StringUtils.hasText(request.getTargetCompanyProfileId())) {
                 // Auto-resolve from project if not explicitly provided
                 if (org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId())) {
@@ -104,10 +111,12 @@ public class ProjectTaskService {
 
         if (org.springframework.util.StringUtils.hasText(request.getTargetCompanyProfileId())) {
             com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findByCompanyId(request.getTargetCompanyProfileId())
+                    .or(() -> companyProfileRepository.findById(request.getTargetCompanyProfileId()))
                     .orElseThrow(() -> new com.apms.common.exception.BusinessValidationException("Target company profile not found"));
             if (Boolean.TRUE.equals(profile.getIsDeleted())) {
                 throw new com.apms.common.exception.BusinessValidationException("Target company profile is deleted");
             }
+            request.setTargetCompanyProfileId(profile.getCompanyId());
         }
 
         if (request.getTaskType() == TaskType.DOCUMENT_COLLECTION) {
@@ -211,24 +220,21 @@ public class ProjectTaskService {
             if (request.getTitle() != null) task.setTitle(request.getTitle());
             if (request.getDescription() != null) task.setDescription(request.getDescription());
             if (request.getPriority() != null) task.setPriority(request.getPriority());
-            if (request.getDueDate() != null) task.setDueDate(request.getDueDate());
+            if (request.getDueDate() != null) {
+                validateTaskDueDateWithinProject(request.getDueDate(), task.getProject());
+                task.setDueDate(request.getDueDate());
+            }
             if (request.getTaskType() != null && task.getStatus() != TaskStatus.DONE && task.getStatus() != TaskStatus.CANCELLED) {
                 task.setTaskType(request.getTaskType());
             }
             if (request.getTargetCompanyProfileId() != null) {
-                com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findById(request.getTargetCompanyProfileId())
+                com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findByCompanyId(request.getTargetCompanyProfileId())
+                        .or(() -> companyProfileRepository.findById(request.getTargetCompanyProfileId()))
                         .orElseThrow(() -> new com.apms.common.exception.BusinessValidationException("Target company profile not found"));
                 if (Boolean.TRUE.equals(profile.getIsDeleted())) {
                     throw new com.apms.common.exception.BusinessValidationException("Target company profile is deleted");
                 }
-                task.setTargetCompanyProfileId(request.getTargetCompanyProfileId());
-            }
-
-            TaskType effectiveTaskType = request.getTaskType() != null ? request.getTaskType() : task.getTaskType();
-            if (effectiveTaskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
-                if (!org.springframework.util.StringUtils.hasText(task.getTargetCompanyProfileId())) {
-                     throw new com.apms.common.exception.BusinessValidationException("targetCompanyProfileId is required for PARTNER_CONTRACT_COLLECTION");
-                }
+                task.setTargetCompanyProfileId(profile.getCompanyId());
             }
 
             if (request.getAssignedToUserId() != null) {
@@ -258,6 +264,18 @@ public class ProjectTaskService {
         }
 
         return toResponse(task);
+    }
+
+    private void validateTaskDueDateWithinProject(LocalDateTime dueDate, Project project) {
+        if (dueDate == null || project == null || project.getPlannedEndDate() == null) {
+            return;
+        }
+        if (dueDate.toLocalDate().isAfter(project.getPlannedEndDate())) {
+            throw new BusinessValidationException(
+                    "Task due date cannot be later than the project's planned end date ("
+                            + project.getPlannedEndDate().format(PROJECT_END_DATE_FORMATTER)
+                            + ").");
+        }
     }
 
     @Transactional
@@ -310,6 +328,8 @@ public class ProjectTaskService {
         List<ImportJobResponse> rawDocuments;
         if (tType == TaskType.COMPANY_DATA_PREPARATION) {
             rawDocuments = documentService.getTaskImportJobs(projectId, taskId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
+        } else if (tType == TaskType.PARTNER_CONTRACT_COLLECTION) {
+            rawDocuments = documentService.getPartnerContractTaskDocuments(projectId, taskId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
         } else {
             rawDocuments = documentService.getProjectImportJobs(projectId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
         }
@@ -447,7 +467,9 @@ public class ProjectTaskService {
                 .projectType(project.getProjectType())
                 .projectStatus(project.getStatus())
                 .targetCompanyName(project.getTargetCompanyName())
-                .targetCompanyProfileId(project.getTargetCompanyProfileId())
+                .targetCompanyProfileId(org.springframework.util.StringUtils.hasText(task.getTargetCompanyProfileId())
+                        ? task.getTargetCompanyProfileId()
+                        : project.getTargetCompanyProfileId())
                 .targetRelationshipType(project.getTargetRelationshipType())
                 .availableActions(actions)
                 .documents(documents)
@@ -572,11 +594,7 @@ public class ProjectTaskService {
                 } else if (taskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
                     actions.add(TaskAction.VIEW_DOCUMENTS);
                     actions.add(TaskAction.UPLOAD_DOCUMENT);
-                    actions.add(TaskAction.RUN_AI_EXTRACTION);
-                    actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
-                    actions.add(TaskAction.EDIT_EXTRACTION_RESULT);
-                    actions.add(TaskAction.REVIEW_EXTRACTION_RESULT);
-                    actions.add(TaskAction.SUBMIT_SELECTED_DRAFT);
+                    actions.add(TaskAction.SUBMIT_WORK);
                 } else if (taskType == TaskType.COMPANY_NEWS_RESEARCH) {
                     actions.add(TaskAction.CREATE_NEWS_DRAFT);
                     actions.add(TaskAction.VIEW_NEWS_DRAFTS);
@@ -603,9 +621,6 @@ public class ProjectTaskService {
                 } else if (project.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY) {
                     actions.add(TaskAction.VIEW_PROFILE_UPDATE_PROPOSAL_DRAFTS);
                 }
-            } else if (taskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
-                actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
-                actions.add(TaskAction.REVIEW_EXTRACTION_RESULT);
             } else if (taskType == TaskType.COMPANY_NEWS_RESEARCH) {
                 actions.add(TaskAction.VIEW_NEWS_DRAFTS);
             }
@@ -644,6 +659,9 @@ public class ProjectTaskService {
                 .updatedAt(task.getUpdatedAt())
                 .completedAt(task.getCompletedAt())
                 .taskType(task.getTaskType() != null ? task.getTaskType() : TaskType.GENERAL_TASK)
+                .targetCompanyProfileId(org.springframework.util.StringUtils.hasText(task.getTargetCompanyProfileId())
+                        ? task.getTargetCompanyProfileId()
+                        : task.getProject().getTargetCompanyProfileId())
                 .build();
     }
 

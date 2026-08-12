@@ -147,4 +147,11 @@ public class ScoreSnapshot {
 
     @Column(name = "approved_role_evaluation_version_number")
     private Integer approvedRoleEvaluationVersionNumber;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "evaluator_role")
+    private com.apms.common.enums.SystemRole evaluatorRole;
+
+    @Column(name = "authoritative")
+    private Boolean authoritative;
 }

@@ -1,6 +1,7 @@
 package com.apms.domain.security.service;
 
 import com.apms.domain.security.config.TotpProperties;
+import com.apms.domain.security.dto.StepUpVerifyResponse;
 import com.apms.domain.security.dto.TotpDto.TotpEnrollmentStartResponse;
 import com.apms.domain.security.dto.TotpDto.TotpStatusResponse;
 import com.apms.domain.security.entity.AccountTotpCredential;
@@ -32,6 +33,7 @@ public class TotpEnrollmentService {
     private final TotpVerificationService verificationService;
     private final TotpProperties totpProperties;
     private final Clock clock;
+    private final StepUpAuthenticationService stepUpAuthenticationService;
 
     private final SecretGenerator secretGenerator = new DefaultSecretGenerator(64);
     private final QrGenerator qrGenerator = new ZxingPngQrGenerator();
@@ -49,6 +51,9 @@ public class TotpEnrollmentService {
                 .enabled(cred.isEnabled())
                 .locked(locked)
                 .lockedUntil(locked ? cred.getLockedUntil() : null)
+                .secureAccessActive(cred.getOwnerSecureSessionExpiresAt() != null
+                        && cred.getOwnerSecureSessionExpiresAt().isAfter(LocalDateTime.now(clock)))
+                .secureAccessExpiresAt(cred.getOwnerSecureSessionExpiresAt())
                 .build();
     }
 
@@ -115,7 +120,7 @@ public class TotpEnrollmentService {
     }
 
     @Transactional
-    public void confirmEnrollment(Long accountId, UUID enrollmentId, String code) {
+    public StepUpVerifyResponse confirmEnrollment(Long accountId, UUID enrollmentId, String code) {
         AccountTotpCredential cred = repository.findByAccountIdWithLock(accountId)
                 .orElseThrow(() -> new TotpException("TOTP_ENROLLMENT_NOT_FOUND"));
 
@@ -164,5 +169,6 @@ public class TotpEnrollmentService {
         cred.setLockedUntil(null);
         cred.setLastAcceptedTimeStep(matchedTimeStep);
         repository.save(cred);
+        return stepUpAuthenticationService.grantOwnerSecureSession(accountId);
     }
 }

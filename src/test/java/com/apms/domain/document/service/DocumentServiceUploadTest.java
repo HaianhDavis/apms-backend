@@ -9,6 +9,7 @@ import com.apms.domain.document.ImportJob;
 import com.apms.domain.document.RawDocument;
 import com.apms.domain.document.dto.ImportJobResponse;
 import com.apms.domain.document.dto.ManualInputRequest;
+import com.apms.domain.document.repository.mongo.CompanyDocumentRepository;
 import com.apms.domain.document.repository.mongo.RawDocumentRepository;
 import com.apms.domain.document.repository.sql.ImportJobRepository;
 import com.apms.domain.project.Project;
@@ -39,7 +40,11 @@ public class DocumentServiceUploadTest {
     @Mock private AccountRepository accountRepository;
     @Mock private ImportJobRepository importJobRepository;
     @Mock private RawDocumentRepository rawDocumentRepository;
+    @Mock private CompanyDocumentRepository companyDocumentRepository;
     @Mock private StorageService storageService;
+    @Mock private DocumentTextExtractionService documentTextExtractionService;
+    @Mock private com.apms.domain.project.service.ProjectTargetProfileResolver projectTargetProfileResolver;
+    @Mock private com.apms.domain.audit.service.AuditLogService auditLogService;
 
     @InjectMocks
     private DocumentService documentService;
@@ -80,6 +85,7 @@ public class DocumentServiceUploadTest {
         when(accountRepository.findById(100L)).thenReturn(Optional.of(staffAccount));
         when(accountRepository.getReferenceById(100L)).thenReturn(staffAccount);
         when(storageService.store(any())).thenReturn("path/to/local.pdf");
+        when(documentTextExtractionService.extractText(anyString(), anyString())).thenReturn("extracted text");
 
         when(importJobRepository.save(any(ImportJob.class))).thenAnswer(inv -> {
             ImportJob j = inv.getArgument(0);

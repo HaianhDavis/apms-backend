@@ -3,7 +3,9 @@ package com.apms.domain.score.service;
 import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.SubmissionStatus;
 import com.apms.common.enums.SubmissionType;
+import com.apms.common.enums.SystemRole;
 import com.apms.common.enums.TaskStatus;
+import com.apms.common.security.ProjectSecurityEvaluator;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.company.enums.CompanyRole;
 import com.apms.domain.project.ProjectTask;
@@ -48,6 +50,7 @@ public class CompetitorRoleEvaluationApprovalStrategy implements RoleEvaluationA
     private final RoleScoringEngine scoringEngine;
     private final RoleScoreRuleSetRepository ruleSetRepository;
     private final AuditLogService auditLogService;
+    private final ProjectSecurityEvaluator projectSecurityEvaluator;
 
     @Override
     public boolean supports(CompanyRole role) {
@@ -57,6 +60,12 @@ public class CompetitorRoleEvaluationApprovalStrategy implements RoleEvaluationA
     @Override
     @Transactional(transactionManager = "transactionManager")
     public void approve(RoleEvaluationDraft draft, ProjectTask task, ProjectTaskSubmission submission, ReviewRoleEvaluationRequest request, Long accountId, String idempotencyKey) {
+
+        if (!projectSecurityEvaluator.isManagerOrOwner(task.getProject().getId()) && !projectSecurityEvaluator.isManager(task.getProject().getId())) {
+            throw new SecurityException("User is not authorized as Manager or Owner for this project");
+        }
+        SystemRole evaluatorRole = RoleEvaluationAuthorityResolver.currentEvaluatorRoleOrDefault(SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        boolean ownerFinal = evaluatorRole == SystemRole.BUSINESS_OWNER;
 
         // 1. Recovery Check: Has this draft already produced a snapshot?
         Optional<ScoreSnapshot> existingSnapshot = scoreSnapshotRepository.findBySourceEvaluationDraftId(draft.getId());
@@ -88,6 +97,8 @@ public class CompetitorRoleEvaluationApprovalStrategy implements RoleEvaluationA
         draft.setStatus(RoleEvaluationStatus.APPROVAL_PROCESSING);
         draft.setApprovalProcessingStartedAt(LocalDateTime.now());
         draft.setApprovalIdempotencyKey(idempotencyKey);
+        draft.setEvaluatorRole(evaluatorRole);
+        draft.setOwnerFinalized(ownerFinal);
         draftRepository.save(draft);
 
         auditLogService.log(accountId, AuditAction.ROLE_EVALUATION_APPROVAL_STARTED, "ROLE_EVALUATION_DRAFT", draft.getId(),
@@ -108,6 +119,8 @@ public class CompetitorRoleEvaluationApprovalStrategy implements RoleEvaluationA
         calcRequest.setCalculatedByAccountId(accountId);
         calcRequest.setSourceEvaluationDraftId(draft.getId());
         calcRequest.setApprovalIdempotencyKey(idempotencyKey);
+        calcRequest.setEvaluatorRole(evaluatorRole);
+        calcRequest.setAuthoritative(ownerFinal);
 
         Map<String, BigDecimal> scores = new HashMap<>();
         draft.getCriterionInputs().forEach((k, v) -> scores.put(k, v.getRawScore()));
@@ -136,7 +149,7 @@ public class CompetitorRoleEvaluationApprovalStrategy implements RoleEvaluationA
         }
 
         // 6. Complete (Database boundary #2 - Mongo)
-        repairStateAndReturn(draft, task, submission, snapshot.getScoreSnapshotId(), accountId);
+        repairStateAndReturn(draft, task, submission, snapshot.getScoreSnapshotId(), accountId, evaluatorRole, ownerFinal);
     }
 
     @Override
@@ -182,10 +195,17 @@ public class CompetitorRoleEvaluationApprovalStrategy implements RoleEvaluationA
     }
 
     private void repairStateAndReturn(RoleEvaluationDraft draft, ProjectTask task, ProjectTaskSubmission submission, Long snapshotId, Long reviewerId) {
+        SystemRole evaluatorRole = RoleEvaluationAuthorityResolver.currentEvaluatorRoleOrDefault(SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        repairStateAndReturn(draft, task, submission, snapshotId, reviewerId, evaluatorRole, evaluatorRole == SystemRole.BUSINESS_OWNER);
+    }
+
+    private void repairStateAndReturn(RoleEvaluationDraft draft, ProjectTask task, ProjectTaskSubmission submission, Long snapshotId, Long reviewerId, SystemRole evaluatorRole, boolean ownerFinal) {
         draft.setApprovedSnapshotId(snapshotId);
-        draft.setStatus(RoleEvaluationStatus.APPROVED);
+        draft.setStatus(ownerFinal ? RoleEvaluationStatus.FINAL : RoleEvaluationStatus.APPROVED);
         draft.setActive(false);
         draft.setActiveDraftKey(null); // Clear unique index
+        draft.setEvaluatorRole(evaluatorRole);
+        draft.setOwnerFinalized(ownerFinal);
         draftRepository.save(draft);
 
         submission.setStatus(SubmissionStatus.APPROVED);

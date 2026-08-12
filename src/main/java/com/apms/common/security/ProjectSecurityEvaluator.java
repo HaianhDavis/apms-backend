@@ -81,6 +81,17 @@ public class ProjectSecurityEvaluator {
     }
 
     /**
+     * Manager must be a project member. BUSINESS_OWNER has system-wide final evaluation authority.
+     */
+    public boolean isManagerOrOwner(Long projectId) {
+        UserDetailsImpl user = currentUser();
+        if (user == null) return false;
+        if (isOwner(user)) return true;
+        if (!hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) return false;
+        return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
+    }
+
+    /**
      * True if project member AND (Staff or Manager)
      */
     public boolean isStaffOrManager(Long projectId) {

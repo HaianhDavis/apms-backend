@@ -1,6 +1,7 @@
 package com.apms.domain.score.dto;
 
 import com.apms.domain.company.enums.CompanyRole;
+import com.apms.common.enums.SystemRole;
 import com.apms.domain.score.enums.EvaluationCompletenessStatus;
 import com.apms.domain.score.enums.WeightSource;
 import com.apms.domain.score.enums.WeightingMethod;
@@ -32,4 +33,6 @@ public class RoleScoreSnapshotResponse {
     private WeightingMethod weightingMethod;
     private WeightSource weightSource;
     private Instant calculatedAt;
+    private SystemRole evaluatorRole;
+    private Boolean authoritative;
 }

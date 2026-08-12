@@ -1,6 +1,7 @@
 package com.apms.domain.score.service;
 
 import com.apms.common.enums.OutboxEventStatus;
+import com.apms.common.enums.SystemRole;
 import com.apms.domain.company.enums.CompanyRole;
 import com.apms.domain.project.ProjectTask;
 import com.apms.domain.project.ProjectTaskSubmission;
@@ -58,9 +59,11 @@ public class CustomerRoleEvaluationApprovalStrategy implements RoleEvaluationApp
     @Transactional(transactionManager = "transactionManager")
     public void approve(RoleEvaluationDraft draft, ProjectTask task, ProjectTaskSubmission submission, ReviewRoleEvaluationRequest request, Long accountId, String idempotencyKey) {
 
-        if (!projectSecurityEvaluator.isManager(task.getProject().getId())) {
-            throw new SecurityException("User is not authorized as Manager for this project");
+        if (!projectSecurityEvaluator.isManagerOrOwner(task.getProject().getId()) && !projectSecurityEvaluator.isManager(task.getProject().getId())) {
+            throw new SecurityException("User is not authorized as Manager or Owner for this project");
         }
+        SystemRole evaluatorRole = RoleEvaluationAuthorityResolver.currentEvaluatorRoleOrDefault(SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        boolean ownerFinal = evaluatorRole == SystemRole.BUSINESS_OWNER;
 
         // 1. Validation
         if (draft.getStatus() != RoleEvaluationStatus.IN_REVIEW) {
@@ -134,7 +137,7 @@ public class CustomerRoleEvaluationApprovalStrategy implements RoleEvaluationApp
                 .evaluatedRole(CompanyRole.CUSTOMER)
                 .versionNumber(nextVersion)
                 .approvedDraftRevision(draft.getWorkingRevisionNumber())
-                .status(RoleEvaluationStatus.APPROVED)
+                .status(ownerFinal ? RoleEvaluationStatus.FINAL : RoleEvaluationStatus.APPROVED)
                 .evaluationPeriod(draft.getEvaluationPeriod())
                 .criteria(criteriaMap)
                 .sourceReferences(draft.getPinnedSourceReferences())
@@ -144,6 +147,8 @@ public class CustomerRoleEvaluationApprovalStrategy implements RoleEvaluationApp
                 .approvedByAccountId(accountId)
                 .approvedAt(LocalDateTime.now())
                 .reviewComment(request.getComment())
+                .evaluatorRole(evaluatorRole)
+                .authoritative(ownerFinal)
                 .completenessStatus(readiness.getAggregateCompletenessStatus())
                 .partialApprovalJustification(readiness.getAggregateCompletenessStatus() == EvaluationCompletenessStatus.PARTIAL ? request.getComment() : null)
                 .schemaVersion(1)
@@ -168,6 +173,8 @@ public class CustomerRoleEvaluationApprovalStrategy implements RoleEvaluationApp
                 .approvedVersionNumber(nextVersion)
                 .managerFeedback(request.getComment())
                 .managerJustification(request.getComment())
+                .evaluatorRole(evaluatorRole)
+                .authoritative(ownerFinal)
                 .aggregateCompletenessStatus(readiness.getAggregateCompletenessStatus())
                 .occurredAt(LocalDateTime.now())
                 .payloadVersion(1)
@@ -206,6 +213,8 @@ public class CustomerRoleEvaluationApprovalStrategy implements RoleEvaluationApp
                 .set("reviewedByAccountId", accountId)
                 .set("reviewedAt", LocalDateTime.now())
                 .set("reviewComment", request.getComment())
+                .set("evaluatorRole", evaluatorRole)
+                .set("ownerFinalized", ownerFinal)
                 .inc("optimisticVersion", 1);
 
         long modified = mongoTemplate.updateFirst(query, update, RoleEvaluationDraft.class).getModifiedCount();
@@ -217,6 +226,8 @@ public class CustomerRoleEvaluationApprovalStrategy implements RoleEvaluationApp
         draft.setStatus(RoleEvaluationStatus.APPROVAL_PROCESSING);
         draft.setCurrentApprovedVersionId(versionId);
         draft.setCurrentApprovedVersionNumber(nextVersion);
+        draft.setEvaluatorRole(evaluatorRole);
+        draft.setOwnerFinalized(ownerFinal);
     }
 
     @Override

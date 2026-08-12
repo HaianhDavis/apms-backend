@@ -348,5 +348,7 @@ public class CompanyCandidate implements org.springframework.data.domain.Persist
         private String rawDocumentId;
         private String fileName;
         private Integer page;
+        private String evidenceText;
+        private Double confidence;
     }
 }

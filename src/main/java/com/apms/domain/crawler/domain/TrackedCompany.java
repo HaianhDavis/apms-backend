@@ -84,4 +84,3 @@ public class TrackedCompany {
     @LastModifiedDate
     private LocalDateTime updatedAt;
 }
-

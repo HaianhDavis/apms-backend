@@ -54,7 +54,7 @@ public class ProfileService {
     private final OwnerOrganizationService ownerOrganizationService;
     private final TrackedCompanyRepository trackedCompanyRepository;
     private final TrackedCompanyCache trackedCompanyCache;
-    private final com.apms.domain.document.service.CompanyDocumentPublisher companyDocumentPublisher;
+    private final com.apms.domain.project.service.ProjectTargetProfileResolver projectTargetProfileResolver;
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER
@@ -79,6 +79,7 @@ public class ProfileService {
         CompanyProfile approvedProfile = project.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY
                 ? updateExistingProfile(project, candidate)
                 : createNewProfile(project, candidate);
+        projectTargetProfileResolver.backfillPartnerContractTasks(project, approvedProfile.getCompanyId());
 
         // Add to TrackedCompany if not exists
         if (candidate.getIdentity() != null) {
@@ -111,7 +112,7 @@ public class ProfileService {
             }
         }
         
-        publishCandidateSourceDocuments(approvedProfile, project, candidate);
+        log.info("Candidate {} source documents remain as research/evidence only; they are not published to Company Profile documents.", candidate.getId());
     }
 
     private CompanyProfile createNewProfile(Project project, CompanyCandidate candidate) {
@@ -229,35 +230,6 @@ public class ProfileService {
         candidateRepository.save(candidate);
     }
 
-    private void publishCandidateSourceDocuments(CompanyProfile profile, Project project, CompanyCandidate candidate) {
-        java.util.List<String> sourceDocumentIds = resolveSourceDocumentIds(candidate);
-        if (sourceDocumentIds.isEmpty()) {
-            log.warn("Approved candidate {} has no source documents to publish", candidate.getId());
-            return;
-        }
-
-        Long approvedBy = resolveApprovedBy(candidate);
-        LocalDateTime approvedAt = candidate.getReview() != null && candidate.getReview().getReviewedAt() != null
-                ? candidate.getReview().getReviewedAt()
-                : LocalDateTime.now();
-
-        for (String sourceDocumentId : sourceDocumentIds) {
-            companyDocumentPublisher.publishApprovedDocument(
-                    profile.getId(),
-                    sourceDocumentId,
-                    approvedBy,
-                    approvedAt,
-                    com.apms.domain.document.dto.PublicationContext.builder()
-                            .sourceProjectId(String.valueOf(project.getId()))
-                            .sourceTaskId(candidate.getTaskId() != null ? String.valueOf(candidate.getTaskId()) : null)
-                            .sourceCandidateId(candidate.getId())
-                            .documentType("AI_EXTRACTION_SOURCE")
-                            .description("Used for Candidate Extraction")
-                            .build()
-            );
-        }
-    }
-
     private java.util.List<String> resolveSourceDocumentIds(CompanyCandidate candidate) {
         java.util.LinkedHashSet<String> ids = new java.util.LinkedHashSet<>();
         if (candidate.getSourceDocumentIds() != null) {
@@ -270,17 +242,6 @@ public class ProfileService {
             ids.add(candidate.getRawDocumentId().trim());
         }
         return new java.util.ArrayList<>(ids);
-    }
-
-    private Long resolveApprovedBy(CompanyCandidate candidate) {
-        if (candidate.getReview() == null || !StringUtils.hasText(candidate.getReview().getReviewedBy())) {
-            return null;
-        }
-        try {
-            return Long.valueOf(candidate.getReview().getReviewedBy());
-        } catch (NumberFormatException ex) {
-            return null;
-        }
     }
 
     // ─────────────────────────────────────────────
@@ -520,10 +481,28 @@ public class ProfileService {
                 .compliance(p.getCompliance())
                 .companyMembers(p.getCompanyMembers())
                 .reviewStatus(p.getReviewStatus())
+                .relationshipType(resolveRelationshipType(p.getCompanyId()))
                 .tags(p.getTags())
                 .metadata(p.getMetadata())
                 .version(p.getVersion())
                 .build();
+    }
+
+    private String resolveRelationshipType(String companyId) {
+        if (!StringUtils.hasText(companyId)) return "PARTNER_WITH";
+        try {
+            String cypher = "MATCH (c:Company {companyId: $companyId})-[r]-(:Company) RETURN type(r) LIMIT 1";
+            java.util.List<String> types = new java.util.ArrayList<>(neo4jClient.query(cypher)
+                    .bind(companyId).to("companyId")
+                    .fetchAs(String.class)
+                    .all());
+            if (types != null && !types.isEmpty()) {
+                return types.get(0);
+            }
+        } catch (Exception e) {
+            log.debug("Failed to resolve Neo4j relationship for companyId {}: {}", companyId, e.getMessage());
+        }
+        return "PARTNER_WITH";
     }
 
     private CompanyProfile.Identity mapIdentity(CompanyCandidate.Identity i) {

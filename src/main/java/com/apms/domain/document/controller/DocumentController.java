@@ -127,16 +127,17 @@ public class DocumentController {
 
     // ─────────────────────────────────────────────
     // DELETE /api/v1/projects/{projectId}/documents/{rawDocumentId}
-    // Role: SYSTEM_ADMIN or (BUSINESS_DEVELOPMENT_MANAGER + isMemberOrOwner)
+    // Role: SYSTEM_ADMIN, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF (if project member)
     // ─────────────────────────────────────────────
     @DeleteMapping("/projects/{projectId}/documents/{rawDocumentId}")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId))")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)) or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMember(#projectId))")
     public ResponseEntity<ApiResponse<Void>> deleteDocument(
             @PathVariable Long projectId,
             @PathVariable String rawDocumentId,
+            @RequestParam(required = false) Long taskId,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
-        documentService.deleteDocument(rawDocumentId, currentUser.getId());
+        documentService.deleteDocument(projectId, taskId, rawDocumentId, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(null, "Document deleted"));
     }
 }

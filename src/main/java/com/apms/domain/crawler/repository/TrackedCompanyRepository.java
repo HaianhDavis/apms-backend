@@ -25,4 +25,3 @@ public interface TrackedCompanyRepository extends MongoRepository<TrackedCompany
      */
     boolean existsByCompanyNameIgnoreCase(String companyName);
 }
-

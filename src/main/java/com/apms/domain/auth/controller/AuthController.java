@@ -6,6 +6,7 @@ import com.apms.domain.auth.dto.JwtResponse;
 import com.apms.domain.auth.dto.LoginRequest;
 import com.apms.domain.auth.dto.TokenRefreshRequest;
 import com.apms.domain.auth.service.RefreshTokenService;
+import com.apms.domain.security.service.StepUpAuthenticationService;
 import com.apms.security.JwtUtils;
 import com.apms.security.UserDetailsImpl;
 import jakarta.validation.Valid;
@@ -29,6 +30,7 @@ public class AuthController {
     private final AuthenticationManager authenticationManager;
     private final JwtUtils jwtUtils;
     private final RefreshTokenService refreshTokenService;
+    private final StepUpAuthenticationService stepUpAuthenticationService;
 
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<JwtResponse>> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
@@ -84,6 +86,7 @@ public class AuthController {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getPrincipal() instanceof UserDetailsImpl userDetails) {
             refreshTokenService.revokeToken(userDetails.getId());
+            stepUpAuthenticationService.invalidateOwnerSecureSession(userDetails.getId());
         }
         return ResponseEntity.ok(ApiResponse.success(null, "Log out successful!"));
     }

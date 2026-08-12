@@ -119,4 +119,3 @@ public class ArticleTriageService {
         return normalized.toLowerCase(Locale.ROOT);
     }
 }
-

@@ -12,10 +12,8 @@ import java.util.Optional;
 @Repository
 public interface CrawledArticleRepository extends MongoRepository<CrawledArticle, String> {
 
-    List<CrawledArticle> findByCrawledAtAfter(java.time.LocalDateTime date);
-
     /**
-     * Find article by URL for deduplication â€” avoid re-crawling the same article.
+     * Find article by URL for deduplication — avoid re-crawling the same article.
      */
     Optional<CrawledArticle> findByUrl(String url);
 
@@ -41,6 +39,8 @@ public interface CrawledArticleRepository extends MongoRepository<CrawledArticle
      * Find articles by AI company detection status with pagination.
      */
     Page<CrawledArticle> findByAiProcessingStatus(String aiProcessingStatus, Pageable pageable);
+
+    Page<CrawledArticle> findByMatchedCompaniesCompanyId(String companyId, Pageable pageable);
 
     Page<CrawledArticle> findByMatchedCompaniesCompanyNameIgnoreCase(String companyName, Pageable pageable);
 
@@ -77,4 +77,3 @@ public interface CrawledArticleRepository extends MongoRepository<CrawledArticle
      */
     long countByAiProcessingStatus(String aiProcessingStatus);
 }
-

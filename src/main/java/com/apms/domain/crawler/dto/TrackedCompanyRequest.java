@@ -23,4 +23,3 @@ public class TrackedCompanyRequest {
     private List<String> keyPeople;
     private String industry;
 }
-

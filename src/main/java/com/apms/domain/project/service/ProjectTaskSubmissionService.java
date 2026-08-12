@@ -53,12 +53,11 @@ public class ProjectTaskSubmissionService {
     private final AuditLogService auditLogService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final List<ProjectTaskSubmissionApprovalHandler> approvalHandlers;
+    private final com.apms.domain.notification.service.NotificationService notificationService;
 
     @org.springframework.beans.factory.annotation.Autowired
     @org.springframework.context.annotation.Lazy
     private com.apms.domain.companymember.service.CompanyMemberResearchService companyMemberResearchService;
-
-    private final com.apms.domain.document.service.CompanyDocumentPublisher companyDocumentPublisher;
 
     @org.springframework.beans.factory.annotation.Autowired
     @org.springframework.beans.factory.annotation.Qualifier("transactionManager")
@@ -262,6 +261,12 @@ public class ProjectTaskSubmissionService {
         LocalDateTime now = LocalDateTime.now();
         ProjectTask task = submission.getProjectTask();
 
+        if (request.getDecision() == com.apms.common.enums.ReviewDecision.REJECT
+                && isDocumentSubmission(submission)
+                && !StringUtils.hasText(request.getComment())) {
+            throw new com.apms.common.exception.BusinessValidationException("Reject reason is required for document submissions.");
+        }
+
         submission.setReviewedByAccount(reviewer);
         submission.setReviewedAt(now);
         submission.setReviewComment(request.getComment());
@@ -361,22 +366,7 @@ public class ProjectTaskSubmissionService {
 
                         auditLogService.log(currentUser.getId(), AuditAction.PROFILE_UPDATE_PROPOSAL_APPLIED, "CompanyProfileUpdateProposal", proposal.getId(), "Proposal applied and profile updated");
 
-                        // Publish documents
-                        if (proposal.getSourceDocumentIds() != null && !proposal.getSourceDocumentIds().isEmpty()) {
-                            for (String docId : proposal.getSourceDocumentIds()) {
-                                companyDocumentPublisher.publishApprovedDocument(
-                                    profile.getId(),
-                                    docId,
-                                    reviewer.getId(),
-                                    now,
-                                    com.apms.domain.document.dto.PublicationContext.builder()
-                                        .sourceProjectId(String.valueOf(proposal.getProjectId()))
-                                        .sourceTaskId(String.valueOf(proposal.getTaskId()))
-                                        .sourceSubmissionId(String.valueOf(submission.getId()))
-                                        .build()
-                                );
-                            }
-                        }
+                        log.info("Profile update proposal {} source documents remain as research/evidence only; they are not published to Company Profile documents.", proposal.getId());
                     }
                 } else if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyCandidate".equals(submission.getTargetEntityType())) {
                     candidateService.approveCandidate(
@@ -410,11 +400,16 @@ public class ProjectTaskSubmissionService {
                 } else if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyCandidate".equals(submission.getTargetEntityType())) {
                     candidateService.sendBackCandidate(submission.getTargetEntityId(), reviewer.getId());
                 } else {
+                    boolean handled = false;
                     for (ProjectTaskSubmissionApprovalHandler handler : approvalHandlers) {
                         if (handler.supports(submission.getSubmissionType())) {
                             handler.handleRejection(submission, reviewer.getId(), request.getComment());
+                            handled = true;
                             break;
                         }
+                    }
+                    if (!handled && submission.getSubmissionType() == com.apms.common.enums.SubmissionType.DOCUMENT_COLLECTION) {
+                        notifyDocumentCollectionRejected(submission, reviewer.getId(), request.getComment());
                     }
                 }
                 break;
@@ -438,7 +433,23 @@ public class ProjectTaskSubmissionService {
         submissionRepository.save(submission);
         taskRepository.save(task);
 
+        if (request.getDecision() == com.apms.common.enums.ReviewDecision.REJECT || request.getDecision() == com.apms.common.enums.ReviewDecision.REQUEST_REVISION) {
+            Account recipient = submission.getSubmittedByAccount() != null ? submission.getSubmittedByAccount() : task.getAssignedToAccount();
+            if (recipient != null) {
+                notificationService.notifyTaskChangesRequested(task, submission, recipient, reviewer, request.getComment());
+            }
+        }
+
         return toResponse(submission);
+    }
+
+    private boolean isDocumentSubmission(ProjectTaskSubmission submission) {
+        return submission.getSubmissionType() == com.apms.common.enums.SubmissionType.DOCUMENT_COLLECTION
+                || submission.getSubmissionType() == com.apms.common.enums.SubmissionType.PARTNER_CONTRACT_COLLECTION;
+    }
+
+    private void notifyDocumentCollectionRejected(ProjectTaskSubmission submission, Long reviewerId, String comment) {
+        notificationService.notifyDocumentRejected(submission, null, "Document package", reviewerId, comment);
     }
 
     @Transactional

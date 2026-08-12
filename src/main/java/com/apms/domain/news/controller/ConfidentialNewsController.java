@@ -12,8 +12,7 @@ import com.apms.domain.news.entity.CompanyIntelligenceArticle;
 import com.apms.domain.news.repository.CompanyIntelligenceArticleRepository;
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.service.CompanyProfileAccessService;
-import com.apms.domain.security.enums.StepUpPurpose;
-import com.apms.domain.security.service.StepUpTokenService;
+import com.apms.domain.security.service.StepUpAuthenticationService;
 import com.apms.security.UserDetailsImpl;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -45,7 +44,7 @@ public class ConfidentialNewsController {
 
     private final CompanyIntelligenceArticleRepository articleRepository;
     private final CompanyProfileAccessService companyProfileAccessService;
-    private final StepUpTokenService stepUpTokenService;
+    private final StepUpAuthenticationService stepUpAuthenticationService;
     private final StorageService storageService;
     private final AuditLogService auditLogService;
 
@@ -138,10 +137,10 @@ public class ConfidentialNewsController {
             throw new AccessDeniedException("STEP_UP_TOKEN_REQUIRED");
         }
 
-        boolean isValid = stepUpTokenService.validateTokenForScope(stepUpToken, currentUser.getId(), "COMPANY_INTERNAL_NEWS", companyProfileId);
+        boolean isValid = stepUpAuthenticationService.isOwnerSecureSessionActive(currentUser.getId(), stepUpToken);
         if (!isValid) {
-            auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_ACCESS_DENIED, "CompanyProfile", companyProfileId, "Invalid step-up token");
-            throw new AccessDeniedException("STEP_UP_TOKEN_INVALID");
+            auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_ACCESS_DENIED, "CompanyProfile", companyProfileId, "Invalid owner secure session");
+            throw new AccessDeniedException("TOTP_STEP_UP_REQUIRED");
         }
     }
 

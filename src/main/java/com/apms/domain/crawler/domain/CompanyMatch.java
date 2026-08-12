@@ -29,7 +29,7 @@ public class CompanyMatch {
      * AI confidence score between 0.0 and 1.0.
      * - 1.0 = exact name match in title
      * - 0.8+ = strong semantic match
-     * - 0.5â€“0.8 = indirect association
+     * - 0.5–0.8 = indirect association
      * - below 0.5 = weak/discarded
      */
     private Double confidenceScore;
@@ -42,10 +42,9 @@ public class CompanyMatch {
 
     /**
      * How the match was detected:
-     * EXACT   â€” company name or alias found literally in text
-     * ALIAS   â€” matched via known alias/subsidiary/product
-     * SEMANTIC â€” AI inferred relationship without exact match
+     * EXACT   — company name or alias found literally in text
+     * ALIAS   — matched via known alias/subsidiary/product
+     * SEMANTIC — AI inferred relationship without exact match
      */
     private String matchType;
 }
-

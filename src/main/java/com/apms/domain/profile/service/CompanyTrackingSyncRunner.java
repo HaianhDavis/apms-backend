@@ -67,6 +67,7 @@ public class CompanyTrackingSyncRunner implements CommandLineRunner {
             }
 
             TrackedCompany newCompany = TrackedCompany.builder()
+                    .id(profile.getId())
                     .companyName(primaryName)
                     .aliases(aliases)
                     .isActive(true)

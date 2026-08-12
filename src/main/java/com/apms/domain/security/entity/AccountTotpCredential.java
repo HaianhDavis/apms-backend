@@ -47,6 +47,10 @@ public class AccountTotpCredential {
 
     private Long lastAcceptedTimeStep;
 
+    private LocalDateTime ownerSecureSessionIssuedAt;
+
+    private LocalDateTime ownerSecureSessionExpiresAt;
+
     @Column(nullable = false)
     @Builder.Default
     private int failedAttempts = 0;

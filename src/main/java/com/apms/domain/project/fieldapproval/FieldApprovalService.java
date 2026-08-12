@@ -130,6 +130,7 @@ public class FieldApprovalService {
             record.setReviewedRevision(currentRevisionNumber);
             record.setReviewedByAccountId(accountId);
             record.setReviewedAt(LocalDateTime.now());
+            record.setPendingValue(def.getGetter().apply(draft));
             
             if (newStatus == FieldApprovalStatus.APPROVED) {
                 Object val = def.getGetter().apply(draft);

@@ -19,6 +19,8 @@ public class TotpDto {
         private boolean enabled;
         private boolean locked;
         private LocalDateTime lockedUntil;
+        private boolean secureAccessActive;
+        private LocalDateTime secureAccessExpiresAt;
     }
 
     @Data
@@ -50,6 +52,8 @@ public class TotpDto {
         private boolean required;
         private boolean verified;
         private LocalDateTime expiresAt;
+        private boolean secureAccessActive;
+        private boolean totpConfigured;
         private String scope;
         private String resourceId;
     }

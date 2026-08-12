@@ -1,6 +1,7 @@
 package com.apms.domain.score.service;
 
 import com.apms.common.enums.OutboxEventStatus;
+import com.apms.common.enums.SystemRole;
 import com.apms.domain.company.enums.CompanyRole;
 import com.apms.domain.project.ProjectTask;
 import com.apms.domain.project.ProjectTaskSubmission;
@@ -44,8 +45,11 @@ public class PotentialPartnerRoleEvaluationSubmissionStrategy implements RoleEva
     public void submit(RoleEvaluationDraft draft, ProjectTask task, ProjectTaskSubmission existingSubmission, SubmitRoleEvaluationRequest request, Long accountId) {
 
         // 1. Validations
-        if (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(accountId)) {
-            throw new IllegalStateException("Only assigned staff can submit");
+        SystemRole evaluatorRole = RoleEvaluationAuthorityResolver.currentEvaluatorRoleOrDefault(SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        boolean managerOrOwner = evaluatorRole == SystemRole.BUSINESS_DEVELOPMENT_MANAGER || evaluatorRole == SystemRole.BUSINESS_OWNER;
+        if (!managerOrOwner
+                && (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(accountId))) {
+            throw new IllegalStateException("Only assigned staff, Manager, or Owner can submit");
         }
 
         if (draft.getStaleTargetProfile() || draft.getStaleReferenceProfile() || draft.getStaleRuleSet()) {

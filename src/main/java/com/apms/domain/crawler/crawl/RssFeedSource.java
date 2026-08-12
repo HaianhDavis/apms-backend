@@ -25,4 +25,3 @@ public class RssFeedSource {
     /** Maximum number of articles to fetch from this feed per crawl cycle */
     private int maxArticles = 10;
 }
-

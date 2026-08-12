@@ -28,4 +28,3 @@ public class TrackedCompanyResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
-

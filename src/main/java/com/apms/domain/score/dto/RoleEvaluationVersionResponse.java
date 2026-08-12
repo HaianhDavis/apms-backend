@@ -1,6 +1,7 @@
 package com.apms.domain.score.dto;
 
 import com.apms.domain.company.enums.CompanyRole;
+import com.apms.common.enums.SystemRole;
 import com.apms.domain.score.enums.CriterionInputMethod;
 import com.apms.domain.score.enums.CriterionSuggestionReviewStatus;
 import com.apms.domain.score.enums.EvaluationCompletenessStatus;
@@ -35,6 +36,8 @@ public class RoleEvaluationVersionResponse {
     private Long approvedByAccountId;
     private LocalDateTime approvedAt;
     private String reviewComment;
+    private SystemRole evaluatorRole;
+    private Boolean authoritative;
     private LocalDateTime createdAt;
 
     @Data

@@ -6,8 +6,6 @@ import com.apms.domain.document.dto.CompanyDocumentResponse;
 import com.apms.domain.document.entity.CompanyDocument;
 import com.apms.domain.document.repository.mongo.CompanyDocumentRepository;
 import com.apms.domain.document.repository.mongo.RawDocumentRepository;
-import com.apms.domain.candidate.CompanyCandidate;
-import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.project.repository.sql.ProjectRepository;
@@ -31,13 +29,15 @@ import java.util.List;
 @RequiredArgsConstructor
 @Slf4j
 public class CompanyDocumentService {
+    private static final String STATUS_PUBLISHED = "PUBLISHED";
+    private static final String DOCUMENT_TYPE_PARTNER_CONTRACT = "PARTNER_CONTRACT";
+    private static final String DOCUMENT_TYPE_AI_EXTRACTION_SOURCE = "AI_EXTRACTION_SOURCE";
 
     private final CompanyDocumentRepository companyDocumentRepository;
     private final RawDocumentRepository rawDocumentRepository;
     private final StorageService storageService;
     private final AccountRepository accountRepository;
     private final CompanyProfileRepository companyProfileRepository;
-    private final CompanyCandidateRepository candidateRepository;
     private final ProjectRepository projectRepository;
 
     public record DocumentDownload(Resource resource, String fileName, String mimeType) {}
@@ -46,8 +46,8 @@ public class CompanyDocumentService {
     public Page<CompanyDocumentResponse> getPublishedDocuments(String companyProfileIdOrCompanyId, Pageable pageable) {
         CompanyProfile profile = resolveProfile(companyProfileIdOrCompanyId);
 
-        Page<CompanyDocument> documents = companyDocumentRepository.findByCompanyProfileIdInAndStatusAndDeletedAtIsNull(
-                profileIdentifiers(profile), "PUBLISHED", pageable);
+        Page<CompanyDocument> documents = companyDocumentRepository.findByCompanyProfileIdInAndStatusAndDocumentTypeAndDeletedAtIsNull(
+                profileIdentifiers(profile), STATUS_PUBLISHED, DOCUMENT_TYPE_PARTNER_CONTRACT, pageable);
         
         return documents.map(this::mapToResponse);
     }
@@ -55,7 +55,7 @@ public class CompanyDocumentService {
     @Transactional
     public int reconcilePublishedDocuments(String companyProfileIdOrCompanyId) {
         CompanyProfile profile = resolveProfile(companyProfileIdOrCompanyId);
-        return backfillMissingCandidateDocuments(profile);
+        return softDeleteLegacyCandidateDocuments(profile);
     }
 
     @Transactional(readOnly = true)
@@ -66,6 +66,11 @@ public class CompanyDocumentService {
 
         if (!profileIdentifiers(profile).contains(doc.getCompanyProfileId())) {
             throw new ResourceNotFoundException("Document does not belong to this profile");
+        }
+        if (!STATUS_PUBLISHED.equals(doc.getStatus())
+                || doc.getDeletedAt() != null
+                || !DOCUMENT_TYPE_PARTNER_CONTRACT.equals(doc.getDocumentType())) {
+            throw new ResourceNotFoundException("Document is not an approved partner contract for this profile");
         }
 
         RawDocument rawDocument = rawDocumentRepository.findById(doc.getSourceDocumentId())
@@ -167,103 +172,23 @@ public class CompanyDocumentService {
         return new ArrayList<>(ids);
     }
 
-    private int backfillMissingCandidateDocuments(CompanyProfile profile) {
-        if (profile.getSourceRefs() == null || profile.getSourceRefs().getCandidateIds() == null
-                || profile.getSourceRefs().getCandidateIds().isEmpty()) {
-            return 0;
-        }
-
-        final int[] changed = {0};
-        for (String candidateId : profile.getSourceRefs().getCandidateIds()) {
-            if (!StringUtils.hasText(candidateId)) continue;
-            candidateRepository.findById(candidateId).ifPresent(candidate -> {
-                List<String> sourceDocumentIds = sourceDocumentIds(candidate);
-                for (String sourceDocumentId : sourceDocumentIds) {
-                    CompanyDocument document = resolveExistingDocumentForBackfill(profile, sourceDocumentId);
-
-                    if (!profile.getId().equals(document.getCompanyProfileId())) {
-                        document.setCompanyProfileId(profile.getId());
-                    }
-
-                    enrichDocumentFromCandidate(document, candidate);
-                    companyDocumentRepository.save(document);
-                    changed[0]++;
-                }
-            });
-        }
-        return changed[0];
-    }
-
-    private CompanyDocument resolveExistingDocumentForBackfill(CompanyProfile profile, String sourceDocumentId) {
-        return companyDocumentRepository.findByCompanyProfileIdAndSourceDocumentId(profile.getId(), sourceDocumentId)
-                .or(() -> StringUtils.hasText(profile.getCompanyId())
-                        ? companyDocumentRepository.findByCompanyProfileIdAndSourceDocumentId(profile.getCompanyId(), sourceDocumentId)
-                        : java.util.Optional.empty())
-                .orElseGet(() -> {
-                    CompanyDocument created = new CompanyDocument();
-                    created.setCompanyProfileId(profile.getId());
-                    created.setSourceDocumentId(sourceDocumentId);
-                    created.setCreatedAt(LocalDateTime.now());
-                    return created;
-                });
-    }
-
-    private List<String> sourceDocumentIds(CompanyCandidate candidate) {
-        LinkedHashSet<String> ids = new LinkedHashSet<>();
-        if (candidate.getSourceDocumentIds() != null) {
-            candidate.getSourceDocumentIds().stream()
-                    .filter(StringUtils::hasText)
-                    .map(String::trim)
-                    .forEach(ids::add);
-        }
-        if (StringUtils.hasText(candidate.getRawDocumentId())) {
-            ids.add(candidate.getRawDocumentId().trim());
-        }
-        return new ArrayList<>(ids);
-    }
-
-    private void enrichDocumentFromCandidate(CompanyDocument document, CompanyCandidate candidate) {
+    private int softDeleteLegacyCandidateDocuments(CompanyProfile profile) {
         LocalDateTime now = LocalDateTime.now();
-        document.setStatus("PUBLISHED");
-        document.setSourceProjectId(candidate.getProjectId());
-        if (candidate.getTaskId() != null) {
-            document.setSourceTaskId(String.valueOf(candidate.getTaskId()));
-        }
-        document.setSourceCandidateId(candidate.getId());
-        document.setDocumentType("AI_EXTRACTION_SOURCE");
-        document.setDescription("Used for Candidate Extraction");
-        document.setUpdatedAt(now);
-        if (document.getPublishedAt() == null) {
-            document.setPublishedAt(now);
-        }
+        List<CompanyDocument> legacyDocuments = companyDocumentRepository.findByCompanyProfileIdInAndStatusAndDeletedAtIsNull(
+                profileIdentifiers(profile), STATUS_PUBLISHED, org.springframework.data.domain.Pageable.unpaged()).getContent();
 
-        if (candidate.getReview() != null) {
-            if (StringUtils.hasText(candidate.getReview().getReviewedBy())) {
-                try {
-                    Long reviewerId = Long.valueOf(candidate.getReview().getReviewedBy());
-                    document.setApprovedBy(reviewerId);
-                    document.setPublishedBy(reviewerId);
-                } catch (NumberFormatException ignored) {
-                    // Legacy reviewer value is kept out of numeric approver fields.
-                }
-            }
-            if (candidate.getReview().getReviewedAt() != null) {
-                document.setApprovedAt(candidate.getReview().getReviewedAt());
+        int changed = 0;
+        for (CompanyDocument document : legacyDocuments) {
+            boolean traceableCandidatePublication = StringUtils.hasText(document.getSourceCandidateId())
+                    || DOCUMENT_TYPE_AI_EXTRACTION_SOURCE.equals(document.getDocumentType());
+            if (traceableCandidatePublication && !DOCUMENT_TYPE_PARTNER_CONTRACT.equals(document.getDocumentType())) {
+                document.setDeletedAt(now);
+                document.setUpdatedAt(now);
+                companyDocumentRepository.save(document);
+                changed++;
             }
         }
-        if (document.getApprovedAt() == null) {
-            document.setApprovedAt(now);
-        }
-
-        rawDocumentRepository.findById(document.getSourceDocumentId()).ifPresent(rawDoc -> {
-            if (rawDoc.getMetadata() != null) {
-                document.setUploadedBy(rawDoc.getMetadata().getUploadedBy());
-                document.setUploadedAt(rawDoc.getMetadata().getUploadedAt());
-            }
-            if (rawDoc.getSource() != null && !StringUtils.hasText(document.getDisplayName())) {
-                document.setDisplayName(rawDoc.getSource().getFileName());
-            }
-        });
+        return changed;
     }
     
     private String getFullName(Account account) {

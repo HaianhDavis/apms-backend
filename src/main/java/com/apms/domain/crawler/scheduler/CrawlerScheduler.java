@@ -3,6 +3,7 @@ package com.apms.domain.crawler.scheduler;
 import com.apms.domain.crawler.ai.CompanyDetectionService;
 import com.apms.domain.crawler.ai.GeminiArticleSummarizer;
 import com.apms.domain.crawler.config.CrawlerConfig;
+import com.apms.domain.crawler.crawl.CrawlerResult;
 import com.apms.domain.crawler.crawl.TargetedNewsCrawler;
 import com.apms.domain.crawler.domain.CrawledArticle;
 import com.apms.domain.crawler.domain.TrackedCompany;
@@ -12,9 +13,11 @@ import com.apms.domain.crawler.service.ArticleTriageService;
 import com.apms.domain.crawler.service.TrackedCompanyCache;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -38,18 +41,14 @@ public class CrawlerScheduler {
     @Value("${crawler.ai.summary.auto-enabled:false}")
     private boolean autoSummaryEnabled;
 
-    @Value("${crawler.schedule.enabled:true}")
-    private boolean automaticCrawlerEnabled;
-
     @Value("${crawler.startup.enabled:true}")
     private boolean startupCrawlEnabled;
 
+    @Value("${crawler.schedule.enabled:true}")
+    private boolean scheduleEnabled;
+
     @EventListener(ApplicationReadyEvent.class)
     public void runOnStartup() {
-        if (!automaticCrawlerEnabled) {
-            log.info("CrawlerScheduler: Automatic crawler disabled.");
-            return;
-        }
         if (!startupCrawlEnabled) {
             log.info("CrawlerScheduler: Startup crawl disabled.");
             return;
@@ -62,14 +61,9 @@ public class CrawlerScheduler {
 
     @Scheduled(cron = "${crawler.schedule.cron:0 */30 * * * *}")
     public void runCrawlPipeline() {
-        if (!automaticCrawlerEnabled) {
-            log.debug("CrawlerScheduler: Skipping scheduled crawl because automatic crawler is disabled.");
+        if (!scheduleEnabled) {
             return;
         }
-        runPipeline();
-    }
-
-    private void runPipeline() {
         if (!running.compareAndSet(false, true)) {
             log.warn("CrawlerScheduler: Previous crawl cycle still running. Skipping.");
             return;
@@ -79,7 +73,8 @@ public class CrawlerScheduler {
             log.info("CrawlerScheduler: Starting targeted crawl pipeline");
 
             long startTime = System.currentTimeMillis();
-            int totalCrawled = crawlAllFeeds();
+            CrawlerResult crawlerResult = crawlAllFeeds();
+            int totalNew = crawlerResult != null ? crawlerResult.getNewArticles() : 0;
             int totalMatched = companyDetectionService.processAllPending();
             int totalTriaged = articleTriageService.backfillMissingTriage();
             int totalSummarized = autoSummaryEnabled ? articleSummarizer.summarizeReadyArticles() : 0;
@@ -90,15 +85,19 @@ public class CrawlerScheduler {
             long totalDiscarded = articleRepository.countByAiProcessingStatus("DISCARDED");
             long totalErrors = articleRepository.countByAiProcessingStatus("ERROR");
 
-            log.info("CrawlerScheduler: Pipeline completed in {}ms", elapsed);
-            log.info("  Crawled relevant new articles: {}", totalCrawled);
-            log.info("  Matched: {}", totalMatched);
-            log.info("  Triaged: {}", totalTriaged);
-            log.info("  AI summarized: {}", totalSummarized);
-            log.info("  Published: {}", totalPublished);
-            log.info("  Still pending: {}", totalPending);
-            log.info("  Discarded: {}", totalDiscarded);
-            log.info("  Errors: {}", totalErrors);
+            log.info("Pipeline completed\nCrawled relevant new articles: {}\nMatched: {}\nTriaged: {}\nPublished: {}\nErrors: {}", 
+                     totalNew, crawlerResult != null ? crawlerResult.getArticlesMatched() : 0, totalTriaged, totalPublished, totalErrors);
+            
+            if (crawlerResult != null) {
+                log.info("Manual crawl completed:\nstatus={}\nnewArticles={}\nsourcesAttempted={}\nsourcesSucceeded={}\nsourcesFailed={}\nfetched={}\nmatched={}", 
+                         crawlerResult.getStatus(),
+                         totalNew,
+                         crawlerResult.getSourcesAttempted(),
+                         crawlerResult.getSourcesSucceeded(),
+                         crawlerResult.getSourcesFailed(),
+                         crawlerResult.getArticlesFetched(),
+                         crawlerResult.getArticlesMatched());
+            }
         } catch (Exception e) {
             log.error("CrawlerScheduler: Pipeline failed: {}", e.getMessage(), e);
         } finally {
@@ -106,42 +105,30 @@ public class CrawlerScheduler {
         }
     }
 
+    @Async("taskExecutor")
     public void triggerManualCrawl() {
-        new Thread(() -> {
-            log.info("CrawlerScheduler: Manual crawl triggered.");
-            runPipeline();
-        }, "manual-crawl").start();
+        log.info("CrawlerScheduler: Async manual crawl triggered.");
+        runCrawlPipeline();
     }
 
-    private int crawlAllFeeds() {
+    private CrawlerResult crawlAllFeeds() {
         List<TrackedCompany> trackedCompanies = companyCache.getActiveCompanies();
         if (trackedCompanies.isEmpty()) {
             log.warn("CrawlerScheduler: No active target companies configured.");
-            return 0;
+            return CrawlerResult.builder().status("FAILED").build();
         }
 
         int totalNew = 0;
-        List<CrawledArticle> articles = targetedNewsCrawler.crawl(trackedCompanies, maxArticlesPerCompanyPerSource());
+        CrawlerResult crawlerResult = targetedNewsCrawler.crawl(trackedCompanies, maxArticlesPerCompanyPerSource());
         int duplicateCount = 0;
         int thumbnailUpdatedCount = 0;
 
-        List<CrawledArticle> recentArticles = new java.util.ArrayList<>(articleRepository.findByCrawledAtAfter(java.time.LocalDateTime.now().minusDays(7)));
+        List<CrawledArticle> matchedArticles = crawlerResult.getMatchedArticles();
+        if (matchedArticles == null) {
+            return crawlerResult;
+        }
 
-        for (CrawledArticle article : articles) {
-            boolean isDuplicate = false;
-            for (CrawledArticle recent : recentArticles) {
-                double sim = com.apms.domain.crawler.util.TextSimilarityUtils.calculateJaccardSimilarity(article.getTitle(), recent.getTitle());
-                if (sim > 0.75) {
-                    isDuplicate = true;
-                    log.info("CrawlerScheduler: Skipping semantic duplicate: {}", article.getTitle());
-                    break;
-                }
-            }
-            if (isDuplicate) {
-                duplicateCount++;
-                continue;
-            }
-
+        for (CrawledArticle article : matchedArticles) {
             var existingArticle = articleRepository.findByUrl(article.getUrl());
             if (existingArticle.isPresent()) {
                 duplicateCount++;
@@ -152,18 +139,19 @@ public class CrawlerScheduler {
                     articleRepository.save(existing);
                     thumbnailUpdatedCount++;
                 }
-                log.debug("CrawlerScheduler: Skipping duplicate URL: {}", article.getUrl());
+                log.debug("CrawlerScheduler: Skipping duplicate: {}", article.getUrl());
                 continue;
             }
 
-            recentArticles.add(article);
             articleRepository.save(articleTriageService.triage(article));
             totalNew++;
         }
 
         log.info("CrawlerScheduler: Targeted search produced {}, saved pending {}, skipped duplicate {}, updated thumbnails {}",
-                articles.size(), totalNew, duplicateCount, thumbnailUpdatedCount);
-        return totalNew;
+                matchedArticles.size(), totalNew, duplicateCount, thumbnailUpdatedCount);
+                
+        crawlerResult.setNewArticles(totalNew);
+        return crawlerResult;
     }
 
     private int maxArticlesPerCompanyPerSource() {
@@ -176,4 +164,3 @@ public class CrawlerScheduler {
                 .orElse(5);
     }
 }
-

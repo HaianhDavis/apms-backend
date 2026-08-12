@@ -34,6 +34,7 @@ public class CandidateWorkflowService {
     private final ProjectTaskSubmissionRepository submissionRepository;
     private final AccountRepository accountRepository;
     private final AuditLogService auditLogService;
+    private final com.apms.domain.notification.service.NotificationService notificationService;
 
     /**
      * Centralized orchestrator to submit a candidate for manager review.
@@ -163,6 +164,18 @@ public class CandidateWorkflowService {
                 "Manager rejected candidate via workflow");
 
         log.info("Successfully rejected Candidate {} and transitioned Task {} to IN_PROGRESS", candidateId, taskId);
+
+        try {
+            Account recipient = submission != null && submission.getSubmittedByAccount() != null
+                    ? submission.getSubmittedByAccount()
+                    : task.getAssignedToAccount();
+            Account reviewer = accountRepository.findById(reviewerId).orElse(null);
+            if (recipient != null) {
+                notificationService.notifyTaskChangesRequested(task, submission, recipient, reviewer, comment);
+            }
+        } catch (Exception ex) {
+            log.warn("Failed to send notification for candidate rejection: {}", ex.getMessage());
+        }
 
         return CandidateWorkflowResponse.builder()
                 .candidateId(candidateId)

@@ -48,6 +48,8 @@ public class ExternalDataService {
             String companyName,
             LocalDateTime fromDate,
             LocalDateTime toDate,
+            String sentiment,
+            String importance,
             Pageable pageable) {
 
         Criteria criteria = new Criteria();
@@ -86,6 +88,14 @@ public class ExternalDataService {
         if (toDate != null) {
             criteria.andOperator(Criteria.where("publishedDate").lte(toDate.toString()));
         }
+        
+        if (StringUtils.hasText(sentiment)) {
+            criteria.and("sentiment").is(sentiment.toUpperCase());
+        }
+        
+        if (StringUtils.hasText(importance)) {
+            criteria.and("priorityLevel").is(importance.toUpperCase());
+        }
 
         Sort sort = pageable.getSort();
         if (sort.getOrderFor("publishedAt") != null) {
@@ -101,6 +111,14 @@ public class ExternalDataService {
 
         List<ExternalDataItemResponse> responses = items.stream().map(this::crawledToResponse).collect(Collectors.toList());
         return new PageImpl<>(responses, pageable, total);
+    }
+
+    public ExternalDataItemResponse getExternalDataById(String id) {
+        CrawledArticle article = mongoTemplate.findById(id, CrawledArticle.class, "crawled_articles");
+        if (article != null) {
+            return crawledToResponse(article);
+        }
+        return null;
     }
 
     public String simulateFetch() {
@@ -206,7 +224,9 @@ public class ExternalDataService {
         return ExternalDataItemResponse.builder()
                 .id(item.getId())
                 .title(item.getTitle())
-                .summary(item.getAiSummary() != null ? item.getAiSummary() : item.getSummary())
+                .summary(item.getSummary())
+                .aiSummary(item.getAiSummary())
+                .content(item.getContent())
                 .source(item.getSourceName())
                 .url(item.getUrl())
                 .publishedAt(pubDate)
@@ -215,6 +235,7 @@ public class ExternalDataService {
                 .riskLevel(item.getPriorityLevel())
                 .relatedCompanyName(companyName)
                 .imageUrl(item.getThumbnail())
+                .createdAt(item.getCrawledAt())
                 .build();
     }
 

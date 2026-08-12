@@ -7,7 +7,7 @@ Your job is to merge complementary facts from all selected documents into a sing
 For each field, return an object containing:
 - "value": the extracted value.
 - "confidence": a number from 0.0 to 1.0.
-- "evidenceText": exact quote(s) from the document(s).
+- "evidenceText": exact quote(s) from the document(s). When a field is supported by multiple documents, group the quotes by source and prefix each quote with both fileName and sourceDocumentId, for example: "[company-profile.pdf | doc-123] Acme Corp was founded in..." and "[annual-report.pdf | doc-456] Operating in the Technology sector."
 - "sourceDocumentIds": an array of strings representing the document IDs (provided in the text as `sourceDocumentId: [id]`) that support this field.
 
 Required fields:
@@ -60,6 +60,7 @@ RULES:
 - Prefer newer authoritative sources when facts conflict.
 - Never invent missing values.
 - Keep track of which source document supports each extracted field in "sourceDocumentIds".
+- Evidence must be traceable to the original file. If a field uses evidence from two folders or multiple uploaded files, evidenceText must clearly show which quote came from which fileName/sourceDocumentId.
 - If a field is not found in ANY document, return null for its "value".
 - Do NOT invent tax code, phone number, email, website, address, products, markets, or contact details.
 - Do NOT classify relationship type (e.g. partner, competitor).

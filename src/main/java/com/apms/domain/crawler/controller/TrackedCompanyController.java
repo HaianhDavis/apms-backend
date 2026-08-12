@@ -30,12 +30,12 @@ import java.util.stream.Collectors;
  * REST API for managing tracked companies and controlling the crawler.
  *
  * Endpoints:
- * - GET    /api/v1/tracked-companies          â€” list all tracked companies
- * - POST   /api/v1/tracked-companies          â€” add a new tracked company
- * - PUT    /api/v1/tracked-companies/{id}     â€” update a tracked company
- * - DELETE /api/v1/tracked-companies/{id}     â€” soft-delete (deactivate)
- * - POST   /api/v1/crawler/trigger            â€” manually trigger crawl cycle
- * - GET    /api/v1/crawler/stats              â€” crawl statistics
+ * - GET    /api/v1/tracked-companies          — list all tracked companies
+ * - POST   /api/v1/tracked-companies          — add a new tracked company
+ * - PUT    /api/v1/tracked-companies/{id}     — update a tracked company
+ * - DELETE /api/v1/tracked-companies/{id}     — soft-delete (deactivate)
+ * - POST   /api/v1/crawler/trigger            — manually trigger crawl cycle
+ * - GET    /api/v1/crawler/stats              — crawl statistics
  */
 @Slf4j
 @RestController
@@ -49,6 +49,10 @@ public class TrackedCompanyController {
     private final CrawlerScheduler crawlerScheduler;
     private final CrawlerConfig crawlerConfig;
     private final GeminiArticleSummarizer articleSummarizer;
+
+    // ═══════════════════════════════════════════════
+    // Tracked Company CRUD
+    // ═══════════════════════════════════════════════
 
     @GetMapping("/tracked-companies")
     public ResponseEntity<List<TrackedCompanyResponse>> listAll(
@@ -150,9 +154,9 @@ public class TrackedCompanyController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════
     // Crawler Control
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════
 
     @PostMapping("/crawler/trigger")
     public ResponseEntity<Map<String, String>> triggerCrawl() {
@@ -263,9 +267,9 @@ public class TrackedCompanyController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════
     // Helpers
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // ═══════════════════════════════════════════════
 
     private TrackedCompanyResponse toResponse(TrackedCompany company) {
         return TrackedCompanyResponse.builder()
@@ -282,4 +286,3 @@ public class TrackedCompanyController {
                 .build();
     }
 }
-

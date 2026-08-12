@@ -26,6 +26,7 @@ public class ProfileResponse {
     private List<CompanyProfile.CompanyMember> companyMembers;
 
     private String reviewStatus;
+    private String relationshipType;
     private List<String> tags;
     private CompanyProfile.Metadata metadata;
     private Integer version;

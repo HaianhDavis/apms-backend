@@ -5,13 +5,14 @@ import com.apms.domain.contract.entity.PartnerContractCollectionSubmissionPayloa
 import com.apms.domain.contract.repository.mongo.PartnerContractCollectionSubmissionPayloadRepository;
 import com.apms.domain.project.ProjectTask;
 
+import com.apms.domain.document.repository.mongo.RawDocumentRepository;
 import com.apms.domain.project.repository.sql.ProjectTaskRepository;
+import com.apms.domain.project.service.ProjectTargetProfileResolver;
 import com.apms.domain.project.service.ProjectTaskSubmissionService;
 import com.apms.domain.contract.dto.SubmitPartnerContractCollectionRequest;
 import com.apms.domain.contract.entity.PartnerContractExtractionDraft;
-import com.apms.domain.contract.repository.mongo.PartnerContractExtractionDraftRepository;
 import com.apms.domain.contract.enums.ContractExtractionReviewStatus;
-import com.apms.domain.contract.enums.ContractExtractionApplicationStatus;
+import com.apms.domain.contract.repository.mongo.PartnerContractExtractionDraftRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -35,6 +36,10 @@ public class PartnerContractCollectionSubmissionServiceTest {
     private ProjectTaskRepository taskRepository;
     @Mock
     private PartnerContractExtractionDraftRepository draftRepository;
+    @Mock
+    private RawDocumentRepository rawDocumentRepository;
+    @Mock
+    private ProjectTargetProfileResolver targetProfileResolver;
 
     @InjectMocks
     private PartnerContractCollectionSubmissionService submissionService;
@@ -64,6 +69,7 @@ public class PartnerContractCollectionSubmissionServiceTest {
         task.setTargetCompanyProfileId("partner1");
         task.setTaskType(com.apms.common.enums.TaskType.PARTNER_CONTRACT_COLLECTION);
         when(taskRepository.findById(1L)).thenReturn(Optional.of(task));
+        when(targetProfileResolver.resolveForPartnerContractTask(1L, 1L, true)).thenReturn("partner1");
 
         PartnerContractExtractionDraft draft = new PartnerContractExtractionDraft();
         draft.setSourceProjectId(1L);

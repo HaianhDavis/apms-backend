@@ -21,7 +21,7 @@ import java.util.stream.Stream;
  * Pipeline per article:
  * 1. Load tracked companies (from in-memory cache)
  * 2. Fast pre-filter: exact alias/keyword matching on title + summary
- * 3. If no pre-filter match â†’ call Gemini AI for semantic matching
+ * 3. If no pre-filter match → call Gemini AI for semantic matching
  * 4. Update article with results (MATCHED or DISCARDED)
  */
 @Slf4j
@@ -88,7 +88,7 @@ public class CompanyDetectionService {
         CompanyDetectionResult preFilterResult = fastPreFilter(article, trackedCompanies);
 
         if (preFilterResult.isRelevant()) {
-            // Pre-filter found matches â€” no need for AI call
+            // Pre-filter found matches — no need for AI call
             article.setMatchedCompanies(preFilterResult.getMatches());
             article.setAiProcessingStatus("MATCHED");
             article.setRawAiOutput("PRE-FILTER: " + preFilterResult.getMatches().size() + " match(es)");
@@ -240,4 +240,3 @@ public class CompanyDetectionService {
         return sb.toString();
     }
 }
-

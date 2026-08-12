@@ -43,6 +43,21 @@ public class Notification {
     @Column(nullable = false)
     private NotificationType type;
 
+    private Long projectId;
+
+    private Long taskId;
+
+    private Long submissionId;
+
+    @Column(length = 100)
+    private String actionType;
+
+    @Column(length = 100)
+    private String documentId;
+
+    @Column(columnDefinition = "NVARCHAR(MAX)")
+    private String rejectReason;
+
     @Builder.Default
     @Column(nullable = false)
     private Boolean isRead = false;

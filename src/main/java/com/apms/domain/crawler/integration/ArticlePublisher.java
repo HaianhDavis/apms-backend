@@ -21,7 +21,7 @@ import java.util.stream.Collectors;
  * (the same collection used by apms-backend's RawDocument entity).
  *
  * This bridges the crawler microservice with the backend's existing workflow:
- * raw_documents â†’ view crawl results â†’ select articles â†’ AI extraction.
+ * raw_documents → view crawl results → select articles → AI extraction.
  *
  * Uses MongoTemplate directly to write to raw_documents without depending
  * on the backend's Java entity classes.
@@ -53,6 +53,9 @@ public class ArticlePublisher {
         log.info("ArticlePublisher: Publishing {} matched articles to raw_documents", matched.size());
 
         int published = 0;
+        int skipped = 0;
+        int errors = 0;
+        
         for (CrawledArticle article : matched) {
             try {
                 // Check if already exists in raw_documents (by original URL)
@@ -62,6 +65,7 @@ public class ArticlePublisher {
                     article.setAiProcessingStatus("PUBLISHED");
                     article.setPublishedAt(LocalDateTime.now());
                     crawledArticleRepository.save(article);
+                    skipped++;
                     continue;
                 }
 
@@ -78,12 +82,13 @@ public class ArticlePublisher {
                 log.debug("ArticlePublisher: Published article: {}", article.getTitle());
 
             } catch (Exception e) {
+                errors++;
                 log.error("ArticlePublisher: Failed to publish article '{}': {}",
                         article.getTitle(), e.getMessage(), e);
             }
         }
 
-        log.info("ArticlePublisher: Published {} articles to raw_documents", published);
+        log.info("ArticlePublisher: Published {} articles, Skipped duplicates: {}, Errors: {}", published, skipped, errors);
         return published;
     }
 
@@ -153,4 +158,3 @@ public class ArticlePublisher {
         return mongoTemplate.exists(query, RAW_DOCUMENTS_COLLECTION);
     }
 }
-

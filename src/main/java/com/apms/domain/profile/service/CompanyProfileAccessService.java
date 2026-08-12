@@ -32,7 +32,8 @@ public class CompanyProfileAccessService {
             throw new AccessDeniedException("ACCESS_FORBIDDEN");
         }
 
-        CompanyProfile profile = companyProfileRepository.findByCompanyId(companyProfileId)
+        CompanyProfile profile = companyProfileRepository.findById(companyProfileId)
+                .or(() -> companyProfileRepository.findByCompanyId(companyProfileId))
                 .orElseThrow(() -> new ResourceNotFoundException("COMPANY_PROFILE_NOT_FOUND"));
 
         if (Boolean.TRUE.equals(profile.getIsDeleted())) {

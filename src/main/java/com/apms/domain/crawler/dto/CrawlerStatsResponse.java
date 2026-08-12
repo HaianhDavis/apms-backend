@@ -26,4 +26,3 @@ public class CrawlerStatsResponse {
     private int configuredFeeds;
     private LocalDateTime lastUpdatedAt;
 }
-

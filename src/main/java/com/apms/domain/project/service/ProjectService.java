@@ -358,8 +358,30 @@ public class ProjectService {
             throw new BusinessValidationException("Cannot remove the last MANAGER from a project.");
         }
 
+        // Prevent removing staff if they have active or in-progress tasks assigned
+        boolean hasActiveTasks = projectTaskRepository.existsByProjectIdAndAssignedToAccountIdAndStatusNotIn(
+                projectId, accountId, List.of(TaskStatus.DONE, TaskStatus.CANCELLED));
+        if (hasActiveTasks) {
+            throw new BusinessValidationException("Cannot remove member from project because they have active or in-progress tasks assigned. All assigned tasks must be completed before removal.");
+        }
+
         projectMemberRepository.deleteByProject_IdAndAccount_Id(projectId, accountId);
         log.info("Member removed: projectId={}, accountId={}", projectId, accountId);
+
+        try {
+            Project project = findProjectOrThrow(projectId);
+            Account removedAccount = accountRepository.findById(accountId).orElse(null);
+            org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            Account sender = null;
+            if (auth != null && auth.getPrincipal() instanceof com.apms.security.UserDetailsImpl u) {
+                sender = accountRepository.findById(u.getId()).orElse(null);
+            }
+            if (removedAccount != null && project != null) {
+                notificationService.notifyProjectMemberRemoved(project, removedAccount, sender);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to send project member removed notification: {}", e.getMessage());
+        }
     }
 
     // ─────────────────────────────────────────────

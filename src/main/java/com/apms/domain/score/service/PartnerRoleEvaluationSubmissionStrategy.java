@@ -4,6 +4,7 @@ import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.OutboxEventStatus;
 import com.apms.common.enums.SubmissionStatus;
 import com.apms.common.enums.SubmissionType;
+import com.apms.common.enums.SystemRole;
 import com.apms.common.enums.TaskStatus;
 import com.apms.common.exception.BusinessValidationException;
 import com.apms.domain.audit.service.AuditLogService;
@@ -56,8 +57,11 @@ public class PartnerRoleEvaluationSubmissionStrategy implements RoleEvaluationSu
     public void submit(RoleEvaluationDraft draft, ProjectTask task, ProjectTaskSubmission existingSubmission, SubmitRoleEvaluationRequest request, Long accountId) {
 
         // 1. Validations
-        if (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(accountId)) {
-            throw new IllegalStateException("Only assigned staff can submit");
+        SystemRole evaluatorRole = RoleEvaluationAuthorityResolver.currentEvaluatorRoleOrDefault(SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        boolean managerOrOwner = evaluatorRole == SystemRole.BUSINESS_DEVELOPMENT_MANAGER || evaluatorRole == SystemRole.BUSINESS_OWNER;
+        if (!managerOrOwner
+                && (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(accountId))) {
+            throw new IllegalStateException("Only assigned staff, Manager, or Owner can submit");
         }
 
         if (draft.getStaleTargetProfile() || draft.getStaleReferenceProfile() || draft.getStaleRuleSet()) {

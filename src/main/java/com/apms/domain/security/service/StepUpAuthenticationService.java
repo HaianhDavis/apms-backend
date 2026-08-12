@@ -6,6 +6,9 @@ import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.profile.service.CompanyProfileAccessService;
 import com.apms.domain.security.dto.StepUpVerifyResponse;
 import com.apms.domain.security.dto.TotpDto.StepUpStatusResponse;
+import com.apms.domain.security.entity.AccountTotpCredential;
+import com.apms.domain.security.exception.TotpException;
+import com.apms.domain.security.repository.AccountTotpCredentialRepository;
 import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,34 +25,42 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 public class StepUpAuthenticationService {
 
+    public static final String SCOPE_COMPANY_INTERNAL_NEWS = "COMPANY_INTERNAL_NEWS";
+    public static final String SCOPE_COMPANY_PROFILE_DOCUMENTS = "COMPANY_PROFILE_DOCUMENTS";
+
     private final StepUpTokenService tokenService;
     private final TotpVerificationService totpVerificationService;
     private final AuditLogService auditLogService;
     private final CompanyProfileAccessService companyProfileAccessService;
+    private final AccountTotpCredentialRepository credentialRepository;
 
     @Value("${apms.stepup.token.expiration-seconds:600}")
     private long tokenExpirationSeconds;
 
-    public StepUpStatusResponse getStepUpStatus(String scope, String resourceId) {
+    public StepUpStatusResponse getStepUpStatus(String scope, String resourceId, String ownerSecureToken) {
         UserDetailsImpl currentUser = getCurrentUser();
 
-        if ("COMPANY_INTERNAL_NEWS".equals(scope)) {
-            companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile(resourceId, currentUser);
+        if (!hasRole(currentUser, SystemRole.BUSINESS_OWNER)) {
+            throw new AccessDeniedException("User is not a BUSINESS_OWNER");
         }
-        
-        boolean required = true; // For now, assume step-up is always required for CONFIDENTIAL_COMPANY_NEWS
-        boolean verified = false;
-        LocalDateTime expiresAt = null;
 
-        // In a real implementation, you would inspect the current valid token to see if it's verified.
-        // Since we don't have the token in the GET request (it's in the client's state),
-        // we rely on the client knowing if it has a token. But we provide this endpoint
-        // for structural integrity.
+        if (SCOPE_COMPANY_INTERNAL_NEWS.equals(scope) || SCOPE_COMPANY_PROFILE_DOCUMENTS.equals(scope)) {
+            companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile(resourceId, currentUser);
+        } else if (scope != null || resourceId != null) {
+            throw new AccessDeniedException("STEP_UP_SCOPE_FORBIDDEN");
+        }
+
+        AccountTotpCredential credential = credentialRepository.findByAccountId(currentUser.getId()).orElse(null);
+        boolean configured = credential != null && credential.isEnabled();
+        boolean verified = configured && isOwnerSecureSessionActive(currentUser.getId(), ownerSecureToken);
+        LocalDateTime expiresAt = verified ? credential.getOwnerSecureSessionExpiresAt() : null;
 
         return StepUpStatusResponse.builder()
-                .required(required)
+                .required(true)
                 .verified(verified)
                 .expiresAt(expiresAt)
+                .secureAccessActive(verified)
+                .totpConfigured(configured)
                 .scope(scope)
                 .resourceId(resourceId)
                 .build();
@@ -60,12 +71,14 @@ public class StepUpAuthenticationService {
         UserDetailsImpl currentUser = getCurrentUser();
 
         if (!hasRole(currentUser, SystemRole.BUSINESS_OWNER)) {
-            auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_ACCESS_DENIED, "StepUpAuth", null, "User is not a BUSINESS_OWNER");
+            auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_FAILED, "StepUpAuth", resourceId, "User is not a BUSINESS_OWNER for scope: " + scope);
             throw new AccessDeniedException("User is not a BUSINESS_OWNER");
         }
 
-        if ("COMPANY_INTERNAL_NEWS".equals(scope)) {
+        if (SCOPE_COMPANY_INTERNAL_NEWS.equals(scope) || SCOPE_COMPANY_PROFILE_DOCUMENTS.equals(scope)) {
             companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile(resourceId, currentUser);
+        } else if (scope != null || resourceId != null) {
+            throw new AccessDeniedException("STEP_UP_SCOPE_FORBIDDEN");
         }
 
         try {
@@ -75,15 +88,67 @@ public class StepUpAuthenticationService {
             throw e;
         }
 
-        // Generate token bound to scope and resourceId
-        String token = tokenService.generateTokenForScope(currentUser.getId(), scope, resourceId, tokenExpirationSeconds);
-        
-        auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_SUCCEEDED, "StepUpAuth", resourceId, "TOTP step-up succeeded for scope: " + scope);
+        StepUpVerifyResponse response = grantOwnerSecureSession(currentUser.getId());
 
+        auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_SUCCEEDED, "StepUpAuth", resourceId, "Owner secure session granted with TOTP");
+        if (SCOPE_COMPANY_PROFILE_DOCUMENTS.equals(scope)) {
+            auditLogService.log(currentUser.getId(), AuditAction.COMPANY_DOCUMENT_ACCESS_VERIFIED, "CompanyProfile", resourceId, "Company document access verified with TOTP");
+        }
+
+        return response;
+    }
+
+    @Transactional
+    public StepUpVerifyResponse grantOwnerSecureSession(Long accountId) {
+        AccountTotpCredential credential = credentialRepository.findByAccountIdWithLock(accountId)
+                .orElseThrow(() -> new TotpException("TOTP_NOT_ENROLLED"));
+        if (!credential.isEnabled()) {
+            throw new TotpException("TOTP_NOT_ENROLLED");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime expiresAt = now.plusSeconds(tokenExpirationSeconds);
+        credential.setOwnerSecureSessionIssuedAt(now);
+        credential.setOwnerSecureSessionExpiresAt(expiresAt);
+        credentialRepository.save(credential);
+
+        String token = tokenService.generateOwnerSecureSessionToken(accountId, expiresAt);
         return StepUpVerifyResponse.builder()
                 .stepUpToken(token)
                 .expiresInSeconds(tokenExpirationSeconds)
+                .expiresAt(expiresAt)
+                .secureAccessGranted(true)
                 .build();
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isOwnerSecureSessionActive(Long accountId, String ownerSecureToken) {
+        if (ownerSecureToken == null || ownerSecureToken.isBlank()) {
+            return false;
+        }
+        if (!tokenService.validateOwnerSecureSessionToken(ownerSecureToken, accountId)) {
+            return false;
+        }
+
+        AccountTotpCredential credential = credentialRepository.findByAccountId(accountId).orElse(null);
+        if (credential == null || !credential.isEnabled() || credential.getOwnerSecureSessionExpiresAt() == null) {
+            return false;
+        }
+        if (!credential.getOwnerSecureSessionExpiresAt().isAfter(LocalDateTime.now())) {
+            return false;
+        }
+
+        LocalDateTime tokenExpiresAt = tokenService.getOwnerSecureSessionExpiresAt(ownerSecureToken, accountId);
+        return tokenExpiresAt != null && !tokenExpiresAt.isAfter(credential.getOwnerSecureSessionExpiresAt());
+    }
+
+    @Transactional
+    public void invalidateOwnerSecureSession(Long accountId) {
+        credentialRepository.findByAccountIdWithLock(accountId).ifPresent(credential -> {
+            credential.setOwnerSecureSessionIssuedAt(null);
+            credential.setOwnerSecureSessionExpiresAt(null);
+            credentialRepository.save(credential);
+        });
     }
 
     private UserDetailsImpl getCurrentUser() {

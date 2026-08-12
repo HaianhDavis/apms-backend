@@ -32,12 +32,12 @@ public class CompanyDetectionPrompt {
         sb.append("1. A company is MENTIONED if its name, alias, subsidiary, product, or key person appears in the article.\n");
         sb.append("2. A company is SEMANTICALLY RELATED if the article discusses a topic, event, or technology ");
         sb.append("closely associated with that company, even without an exact name match.\n");
-        sb.append("3. Be precise â€” only match companies with clear relevance. Do NOT guess or stretch connections.\n");
+        sb.append("3. Be precise — only match companies with clear relevance. Do NOT guess or stretch connections.\n");
         sb.append("4. One article can match MULTIPLE companies (e.g., partnership announcements).\n");
         sb.append("5. Set confidence between 0.0 and 1.0:\n");
-        sb.append("   - 0.9â€“1.0: Company name or alias explicitly mentioned\n");
-        sb.append("   - 0.7â€“0.9: Subsidiary, product, or key person mentioned\n");
-        sb.append("   - 0.5â€“0.7: Strong semantic association\n");
+        sb.append("   - 0.9–1.0: Company name or alias explicitly mentioned\n");
+        sb.append("   - 0.7–0.9: Subsidiary, product, or key person mentioned\n");
+        sb.append("   - 0.5–0.7: Strong semantic association\n");
         sb.append("   - Below 0.5: Do NOT include\n\n");
 
         // Build tracked companies section
@@ -86,4 +86,3 @@ public class CompanyDetectionPrompt {
         return sb.toString();
     }
 }
-

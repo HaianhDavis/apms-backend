@@ -23,10 +23,12 @@ public class RoleEvaluationSubmissionService {
     private final ProjectTaskRepository taskRepository;
     private final ProjectTaskSubmissionRepository submissionRepository;
     private final List<RoleEvaluationSubmissionStrategy> strategies;
+    private final RoleEvaluationAuthorityService authorityService;
 
     public void submitDraft(String draftId, SubmitRoleEvaluationRequest request, Long accountId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found: " + draftId));
+        authorityService.assertDraftMutableByCurrentUser(draft);
 
         ProjectTask task = taskRepository.findById(draft.getTaskId())
                 .orElseThrow(() -> new IllegalStateException("Task not found"));

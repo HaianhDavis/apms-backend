@@ -1,6 +1,7 @@
 package com.apms.domain.score.dto.draft;
 
 import com.apms.domain.company.enums.CompanyRole;
+import com.apms.common.enums.SystemRole;
 import com.apms.domain.score.draft.AutomaticSuggestion;
 import com.apms.domain.score.draft.CriterionInput;
 import com.apms.domain.score.draft.EvidenceRecord;
@@ -53,4 +54,12 @@ public class RoleEvaluationDraftResponse {
     private Long reviewedByAccountId;
     private LocalDateTime reviewedAt;
     private String reviewComment;
+
+    private SystemRole evaluatorRole;
+    private Boolean ownerFinalized;
+    private Boolean ownerFinalEvaluationExists;
+    private Boolean canEdit;
+    private Boolean canSubmit;
+    private Boolean canReview;
+    private Boolean canReevaluate;
 }

@@ -2,6 +2,7 @@ package com.apms.domain.score.service;
 
 import com.apms.common.enums.OutboxEventStatus;
 import com.apms.common.enums.SubmissionStatus;
+import com.apms.common.enums.SystemRole;
 import com.apms.common.enums.TaskStatus;
 import com.apms.common.exception.BusinessValidationException;
 import com.apms.domain.company.enums.CompanyRole;
@@ -58,9 +59,11 @@ public class PartnerRoleEvaluationApprovalStrategy implements RoleEvaluationAppr
     @Override
     public void approve(RoleEvaluationDraft draft, ProjectTask task, ProjectTaskSubmission submission, ReviewRoleEvaluationRequest request, Long accountId, String idempotencyKey) {
 
-        if (!projectSecurityEvaluator.isManager(task.getProject().getId())) {
-            throw new SecurityException("User is not authorized as Manager for this project");
+        if (!projectSecurityEvaluator.isManagerOrOwner(task.getProject().getId()) && !projectSecurityEvaluator.isManager(task.getProject().getId())) {
+            throw new SecurityException("User is not authorized as Manager or Owner for this project");
         }
+        SystemRole evaluatorRole = RoleEvaluationAuthorityResolver.currentEvaluatorRoleOrDefault(SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        boolean ownerFinal = evaluatorRole == SystemRole.BUSINESS_OWNER;
 
         // 1. Validation
         if (draft.getStatus() != RoleEvaluationStatus.IN_REVIEW) {
@@ -125,7 +128,7 @@ public class PartnerRoleEvaluationApprovalStrategy implements RoleEvaluationAppr
                 .evaluatedRole(CompanyRole.PARTNER)
                 .versionNumber(nextVersion)
                 .approvedDraftRevision(draft.getWorkingRevisionNumber())
-                .status(RoleEvaluationStatus.APPROVED)
+                .status(ownerFinal ? RoleEvaluationStatus.FINAL : RoleEvaluationStatus.APPROVED)
                 .evaluationPeriod(draft.getEvaluationPeriod())
                 .criteria(criteriaMap)
                 .sourceReferences(draft.getPinnedSourceReferences())
@@ -135,6 +138,8 @@ public class PartnerRoleEvaluationApprovalStrategy implements RoleEvaluationAppr
                 .approvedByAccountId(accountId)
                 .approvedAt(LocalDateTime.now())
                 .reviewComment(request.getComment())
+                .evaluatorRole(evaluatorRole)
+                .authoritative(ownerFinal)
                 .completenessStatus(completenessStatus)
                 .partialApprovalJustification(null)
                 .schemaVersion(1)
@@ -158,6 +163,8 @@ public class PartnerRoleEvaluationApprovalStrategy implements RoleEvaluationAppr
                         .approvedVersionId(versionId)
                         .approvedVersionNumber(nextVersion)
                         .managerFeedback(request.getComment())
+                        .evaluatorRole(evaluatorRole)
+                        .authoritative(ownerFinal)
                         .aggregateCompletenessStatus(completenessStatus)
                         .managerJustification(null)
                         .occurredAt(LocalDateTime.now())
@@ -184,7 +191,7 @@ public class PartnerRoleEvaluationApprovalStrategy implements RoleEvaluationAppr
                 .and("optimisticVersion").is(draft.getOptimisticVersion()));
 
         Update update = new Update()
-                .set("status", RoleEvaluationStatus.APPROVED)
+                .set("status", ownerFinal ? RoleEvaluationStatus.FINAL : RoleEvaluationStatus.APPROVED)
                 .set("active", false)
                 .unset("activeDraftKey")
                 .set("currentApprovedVersionId", versionId)
@@ -192,6 +199,8 @@ public class PartnerRoleEvaluationApprovalStrategy implements RoleEvaluationAppr
                 .set("reviewedByAccountId", accountId)
                 .set("reviewedAt", LocalDateTime.now())
                 .set("reviewComment", request.getComment())
+                .set("evaluatorRole", evaluatorRole)
+                .set("ownerFinalized", ownerFinal)
                 .inc("optimisticVersion", 1);
 
         long modified = mongoTemplate.updateFirst(query, update, RoleEvaluationDraft.class).getModifiedCount();

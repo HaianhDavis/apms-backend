@@ -182,7 +182,7 @@ public class RssFeedCrawler {
             return LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
         }
 
-        // Normalize timezone offset: "+07" â†’ "+0700"
+        // Normalize timezone offset: "+07" → "+0700"
         String normalized = pubDateStr.trim();
         if (normalized.matches(".*[+-]\\d{2}$")) {
             normalized += "00";
@@ -209,4 +209,3 @@ public class RssFeedCrawler {
         return LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
     }
 }
-

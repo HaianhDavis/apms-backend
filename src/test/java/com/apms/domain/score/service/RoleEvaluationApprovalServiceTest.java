@@ -24,7 +24,9 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -42,6 +44,9 @@ public class RoleEvaluationApprovalServiceTest {
     @Mock
     private RoleEvaluationApprovalStrategy strategy;
 
+    @Mock
+    private RoleEvaluationAuthorityService authorityService;
+
     private RoleEvaluationApprovalService service;
 
     private RoleEvaluationDraft draft;
@@ -51,7 +56,7 @@ public class RoleEvaluationApprovalServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new RoleEvaluationApprovalService(draftRepository, taskRepository, submissionRepository, List.of(strategy));
+        service = new RoleEvaluationApprovalService(draftRepository, taskRepository, submissionRepository, List.of(strategy), authorityService);
 
         draft = new RoleEvaluationDraft();
         draft.setId("draft-1");
@@ -86,6 +91,19 @@ public class RoleEvaluationApprovalServiceTest {
         service.reviewDraft("draft-1", request, 1L, "key-1");
 
         verify(strategy).approve(draft, task, submission, request, 1L, "key-1");
+    }
+
+    @Test
+    void reviewDraft_BlocksManagerAfterOwnerFinalized() {
+        request.setDecision(RoleEvaluationReviewDecision.APPROVE);
+        when(draftRepository.findById("draft-1")).thenReturn(Optional.of(draft));
+        doThrow(new com.apms.common.exception.BusinessValidationException(RoleEvaluationAuthorityService.MANAGER_LOCK_MESSAGE))
+                .when(authorityService).assertManagerMayReview(draft);
+
+        assertThrows(com.apms.common.exception.BusinessValidationException.class,
+                () -> service.reviewDraft("draft-1", request, 1L, "key-1"));
+
+        verifyNoInteractions(strategy);
     }
 
     @Test

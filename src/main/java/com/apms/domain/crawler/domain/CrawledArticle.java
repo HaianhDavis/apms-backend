@@ -80,9 +80,9 @@ public class CrawledArticle {
     /** Short reason explaining why the article has this priority */
     private String priorityReason;
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────
     // AI Company Detection Results
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────
 
     /**
      * List of tracked companies matched to this article.
@@ -93,11 +93,11 @@ public class CrawledArticle {
 
     /**
      * AI processing lifecycle status:
-     * PENDING    â€” crawled but not yet analyzed
-     * MATCHED    â€” AI found relevant tracked companies
-     * DISCARDED  â€” AI determined no relevance to any tracked company
-     * PUBLISHED  â€” article pushed to raw_documents for backend consumption
-     * ERROR      â€” AI processing failed
+     * PENDING    — crawled but not yet analyzed
+     * MATCHED    — AI found relevant tracked companies
+     * DISCARDED  — AI determined no relevance to any tracked company
+     * PUBLISHED  — article pushed to raw_documents for backend consumption
+     * ERROR      — AI processing failed
      */
     @Indexed
     @Builder.Default
@@ -112,9 +112,9 @@ public class CrawledArticle {
     /** Error message if AI processing failed */
     private String aiErrorMessage;
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────
     // Timestamps
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ─────────────────────────────────────────────────────────────
 
     @CreatedDate
     private LocalDateTime crawledAt;
@@ -125,4 +125,3 @@ public class CrawledArticle {
     /** When the article was published to raw_documents */
     private LocalDateTime publishedAt;
 }
-

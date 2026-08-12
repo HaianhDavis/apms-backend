@@ -29,7 +29,7 @@ public class RoleEvaluationDraftController {
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/role-evaluations")
     @ResponseStatus(HttpStatus.CREATED)
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public RoleEvaluationDraftResponse createDraft(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
@@ -40,7 +40,7 @@ public class RoleEvaluationDraftController {
     }
 
     @GetMapping("/projects/{projectId}/tasks/{taskId}/role-evaluations")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public java.util.List<RoleEvaluationDraftResponse> getTaskDrafts(
             @PathVariable Long projectId,
             @PathVariable Long taskId) {
@@ -48,13 +48,13 @@ public class RoleEvaluationDraftController {
     }
 
     @GetMapping("/role-evaluations/{evaluationId}")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public RoleEvaluationDraftResponse getDraft(@PathVariable String evaluationId) {
         return draftService.getDraft(evaluationId);
     }
 
     @PatchMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public RoleEvaluationDraftResponse updateCriterionInput(
             @PathVariable String evaluationId,
             @PathVariable String criterionKey,
@@ -65,7 +65,7 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/evidence")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public RoleEvaluationDraftResponse addEvidence(
             @PathVariable String evaluationId,
             @RequestBody CreateEvidenceRequest request,
@@ -75,7 +75,7 @@ public class RoleEvaluationDraftController {
     }
 
     @DeleteMapping("/role-evaluations/{evaluationId}/evidence/{evidenceId}")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public RoleEvaluationDraftResponse removeEvidence(
             @PathVariable String evaluationId,
             @PathVariable String evidenceId,
@@ -85,7 +85,7 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/suggestions/generate")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public BatchGenerationResponse generateSuggestions(
             @PathVariable String evaluationId,
             @RequestBody(required = false) GenerateSuggestionRequest request) {
@@ -98,7 +98,7 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public SingleGenerationResponse generateCriterionSuggestion(
             @PathVariable String evaluationId,
             @PathVariable String criterionKey,
@@ -123,7 +123,7 @@ public class RoleEvaluationDraftController {
     }
 
     @GetMapping("/role-evaluations/{evaluationId}/readiness")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse checkReadiness(
             @PathVariable String evaluationId) {
         com.apms.domain.score.draft.RoleEvaluationDraft draft = draftService.getRawDraft(evaluationId);
@@ -139,14 +139,14 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/product-market-overlap/suggest")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public RoleEvaluationDraftResponse suggestProductMarketOverlap(
             @PathVariable String evaluationId) {
         return draftService.suggestProductMarketOverlap(evaluationId);
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/product-market-overlap/accept")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public RoleEvaluationDraftResponse acceptAutomaticSuggestion(
             @PathVariable String evaluationId,
             @RequestBody AcceptAutomaticSuggestionRequest request,
@@ -156,7 +156,7 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/accept")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public RoleEvaluationDraftResponse acceptCriterionSuggestion(
             @PathVariable String evaluationId,
             @PathVariable String criterionKey,
@@ -174,7 +174,7 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/edit")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public RoleEvaluationDraftResponse editCriterionSuggestion(
             @PathVariable String evaluationId,
             @PathVariable String criterionKey,
@@ -193,7 +193,7 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/reject")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public RoleEvaluationDraftResponse rejectCriterionSuggestion(
             @PathVariable String evaluationId,
             @PathVariable String criterionKey,
@@ -211,7 +211,7 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/criteria/{criterionKey}/suggest/needs-more-data")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public RoleEvaluationDraftResponse markSuggestionNeedsMoreData(
             @PathVariable String evaluationId,
             @PathVariable String criterionKey,
@@ -229,7 +229,7 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/calculate-preview")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public RoleEvaluationPreviewResponse calculatePreview(
             @PathVariable String evaluationId) {
         return draftService.calculatePreview(evaluationId);
@@ -237,7 +237,7 @@ public class RoleEvaluationDraftController {
 
     @PostMapping("/role-evaluations/{evaluationId}/submit")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'RESEARCH_STAFF')")
     public void submitDraft(
             @PathVariable String evaluationId,
             @RequestBody SubmitRoleEvaluationRequest request,
@@ -247,7 +247,7 @@ public class RoleEvaluationDraftController {
     }
 
     @PostMapping("/role-evaluations/{evaluationId}/review")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'MANAGER')")
     public org.springframework.http.ResponseEntity<?> reviewDraft(
             @PathVariable String evaluationId,
             @RequestBody ReviewRoleEvaluationRequest request,

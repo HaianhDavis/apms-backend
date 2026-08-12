@@ -1,7 +1,10 @@
 package com.apms.domain.crawler.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.apms.domain.crawler.crawl.RssFeedSource;
 import lombok.Data;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -39,5 +42,5 @@ public class CrawlerConfig {
                 .build();
     }
 
-}
 
+}

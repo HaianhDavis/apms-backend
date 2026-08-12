@@ -39,4 +39,7 @@ public class ExtractionFieldResult {
 
     private ExtractionReviewStatus previousManagerReviewStatus;
     private String previousManagerReviewComment;
+    private Object previousSubmittedValue;
+    private Integer previousReviewedRevision;
+    private Integer changedInRevision;
 }

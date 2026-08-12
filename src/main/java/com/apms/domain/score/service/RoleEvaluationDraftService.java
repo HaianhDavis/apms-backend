@@ -39,6 +39,7 @@ import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.apms.common.exception.BusinessConflictException;
+import com.apms.common.exception.BusinessValidationException;
 import com.apms.domain.score.enums.EvaluationCompletenessStatus;
 import com.apms.domain.score.draft.ApprovedSourceReference;
 import com.apms.domain.score.draft.SourceSnapshotHasher;
@@ -68,6 +69,7 @@ public class RoleEvaluationDraftService {
     private final AuditLogService auditLogService;
     private final CriterionSuggestionValidator suggestionValidator;
     private final SourcePinningValidator sourcePinningValidator;
+    private final RoleEvaluationAuthorityService authorityService;
 
     @Transactional
     public RoleEvaluationDraftResponse createDraft(Long projectId, Long taskId, CreateRoleEvaluationDraftRequest request, Long accountId) {
@@ -112,6 +114,10 @@ public class RoleEvaluationDraftService {
         RoleScoreRuleSet ruleSet = ruleSetRepository.findByEvaluatedRoleAndActiveTrue(evaluatedRole)
                 .orElseThrow(() -> new IllegalArgumentException("No active rule set found for role: " + evaluatedRole));
 
+        if (!isCurrentOwner() && ownerFinalEvaluationExists(targetProfile.getId(), evaluatedRole)) {
+            throw new BusinessValidationException(RoleEvaluationAuthorityService.MANAGER_LOCK_MESSAGE);
+        }
+
         String activeDraftKey = projectId + ":" + taskId + ":" + evaluatedRole;
         if (draftRepository.existsByActiveDraftKey(activeDraftKey)) {
             throw new IllegalStateException("An active draft already exists for this task and role.");
@@ -136,6 +142,7 @@ public class RoleEvaluationDraftService {
                 .active(true)
                 .activeDraftKey(activeDraftKey)
                 .createdByAccountId(accountId)
+                .evaluatorRole(currentEvaluatorRoleOrNull())
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
                 .build();
@@ -196,6 +203,7 @@ public class RoleEvaluationDraftService {
     public RoleEvaluationDraftResponse updateCriterionInput(String draftId, String criterionKey, UpdateCriterionInputRequest request, Long accountId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+        assertDraftMutableByCurrentUser(draft);
 
         if (draft.getStatus() != RoleEvaluationStatus.DRAFT && draft.getStatus() != RoleEvaluationStatus.REVISION_REQUIRED) {
             throw new IllegalStateException("Draft cannot be edited in current state: " + draft.getStatus());
@@ -239,6 +247,7 @@ public class RoleEvaluationDraftService {
     public RoleEvaluationDraftResponse addEvidence(String draftId, CreateEvidenceRequest request, Long accountId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+        assertDraftMutableByCurrentUser(draft);
 
         if (draft.getStatus() != RoleEvaluationStatus.DRAFT && draft.getStatus() != RoleEvaluationStatus.REVISION_REQUIRED) {
             throw new IllegalStateException("Draft cannot be edited in current state");
@@ -276,6 +285,7 @@ public class RoleEvaluationDraftService {
     public RoleEvaluationDraftResponse removeEvidence(String draftId, String evidenceId, Long accountId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+        assertDraftMutableByCurrentUser(draft);
 
         if (draft.getStatus() != RoleEvaluationStatus.DRAFT && draft.getStatus() != RoleEvaluationStatus.REVISION_REQUIRED) {
             throw new IllegalStateException("Draft cannot be edited in current state");
@@ -314,6 +324,7 @@ public class RoleEvaluationDraftService {
     public RoleEvaluationDraftResponse suggestProductMarketOverlap(String draftId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+        assertDraftMutableByCurrentUser(draft);
 
         CompanyProfile target = identifierResolver.resolveProfileByDocumentId(draft.getTargetProfileDocumentId());
         CompanyProfile reference = identifierResolver.resolveProfileByDocumentId(draft.getReferenceProfileDocumentId());
@@ -336,6 +347,7 @@ public class RoleEvaluationDraftService {
     public RoleEvaluationDraftResponse acceptCriterionSuggestion(String draftId, String criterionKey, AcceptAutomaticSuggestionRequest request, Long accountId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+        assertDraftMutableByCurrentUser(draft);
 
         if (draft.getStatus() != RoleEvaluationStatus.DRAFT && draft.getStatus() != RoleEvaluationStatus.REVISION_REQUIRED) {
             throw new IllegalStateException("Draft cannot be edited in current state");
@@ -400,6 +412,7 @@ public class RoleEvaluationDraftService {
     public RoleEvaluationDraftResponse editCriterionSuggestion(String draftId, String criterionKey, EditCriterionSuggestionRequest request, Long accountId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+        assertDraftMutableByCurrentUser(draft);
 
         if (draft.getStatus() != RoleEvaluationStatus.DRAFT && draft.getStatus() != RoleEvaluationStatus.REVISION_REQUIRED) {
             throw new IllegalStateException("Draft cannot be edited in current state");
@@ -453,6 +466,7 @@ public class RoleEvaluationDraftService {
     public RoleEvaluationDraftResponse rejectCriterionSuggestion(String draftId, String criterionKey, RejectCriterionSuggestionRequest request, Long accountId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+        assertDraftMutableByCurrentUser(draft);
 
         if (draft.getStatus() != RoleEvaluationStatus.DRAFT && draft.getStatus() != RoleEvaluationStatus.REVISION_REQUIRED) {
             throw new IllegalStateException("Draft cannot be edited in current state");
@@ -491,6 +505,7 @@ public class RoleEvaluationDraftService {
     public RoleEvaluationDraftResponse markSuggestionNeedsMoreData(String draftId, String criterionKey, NeedsMoreDataCriterionSuggestionRequest request, Long accountId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+        assertDraftMutableByCurrentUser(draft);
 
         if (draft.getStatus() != RoleEvaluationStatus.DRAFT && draft.getStatus() != RoleEvaluationStatus.REVISION_REQUIRED) {
             throw new IllegalStateException("Draft cannot be edited in current state");
@@ -528,6 +543,7 @@ public class RoleEvaluationDraftService {
     public RoleEvaluationPreviewResponse calculatePreview(String draftId) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+        assertDraftMutableByCurrentUser(draft);
 
         if (draft.getEvaluatedRole() == CompanyRole.PARTNER) {
             RoleEvaluationPreviewResponse response = new RoleEvaluationPreviewResponse();
@@ -607,6 +623,20 @@ public class RoleEvaluationDraftService {
         response.setReviewedByAccountId(draft.getReviewedByAccountId());
         response.setReviewedAt(draft.getReviewedAt());
         response.setReviewComment(draft.getReviewComment());
+        response.setEvaluatorRole(draft.getEvaluatorRole());
+        boolean ownerFinalExists = ownerFinalEvaluationExists(draft.getTargetProfileDocumentId(), draft.getEvaluatedRole());
+        response.setOwnerFinalized(Boolean.TRUE.equals(draft.getOwnerFinalized()));
+        response.setOwnerFinalEvaluationExists(ownerFinalExists);
+        com.apms.common.enums.SystemRole currentRole = currentEvaluatorRoleOrNull();
+        boolean owner = currentRole == com.apms.common.enums.SystemRole.BUSINESS_OWNER;
+        boolean managerLocked = !owner && ownerFinalExists;
+        boolean mutableStatus = draft.getStatus() == RoleEvaluationStatus.DRAFT || draft.getStatus() == RoleEvaluationStatus.REVISION_REQUIRED;
+        response.setCanEdit(!managerLocked && mutableStatus);
+        response.setCanSubmit(!managerLocked && mutableStatus);
+        response.setCanReview((owner || currentRole == com.apms.common.enums.SystemRole.BUSINESS_DEVELOPMENT_MANAGER)
+                && !managerLocked
+                && (draft.getStatus() == RoleEvaluationStatus.IN_REVIEW || draft.getStatus() == RoleEvaluationStatus.APPROVAL_FAILED));
+        response.setCanReevaluate(owner && ownerFinalExists);
 
         return response;
     }
@@ -614,6 +644,7 @@ public class RoleEvaluationDraftService {
     public void pinSourceReferences(String draftId, List<SourceSelectionRequest> requests, Integer expectedWorkingRevisionNumber, Long expectedOptimisticVersion) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found"));
+        assertDraftMutableByCurrentUser(draft);
 
         if (draft.getStatus() != RoleEvaluationStatus.DRAFT && draft.getStatus() != RoleEvaluationStatus.REVISION_REQUIRED) {
             throw new IllegalStateException("Draft cannot be edited in current state");
@@ -637,5 +668,23 @@ public class RoleEvaluationDraftService {
         if (result.getMatchedCount() == 0) {
             throw new BusinessConflictException("Concurrent modification detected. Draft was modified by another writer.");
         }
+    }
+
+    private void assertDraftMutableByCurrentUser(RoleEvaluationDraft draft) {
+        if (authorityService != null) {
+            authorityService.assertDraftMutableByCurrentUser(draft);
+        }
+    }
+
+    private boolean ownerFinalEvaluationExists(String targetProfileDocumentId, CompanyRole evaluatedRole) {
+        return authorityService != null && authorityService.ownerFinalEvaluationExists(targetProfileDocumentId, evaluatedRole);
+    }
+
+    private boolean isCurrentOwner() {
+        return authorityService != null && authorityService.isOwner();
+    }
+
+    private com.apms.common.enums.SystemRole currentEvaluatorRoleOrNull() {
+        return authorityService != null ? authorityService.currentEvaluatorRoleOrNull() : null;
     }
 }

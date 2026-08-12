@@ -12,6 +12,8 @@ import java.util.Optional;
 @Repository
 public interface CompanyDocumentRepository extends MongoRepository<CompanyDocument, String> {
     Optional<CompanyDocument> findByCompanyProfileIdAndSourceDocumentId(String companyProfileId, String sourceDocumentId);
+    boolean existsBySourceDocumentIdAndStatusAndDeletedAtIsNull(String sourceDocumentId, String status);
     Page<CompanyDocument> findByCompanyProfileIdAndStatusAndDeletedAtIsNull(String companyProfileId, String status, Pageable pageable);
     Page<CompanyDocument> findByCompanyProfileIdInAndStatusAndDeletedAtIsNull(Collection<String> companyProfileIds, String status, Pageable pageable);
+    Page<CompanyDocument> findByCompanyProfileIdInAndStatusAndDocumentTypeAndDeletedAtIsNull(Collection<String> companyProfileIds, String status, String documentType, Pageable pageable);
 }

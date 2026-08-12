@@ -33,7 +33,7 @@ public class GeminiArticleSummarizer {
     @Value("${crawler.ai.gemini.api-key:dummy-key}")
     private String geminiApiKey;
 
-    @Value("${crawler.ai.gemini.model:gemini-3.6-flash}")
+    @Value("${crawler.ai.gemini.model:gemini-2.5-flash}")
     private String geminiModel;
 
     @Value("${crawler.ai.summary.max-articles-per-run:20}")
@@ -65,9 +65,9 @@ public class GeminiArticleSummarizer {
         } catch (RestClientResponseException e) {
             if (e.getStatusCode().value() == 429) {
                 throw new IllegalStateException(
-                        "Gemini Ä‘Ã£ háº¿t quota hoáº·c Ä‘ang bá»‹ rate limit. Vui lÃ²ng thá»­ láº¡i sau, Ä‘á»•i API key, hoáº·c nÃ¢ng quota/billing.");
+                        "Gemini đã hết quota hoặc đang bị rate limit. Vui lòng thử lại sau, đổi API key, hoặc nâng quota/billing.");
             }
-            throw new IllegalStateException("Gemini API lá»—i: " + e.getStatusCode(), e);
+            throw new IllegalStateException("Gemini API lỗi: " + e.getStatusCode(), e);
         } catch (Exception e) {
             throw new IllegalStateException("Failed to summarize article: " + e.getMessage(), e);
         }
@@ -178,4 +178,3 @@ public class GeminiArticleSummarizer {
                 geminiApiKey.isBlank();
     }
 }
-

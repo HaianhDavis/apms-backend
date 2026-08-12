@@ -36,11 +36,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class TaskExtractionOrchestrator {
+    private static final String SOURCE_TYPE_PARTNER_CONTRACT = "PARTNER_CONTRACT";
 
     private final RawDocumentRepository rawDocumentRepository;
     private final GeminiExtractionProvider geminiProvider;
@@ -48,6 +51,7 @@ public class TaskExtractionOrchestrator {
     private final CandidateService candidateService;
     private final AiExtractionJobRepository jobRepository;
     private final AiExtractionQualityService qualityService;
+    private final com.apms.domain.project.repository.sql.ProjectTaskRepository projectTaskRepository;
 
     @Value("${app.storage.upload-dir:uploads/}")
     private String uploadDir;
@@ -57,6 +61,8 @@ public class TaskExtractionOrchestrator {
 
     @Transactional
     public String startExtractionJob(Long projectId, Long taskId, List<String> rawDocumentIds, Long creatorId) {
+        validateResearchExtractionRequest(projectId, taskId, rawDocumentIds);
+
         String jobId = UUID.randomUUID().toString();
         AiExtractionJob job = AiExtractionJob.builder()
                 .id(jobId)
@@ -69,6 +75,31 @@ public class TaskExtractionOrchestrator {
                 .build();
         jobRepository.save(job);
         return jobId;
+    }
+
+    private void validateResearchExtractionRequest(Long projectId, Long taskId, List<String> rawDocumentIds) {
+        com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found: " + taskId));
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new com.apms.common.exception.BusinessValidationException("Task does not belong to the specified project");
+        }
+        if (task.getTaskType() != com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION) {
+            throw new com.apms.common.exception.BusinessValidationException("AI extraction is only allowed for COMPANY_DATA_PREPARATION research documents");
+        }
+
+        for (String rawDocId : rawDocumentIds) {
+            RawDocument doc = rawDocumentRepository.findById(rawDocId)
+                    .orElseThrow(() -> new ResourceNotFoundException("RawDocument not found: " + rawDocId));
+            if (!String.valueOf(projectId).equals(doc.getProjectId())) {
+                throw new com.apms.common.exception.BusinessValidationException("RawDocument does not belong to this project: " + rawDocId);
+            }
+            if (doc.getSource() != null && SOURCE_TYPE_PARTNER_CONTRACT.equalsIgnoreCase(doc.getSource().getType())) {
+                throw new com.apms.common.exception.BusinessValidationException("Partner contract documents cannot be used for AI company extraction: " + rawDocId);
+            }
+            if (Boolean.TRUE.equals(doc.getIsHidden())) {
+                throw new com.apms.common.exception.BusinessValidationException("Hidden documents cannot be used for AI extraction: " + rawDocId);
+            }
+        }
     }
 
     @Async
@@ -90,7 +121,6 @@ public class TaskExtractionOrchestrator {
             for (String rawDocId : rawDocumentIds) {
                 RawDocument doc = rawDocumentRepository.findById(rawDocId)
                         .orElseThrow(() -> new ResourceNotFoundException("RawDocument not found: " + rawDocId));
-                
                 String text = extractTextFromDocument(doc);
                 
                 combinedText.append("=== DOCUMENT ").append(rawDocId).append(" ===\n");
@@ -129,6 +159,8 @@ public class TaskExtractionOrchestrator {
                                         .rawDocumentId(docId)
                                         .fileName(fName)
                                         .page(fieldResult.getPageNumber())
+                                        .evidenceText(evidenceTextForSource(fieldResult.getEvidenceText(), fName, docId))
+                                        .confidence(fieldResult.getConfidence())
                                         .build());
                             });
                         }
@@ -231,7 +263,7 @@ public class TaskExtractionOrchestrator {
             try {
                 job.setStatus(AiExtractionJobStatus.FAILED);
                 job.setStage(AiExtractionJobStage.FAILED);
-                
+                 
                 if (e.getMessage() != null && e.getMessage().contains("GEMINI_JSON_PARSE_FAILED")) {
                     job.setErrorMessage("AI returned an invalid structured response.");
                 } else {
@@ -249,6 +281,25 @@ public class TaskExtractionOrchestrator {
     public AiExtractionJob getExtractionJob(String jobId) {
         return jobRepository.findById(jobId)
                 .orElseThrow(() -> new ResourceNotFoundException("Job not found: " + jobId));
+    }
+
+    private String evidenceTextForSource(String evidenceText, String fileName, String rawDocumentId) {
+        if (evidenceText == null || evidenceText.isBlank()) {
+            return evidenceText;
+        }
+
+        Pattern sourcePattern = Pattern.compile("\\[([^|\\]]+)\\s*\\|\\s*([^\\]]+)\\]\\s*([^\\[]+)");
+        Matcher matcher = sourcePattern.matcher(evidenceText);
+        List<String> matches = new ArrayList<>();
+        while (matcher.find()) {
+            String taggedFileName = matcher.group(1).trim();
+            String taggedRawDocumentId = matcher.group(2).trim();
+            if (taggedRawDocumentId.equals(rawDocumentId) || taggedFileName.equalsIgnoreCase(fileName)) {
+                matches.add(matcher.group(3).trim());
+            }
+        }
+
+        return matches.isEmpty() ? evidenceText : String.join("\n", matches);
     }
 
     private java.util.Map<String, java.util.List<CompanyCandidate.DocumentEvidence>> encodeFieldEvidence(

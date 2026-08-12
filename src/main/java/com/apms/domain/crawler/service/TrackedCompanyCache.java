@@ -74,8 +74,7 @@ public class TrackedCompanyCache {
             log.info("TrackedCompanyCache: Refreshed. {} active companies loaded.", companies.size());
         } catch (Exception e) {
             log.error("TrackedCompanyCache: Failed to refresh from MongoDB: {}", e.getMessage(), e);
-            // Keep stale data rather than failing â€” better to use old list than none
+            // Keep stale data rather than failing — better to use old list than none
         }
     }
 }
-

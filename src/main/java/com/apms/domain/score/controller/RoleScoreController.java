@@ -21,6 +21,7 @@ import com.apms.domain.score.repository.mongo.RoleEvaluationDraftRepository;
 import com.apms.domain.score.repository.sql.RoleScoreRuleSetRepository;
 import com.apms.domain.score.repository.sql.ScoreSnapshotRepository;
 import com.apms.domain.score.service.CanonicalScoreJsonMapper;
+import com.apms.domain.score.service.RoleEvaluationAuthorityService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
@@ -47,6 +48,7 @@ public class RoleScoreController {
     private final CompanyProfileRepository companyProfileRepository;
     private final CanonicalScoreJsonMapper jsonMapper;
     private final OwnerOrganizationService ownerOrganizationService;
+    private final RoleEvaluationAuthorityService authorityService;
 
     @GetMapping("/profiles/{companyProfileId}/role-scores")
     public ResponseEntity<ApiResponse<List<RoleScoreSnapshotResponse>>> getRoleScores(
@@ -69,6 +71,22 @@ public class RoleScoreController {
                 .collect(Collectors.toList());
 
         return ResponseEntity.ok(ApiResponse.success(responses));
+    }
+
+    @GetMapping("/profiles/{companyProfileId}/role-scores/effective")
+    public ResponseEntity<ApiResponse<RoleEvaluationVersionResponse>> getEffectiveRoleEvaluation(
+            @PathVariable String companyProfileId,
+            @RequestParam CompanyRole role) {
+
+        if (companyProfileId.equals(ownerOrganizationService.getOwnerCompanyId())) {
+            throw new IllegalArgumentException("The Owner Organization cannot be evaluated as a target company.");
+        }
+
+        RoleEvaluationVersionResponse response = authorityService.getEffectiveEvaluation(companyProfileId, role)
+                .map(this::toVersionResponse)
+                .orElse(null);
+
+        return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     @GetMapping("/role-evaluation-versions")
@@ -129,6 +147,8 @@ public class RoleScoreController {
                 .weightingMethod(snapshot.getWeightingMethod())
                 .weightSource(snapshot.getWeightSource())
                 .calculatedAt(snapshot.getCalculatedAt())
+                .evaluatorRole(snapshot.getEvaluatorRole())
+                .authoritative(snapshot.getAuthoritative())
                 .build();
     }
 
@@ -167,6 +187,8 @@ public class RoleScoreController {
                 .approvedByAccountId(version.getApprovedByAccountId())
                 .approvedAt(version.getApprovedAt())
                 .reviewComment(version.getReviewComment())
+                .evaluatorRole(version.getEvaluatorRole())
+                .authoritative(version.getAuthoritative())
                 .createdAt(version.getCreatedAt())
                 .build();
     }

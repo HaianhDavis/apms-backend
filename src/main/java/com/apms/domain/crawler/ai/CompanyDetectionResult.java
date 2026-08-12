@@ -53,4 +53,3 @@ public class CompanyDetectionResult {
     @Builder.Default
     private boolean fromPreFilter = false;
 }
-

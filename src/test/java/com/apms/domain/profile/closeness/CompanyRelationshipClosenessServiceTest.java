@@ -145,6 +145,63 @@ class CompanyRelationshipClosenessServiceTest {
     }
 
     @Test
+    void managerCannotUpdateAfterOwnerFinalized() {
+        mockTargetValid();
+        when(projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(targetCompanyId, managerUser.getId(), List.of(ProjectStatus.DRAFT, ProjectStatus.ACTIVE)))
+                .thenReturn(true);
+
+        CompanyRelationshipCloseness existing = new CompanyRelationshipCloseness();
+        existing.setId(11L);
+        existing.setOwnerCompanyProfileId(ownerCompanyId);
+        existing.setTargetCompanyProfileId(targetCompanyId);
+        existing.setStars(5);
+        existing.setRatedByAccountId(ownerUser.getId());
+        existing.setRatedByRole("BUSINESS_OWNER");
+        existing.setOwnerStars(5);
+        existing.setOwnerRatedByAccountId(ownerUser.getId());
+        when(closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerCompanyId, targetCompanyId))
+                .thenReturn(Optional.of(existing));
+
+        UpdateRelationshipClosenessRequest req = new UpdateRelationshipClosenessRequest();
+        req.setStars(3);
+
+        AccessDeniedException ex = assertThrows(AccessDeniedException.class, () -> service.updateCloseness(targetCompanyId, req, managerUser));
+        assertTrue(ex.getMessage().contains("Business Owner has finalized"));
+        verify(closenessRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void ownerFinalRatingLocksManagerButKeepsManagerDraft() {
+        mockTargetValid();
+        CompanyRelationshipCloseness existing = new CompanyRelationshipCloseness();
+        existing.setId(12L);
+        existing.setOwnerCompanyProfileId(ownerCompanyId);
+        existing.setTargetCompanyProfileId(targetCompanyId);
+        existing.setStars(3);
+        existing.setNote("Manager view");
+        existing.setRatedByAccountId(managerUser.getId());
+        existing.setRatedByRole("BUSINESS_DEVELOPMENT_MANAGER");
+        existing.setManagerStars(3);
+        existing.setManagerNote("Manager view");
+        existing.setManagerRatedByAccountId(managerUser.getId());
+        when(closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerCompanyId, targetCompanyId))
+                .thenReturn(Optional.of(existing));
+        when(closenessRepository.saveAndFlush(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        UpdateRelationshipClosenessRequest req = new UpdateRelationshipClosenessRequest();
+        req.setStars(5);
+        req.setNote("Owner final");
+
+        RelationshipClosenessResponse response = service.updateCloseness(targetCompanyId, req, ownerUser);
+
+        assertTrue(response.isOwnerFinalized());
+        assertEquals(5, response.getStars());
+        assertEquals(5, response.getOwnerStars());
+        assertEquals(3, response.getManagerStars());
+        assertEquals("BUSINESS_OWNER", response.getRatedByRole());
+    }
+
+    @Test
     void managerDeniedOutsideScope() {
         mockTargetValid();
         when(projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(eq(targetCompanyId), eq(managerUser.getId()), anyList()))

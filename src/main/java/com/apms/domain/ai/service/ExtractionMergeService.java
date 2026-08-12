@@ -55,6 +55,9 @@ public class ExtractionMergeService {
         if (extractionIds == null || extractionIds.isEmpty()) {
             throw new IllegalArgumentException("At least one extractionId must be provided");
         }
+        if (candidateRepository.existsByTaskIdAndStatus(taskId, CandidateStatus.REVISION_REQUIRED)) {
+            throw new BusinessValidationException("This task already has a Candidate requiring revision. Continue editing the returned Candidate before creating another draft.");
+        }
 
         // 1. Load all extractions
         List<AiExtractionCache> extractions = loadExtractions(extractionIds);

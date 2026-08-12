@@ -5,8 +5,7 @@ import com.apms.domain.news.entity.CompanyIntelligenceArticle;
 import com.apms.domain.news.repository.CompanyIntelligenceArticleRepository;
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.service.CompanyProfileAccessService;
-import com.apms.domain.security.enums.StepUpPurpose;
-import com.apms.domain.security.service.StepUpTokenService;
+import com.apms.domain.security.service.StepUpAuthenticationService;
 import com.apms.domain.document.service.StorageService;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.security.UserDetailsImpl;
@@ -43,7 +42,7 @@ class ConfidentialNewsControllerTest {
     @Mock
     private CompanyProfileAccessService companyProfileAccessService;
     @Mock
-    private StepUpTokenService stepUpTokenService;
+    private StepUpAuthenticationService stepUpAuthenticationService;
     @Mock
     private AuditLogService auditLogService;
     @Mock
@@ -85,7 +84,7 @@ class ConfidentialNewsControllerTest {
 
         CompanyProfile profile = CompanyProfile.builder().id("profile-1").build();
         when(companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile("profile-1", ownerUser)).thenReturn(profile);
-        when(stepUpTokenService.validateTokenForScope("valid-token", 1L, "COMPANY_INTERNAL_NEWS", "profile-1")).thenReturn(true);
+        when(stepUpAuthenticationService.isOwnerSecureSessionActive(1L, "valid-token")).thenReturn(true);
 
         CompanyIntelligenceArticle article = CompanyIntelligenceArticle.builder().id("art-1").build();
         Page<CompanyIntelligenceArticle> page = new PageImpl<>(List.of(article));
@@ -152,7 +151,7 @@ class ConfidentialNewsControllerTest {
 
         CompanyProfile profile = CompanyProfile.builder().id("profile-1").build();
         when(companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile("profile-1", ownerUser)).thenReturn(profile);
-        when(stepUpTokenService.validateTokenForScope("valid-token", 1L, "COMPANY_INTERNAL_NEWS", "profile-1")).thenReturn(true);
+        when(stepUpAuthenticationService.isOwnerSecureSessionActive(1L, "valid-token")).thenReturn(true);
 
         when(articleRepository.findByIdAndCompanyProfileIdAndIsDeletedFalseAndApprovedAtIsNotNull("art-1", "profile-1"))
                 .thenReturn(Optional.empty()); // simulate article belongs to another company or not found
@@ -168,7 +167,7 @@ class ConfidentialNewsControllerTest {
 
         CompanyProfile profile = CompanyProfile.builder().id("profile-1").build();
         when(companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile("profile-1", ownerUser)).thenReturn(profile);
-        when(stepUpTokenService.validateTokenForScope("valid-token", 1L, "COMPANY_INTERNAL_NEWS", "profile-1")).thenReturn(true);
+        when(stepUpAuthenticationService.isOwnerSecureSessionActive(1L, "valid-token")).thenReturn(true);
 
         CompanyIntelligenceArticle article = CompanyIntelligenceArticle.builder()
                 .id("art-1")
@@ -211,7 +210,7 @@ class ConfidentialNewsControllerTest {
 
         CompanyProfile profile = CompanyProfile.builder().id("profile-1").build();
         when(companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile("profile-1", ownerUser)).thenReturn(profile);
-        when(stepUpTokenService.validateTokenForScope("valid-token", 1L, "COMPANY_INTERNAL_NEWS", "profile-1")).thenReturn(true);
+        when(stepUpAuthenticationService.isOwnerSecureSessionActive(1L, "valid-token")).thenReturn(true);
 
         when(articleRepository.findByIdAndCompanyProfileIdAndIsDeletedFalseAndApprovedAtIsNotNull("art-1", "profile-1"))
                 .thenReturn(Optional.empty());
