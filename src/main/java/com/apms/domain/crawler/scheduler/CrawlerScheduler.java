@@ -44,7 +44,7 @@ public class CrawlerScheduler {
     @Value("${crawler.startup.enabled:true}")
     private boolean startupCrawlEnabled;
 
-    @Value("${crawler.schedule.enabled:true}")
+    @Value("${news.crawler.scheduler.enabled:true}")
     private boolean scheduleEnabled;
 
     @EventListener(ApplicationReadyEvent.class)
@@ -59,7 +59,10 @@ public class CrawlerScheduler {
 
     private final AtomicBoolean running = new AtomicBoolean(false);
 
-    @Scheduled(cron = "${crawler.schedule.cron:0 */30 * * * *}")
+    @Scheduled(
+            fixedDelayString = "#{${news.crawler.scheduler.interval-minutes:30} * 60000}",
+            initialDelayString = "#{${news.crawler.scheduler.initial-delay-seconds:30} * 1000}"
+    )
     public void runCrawlPipeline() {
         if (!scheduleEnabled) {
             return;
@@ -133,12 +136,35 @@ public class CrawlerScheduler {
             if (existingArticle.isPresent()) {
                 duplicateCount++;
                 CrawledArticle existing = existingArticle.get();
+                boolean updated = false;
+
                 if ((existing.getThumbnail() == null || existing.getThumbnail().isBlank()) &&
                         article.getThumbnail() != null && !article.getThumbnail().isBlank()) {
                     existing.setThumbnail(article.getThumbnail());
-                    articleRepository.save(existing);
                     thumbnailUpdatedCount++;
+                    updated = true;
                 }
+
+                if (article.getMatchedCompanies() != null && !article.getMatchedCompanies().isEmpty()) {
+                    List<com.apms.domain.crawler.domain.CompanyMatch> currentMatches = existing.getMatchedCompanies();
+                    if (currentMatches == null) {
+                        currentMatches = new java.util.ArrayList<>();
+                        existing.setMatchedCompanies(currentMatches);
+                    }
+                    for (com.apms.domain.crawler.domain.CompanyMatch newMatch : article.getMatchedCompanies()) {
+                        boolean hasMatch = currentMatches.stream()
+                                .anyMatch(m -> m.getCompanyId().equals(newMatch.getCompanyId()));
+                        if (!hasMatch) {
+                            currentMatches.add(newMatch);
+                            updated = true;
+                        }
+                    }
+                }
+
+                if (updated) {
+                    articleRepository.save(existing);
+                }
+
                 log.debug("CrawlerScheduler: Skipping duplicate: {}", article.getUrl());
                 continue;
             }

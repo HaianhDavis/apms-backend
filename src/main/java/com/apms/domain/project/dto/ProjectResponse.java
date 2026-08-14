@@ -26,6 +26,8 @@ public class ProjectResponse {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDate plannedEndDate;
+    private Long managerId;
+    private String managerName;
     private Integer totalTasks;
     private Integer completedTasks;
     private Integer progressPercentage;

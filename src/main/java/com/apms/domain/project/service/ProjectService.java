@@ -459,6 +459,21 @@ public class ProjectService {
             }
         }
 
+        List<ProjectMemberResponse> memberResponses = members.stream()
+                .map(this::toMemberResponse)
+                .collect(Collectors.toList());
+
+        Long managerId = null;
+        String managerName = null;
+        List<ProjectMemberResponse> managers = memberResponses.stream()
+                .filter(m -> m.getMemberRole() == com.apms.common.enums.MemberRole.MANAGER)
+                .collect(Collectors.toList());
+        
+        if (!managers.isEmpty()) {
+            managerId = managers.get(0).getAccountId();
+            managerName = managers.stream().map(ProjectMemberResponse::getFullName).collect(Collectors.joining(", "));
+        }
+
         return ProjectResponse.builder()
                 .id(project.getId())
                 .projectName(project.getProjectName())
@@ -472,11 +487,13 @@ public class ProjectService {
                 .createdAt(project.getCreatedAt())
                 .updatedAt(project.getUpdatedAt())
                 .plannedEndDate(project.getPlannedEndDate())
+                .managerId(managerId)
+                .managerName(managerName)
                 .totalTasks(totalTasks)
                 .completedTasks(completedTasks)
                 .progressPercentage(progressPercentage)
                 .isOverdue(isOverdue)
-                .members(members.stream().map(this::toMemberResponse).collect(Collectors.toList()))
+                .members(memberResponses)
                 .build();
     }
 

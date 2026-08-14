@@ -4,7 +4,7 @@ import lombok.Data;
 import org.springframework.data.neo4j.core.schema.Id;
 import org.springframework.data.neo4j.core.schema.Node;
 
-import java.time.LocalDateTime;
+import java.time.ZonedDateTime;
 
 @Node("Company")
 @Data
@@ -17,7 +17,7 @@ public class CompanyNode {
 
     private String industry;
 
-    private LocalDateTime createdAt;
+    private ZonedDateTime createdAt;
 
-    private LocalDateTime updatedAt;
+    private ZonedDateTime updatedAt;
 }

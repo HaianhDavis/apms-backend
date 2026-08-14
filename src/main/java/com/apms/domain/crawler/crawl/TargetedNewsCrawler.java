@@ -51,8 +51,14 @@ public class TargetedNewsCrawler {
                 }
                 
                 for (CrawledArticle article : sourceResult.getArticles()) {
-                    if (!articlesByUrl.containsKey(article.getUrl())) {
-                        articlesByUrl.put(article.getUrl(), article);
+                    String rawUrl = article.getUrl();
+                    if (rawUrl == null || rawUrl.isBlank()) continue;
+                    
+                    String normalizedUrl = normalizeUrl(rawUrl);
+                    article.setUrl(normalizedUrl);
+                    
+                    if (!articlesByUrl.containsKey(normalizedUrl)) {
+                        articlesByUrl.put(normalizedUrl, article);
                         allFetchedArticles.add(article);
                     }
                 }
@@ -107,5 +113,20 @@ public class TargetedNewsCrawler {
                 .matchedArticles(matchedArticles)
                 .sourceResults(sourceResults)
                 .build();
+    }
+
+    private String normalizeUrl(String url) {
+        if (url == null) return null;
+        url = url.trim();
+        int hashIdx = url.indexOf('#');
+        if (hashIdx != -1) {
+            url = url.substring(0, hashIdx);
+        }
+        // Remove known tracking params safely if present at the end or in the middle
+        url = url.replaceAll("([?&])utm_[^&]+=?([^&#]*)", "$1");
+        // Clean up empty params and trailing ? or &
+        url = url.replaceAll("([?&])+$", ""); 
+        url = url.replaceAll("\\?&+", "?"); 
+        return url;
     }
 }
