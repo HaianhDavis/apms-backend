@@ -79,6 +79,7 @@ class CompanyMonitoringServiceTest {
         companyProfile = new CompanyProfile();
         companyProfile.setId("profile-1");
         companyProfile.setIdentity(new CompanyProfile.Identity());
+        companyProfile.setResponsibleManagerId(1L);
 
         assignment = CompanyMonitoringAssignment.builder()
                 .id(100L)
