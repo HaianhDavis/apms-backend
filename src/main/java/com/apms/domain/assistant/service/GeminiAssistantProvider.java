@@ -38,19 +38,18 @@ public class GeminiAssistantProvider implements AssistantProvider {
     private static final String ASSISTANT_SYSTEM_PROMPT = """
             You are an APMS (Acquisition & Partnership Management System) AI assistant.
 
-            Your role is to answer business intelligence questions about companies in the APMS system.
+            Your role is to assist users with both general business knowledge and specific APMS business intelligence.
 
             CRITICAL RULES:
-            1. Answer ONLY using the approved APMS data provided in the context below.
-            2. Do NOT use any external knowledge or general knowledge about companies.
-            3. Do NOT invent or assume any facts not present in the provided context.
-            4. If the context does not contain enough information to answer the question, respond:
-               "The APMS system does not have enough approved information to answer this question."
-            5. Keep answers concise, business-focused, and professional.
-            6. When referencing data, mention which source it comes from
-               (e.g., "According to the approved company profile...", "Based on the score snapshot...").
-            7. Do NOT reveal internal system IDs unnecessarily unless asked.
-            8. Prioritize the provided Neo4j relationships when answering relationship or classification questions.
+            1. For GENERAL knowledge questions (e.g., "What is SWOT analysis?", "What are common risks?"), answer normally using your general knowledge. Do NOT claim this general knowledge comes from APMS data.
+            2. For APMS-SPECIFIC questions, you must ONLY use the provided approved APMS data below.
+            3. Do NOT invent, assume, or infer any APMS-specific facts not present in the provided context.
+            4. If the user asks for APMS-specific information about a company/project/task that is not in the context, respond: "The APMS system does not have enough approved information to answer this question."
+            5. If the context explicitly states the user is NOT AUTHORIZED to access requested APMS data, respond: "The requested APMS information is outside your available workspace scope."
+            6. For MIXED questions, you may answer the general knowledge part, but apply the rules above to the APMS-specific part.
+            7. Keep answers concise, business-focused, and professional.
+            8. When referencing data, mention which source it comes from (e.g., "According to your active projects...", "Based on your assigned tasks...").
+            9. Do NOT reveal internal system IDs unnecessarily unless asked.
             """;
 
     private final RestClient restClient;
@@ -135,7 +134,7 @@ public class GeminiAssistantProvider implements AssistantProvider {
 
     private String buildMockAnswer(String question, AssistantContext context) {
         if (context.getCompanyProfile() == null) {
-            return "[MOCK] The APMS system does not have enough approved information to answer this question. "
+            return "The APMS system does not have enough approved information to answer this question. "
                     + "No approved company profile was found in the current project context.";
         }
 
@@ -146,7 +145,7 @@ public class GeminiAssistantProvider implements AssistantProvider {
         }
 
         StringBuilder answer = new StringBuilder();
-        answer.append("[MOCK RESPONSE — Gemini key not configured]\n\n");
+//        answer.append("[MOCK RESPONSE — Gemini key not configured]\n\n");
         answer.append("Based on the approved APMS company profile for **").append(companyName).append("**:\n\n");
 
         if (context.getCompanyProfile().getBusiness() != null) {
@@ -154,10 +153,6 @@ public class GeminiAssistantProvider implements AssistantProvider {
             answer.append("- Business Model: ").append(context.getCompanyProfile().getBusiness().getBusinessModel()).append("\n");
         }
 
-        if (context.getLatestScore() != null) {
-            answer.append("- Total Score: ").append(context.getLatestScore().getTotalScore()).append("\n");
-            answer.append("- Partner Fit: ").append(context.getLatestScore().getPartnerFitScore()).append("\n");
-        }
 
         if (context.getFormattedRelationships() != null && !context.getFormattedRelationships().isEmpty()) {
             answer.append("- Known relationships: ").append(context.getFormattedRelationships().size()).append(" approved graph connection(s).\n");

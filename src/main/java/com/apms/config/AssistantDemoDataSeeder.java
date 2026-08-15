@@ -1,20 +1,12 @@
 package com.apms.config;
 
-import com.apms.common.enums.MemberRole;
-import com.apms.common.enums.ProjectStatus;
-import com.apms.common.enums.ProjectType;
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.CompanyProfileVersion;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository;
 import com.apms.domain.profile.service.OwnerOrganizationService;
-import com.apms.domain.project.Project;
-import com.apms.domain.project.ProjectMember;
 import com.apms.domain.project.repository.sql.ProjectMemberRepository;
 import com.apms.domain.project.repository.sql.ProjectRepository;
-import com.apms.domain.score.ScoreSnapshot;
-import com.apms.domain.score.repository.sql.ScoreSnapshotRepository;
-import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,7 +15,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
-import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,8 +33,7 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
     private final CompanyProfileRepository companyProfileRepository;
-    private final Neo4jClient neo4jClient;
-    private final ScoreSnapshotRepository scoreSnapshotRepository;
+    private final org.springframework.data.neo4j.core.Neo4jClient neo4jClient;
     private final OwnerOrganizationService ownerOrganizationService;
     private final CompanyProfileVersionRepository versionRepository;
     private final ObjectMapper objectMapper;
@@ -125,16 +115,10 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
                 "Running AssistantDemoDataSeeder with verified FPT-centric company data..."
         );
 
-        Project project = ensureProjectExists();
-
-        // MongoDB
         seedCompanyProfiles();
 
         // Neo4j
         seedNeo4jGraph();
-
-        // SQL Server
-        seedScoreSnapshots(project);
 
         log.info("");
         log.info(
@@ -203,121 +187,6 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
 
         log.info("");
     }
-
-
-    // ============================================================
-    // PROJECT
-    // ============================================================
-
-    private Project ensureProjectExists() {
-
-        Account manager =
-                accountRepository
-                        .findByEmail("manager@apms.com")
-                        .orElseThrow();
-
-        Project project =
-                projectRepository
-                        .findById(1L)
-                        .orElse(null);
-
-        if (project == null) {
-
-            project =
-                    Project.builder()
-
-                            .projectName(
-                                    "AI Assistant Demo Project"
-                            )
-
-                            .projectType(
-                                    ProjectType.RESEARCH_NEW_COMPANY
-                            )
-
-                            .targetCompanyName(
-                                    "FPT Business Ecosystem"
-                            )
-
-                            .description(
-                                    "Approved FPT-centric company data for AI assistant testing."
-                            )
-
-                            .status(
-                                    ProjectStatus.ACTIVE
-                            )
-
-                            .createdByAccount(
-                                    manager
-                            )
-
-                            .build();
-
-            project =
-                    projectRepository.save(project);
-        }
-
-        ensureMembership(
-                project,
-                "manager@apms.com",
-                MemberRole.MANAGER
-        );
-
-        ensureMembership(
-                project,
-                "staff@apms.com",
-                MemberRole.STAFF
-        );
-
-        return project;
-    }
-
-
-    private void ensureMembership(
-            Project project,
-            String email,
-            MemberRole role
-    ) {
-
-        accountRepository
-                .findByEmail(email)
-                .ifPresent(account -> {
-
-                    boolean exists =
-                            projectMemberRepository
-                                    .existsByProject_IdAndAccount_Id(
-                                            project.getId(),
-                                            account.getId()
-                                    );
-
-                    if (!exists) {
-
-                        projectMemberRepository.save(
-
-                                ProjectMember.builder()
-
-                                        .project(
-                                                project
-                                        )
-
-                                        .account(
-                                                account
-                                        )
-
-                                        .memberRole(
-                                                role
-                                        )
-
-                                        .build()
-                        );
-                    }
-                });
-    }
-
-
-    // ============================================================
-    // MONGODB
-    // COMPANY PROFILES
-    // ============================================================
 
     private void seedCompanyProfiles() {
 
@@ -2103,192 +1972,5 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
                 )
 
                 .run();
-    }
-
-
-    // ============================================================
-    // SQL SERVER
-    // SCORE SNAPSHOTS
-    // ============================================================
-
-    private void seedScoreSnapshots(
-            Project project
-    ) {
-
-        // ========================================================
-        // FPT IS OWNER
-        // Do not seed a new FPT score.
-        // ========================================================
-
-
-        // PARTNER - NVIDIA
-        ensureScore(
-                project,
-                NVIDIA_ID,
-                95,
-                15,
-                30,
-                92
-        );
-
-
-        // PARTNER - SAP
-        ensureScore(
-                project,
-                SAP_ID,
-                92,
-                18,
-                28,
-                88
-        );
-
-
-        // SUPPLIER - DELL
-        ensureScore(
-                project,
-                DELL_ID,
-                84,
-                20,
-                32,
-                76
-        );
-
-
-        // CUSTOMER - VIETNAM AIRLINES
-        ensureScore(
-                project,
-                VIETNAM_AIRLINES_ID,
-                86,
-                10,
-                38,
-                85
-        );
-
-
-        // CUSTOMER - PVOIL
-        ensureScore(
-                project,
-                PVOIL_ID,
-                82,
-                12,
-                42,
-                78
-        );
-
-
-        // POTENTIAL PARTNER - MITSUBISHI MOTORS
-        ensureScore(
-                project,
-                MITSUBISHI_MOTORS_ID,
-                90,
-                28,
-                36,
-                72
-        );
-
-
-        // COMPETITOR - TCS
-        ensureScore(
-                project,
-                TCS_ID,
-                58,
-                95,
-                36,
-                20
-        );
-
-
-        // COMPETITOR - INFOSYS
-        ensureScore(
-                project,
-                INFOSYS_ID,
-                60,
-                92,
-                34,
-                22
-        );
-    }
-
-
-    // ============================================================
-    // ENSURE SCORE
-    // ============================================================
-
-    private void ensureScore(
-
-            Project project,
-
-            String companyId,
-
-            int fit,
-
-            int comp,
-
-            int risk,
-
-            int rel
-
-    ) {
-
-        if (
-                !scoreSnapshotRepository
-                        .findByCompanyIdAndEvaluatedRoleIsNullOrderByCreatedAtDesc(
-                                companyId
-                        )
-                        .isEmpty()
-        ) {
-
-            return;
-        }
-
-        scoreSnapshotRepository.save(
-
-                ScoreSnapshot.builder()
-
-                        .companyId(
-                                companyId
-                        )
-
-                        .candidateId(
-                                "seed-" + companyId
-                        )
-
-                        .project(
-                                project
-                        )
-
-                        .partnerFitScore(
-                                fit
-                        )
-
-                        .competitionLevel(
-                                comp
-                        )
-
-                        .riskLevel(
-                                risk
-                        )
-
-                        .relationshipStrength(
-                                rel
-                        )
-
-                        .totalScore(
-                                fit
-                                        + comp
-                                        + risk
-                                        + rel
-                        )
-
-                        .ruleVersion(
-                                "demo-v4-verified-fpt-centric"
-                        )
-
-                        .generatedByAccount(
-                                null
-                        )
-
-                        .build()
-        );
     }
 }

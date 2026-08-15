@@ -32,11 +32,10 @@ public class OwnerGeminiAssistantProvider implements AssistantProvider {
             3. Do NOT invent or assume any facts not present in the provided context.
             4. If the context does not contain enough information to answer the question, explicitly state:
                "The APMS system does not have enough approved information to answer this question."
-            5. Answer as an executive assistant for a business owner. Keep answers business-focused, strategic, and action-oriented.
-            6. Prioritize the provided Neo4j relationships when answering relationship or classification questions.
-            7. Prioritize score_snapshots when answering questions about risk, fit, or competition.
-            8. Include source references where possible.
-            9. Format output with clear markdown headings and bullet points when summarizing ecosystems.
+            5. For general company profile questions (e.g., "What do we know about this company?"), provide a STRICTLY factual summary (e.g., Legal Name, Industries, Business Model, Strengths). Do NOT use unsupported strategic language or invent stronger claims.
+            6. Reserve strategic synthesis for explicit strategic questions (e.g., "What should we do strategically?").
+            7. Do NOT append any fabricated "Data Source:" lines, source labels, or references in the text. The UI handles sources independently.
+            8. Format output with clear markdown headings and bullet points.
             """;
 
     private final RestClient restClient;
@@ -121,7 +120,6 @@ public class OwnerGeminiAssistantProvider implements AssistantProvider {
 
     private String buildMockAnswer(String question, AssistantContext context) {
         StringBuilder answer = new StringBuilder();
-        answer.append("[MOCK EXECUTIVE RESPONSE — Gemini key not configured]\n\n");
         answer.append("Based on the approved APMS context:\n\n");
 
         if (context.getCompanyProfile() != null) {
@@ -135,10 +133,6 @@ public class OwnerGeminiAssistantProvider implements AssistantProvider {
 
         if (context.getFormattedRelationships() != null && !context.getFormattedRelationships().isEmpty()) {
             answer.append("- Tracked Relationships: ").append(context.getFormattedRelationships().size()).append("\n");
-        }
-
-        if (context.getLatestScore() != null) {
-            answer.append("- Total Score (Selected Company): ").append(context.getLatestScore().getTotalScore()).append("\n");
         }
 
         answer.append("\nQuestion received: ").append(question);

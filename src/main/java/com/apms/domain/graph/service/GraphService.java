@@ -252,6 +252,51 @@ public class GraphService {
                 .toList();
     }
 
+    public List<CompanyRelationshipDto> getPairRelationships(String companyIdA, String companyIdB) {
+        String cypher = """
+            MATCH (c1:Company {companyId: $companyIdA})-[r]-(c2:Company {companyId: $companyIdB})
+            RETURN type(r) as relType, startNode(r).companyId as sourceCompanyId, endNode(r).companyId as targetCompanyId,
+                   r.confidenceScore as confidenceScore, r.confirmedBy as confirmedBy,
+                   r.projectId as projectId, r.candidateId as candidateId,
+                   r.startDate as startDate, r.endDate as endDate, r.status as status, r.metadata as metadata
+            """;
+
+        return (List<CompanyRelationshipDto>) neo4jClient.query(cypher)
+                .bindAll(Map.of("companyIdA", companyIdA, "companyIdB", companyIdB))
+                .fetch()
+                .all()
+                .stream()
+                .map(record -> {
+                    Map<String, Object> parsedMetadata = null;
+                    String metadataStr = (String) record.get("metadata");
+                    if (StringUtils.hasText(metadataStr)) {
+                        try {
+                            parsedMetadata = objectMapper.readValue(metadataStr, new TypeReference<Map<String, Object>>() {});
+                        } catch (JsonProcessingException e) {
+                            log.error("Failed to parse metadata JSON", e);
+                        }
+                    }
+
+                    String startDateStr = (String) record.get("startDate");
+                    String endDateStr = (String) record.get("endDate");
+
+                    return CompanyRelationshipDto.builder()
+                        .sourceCompanyId((String) record.get("sourceCompanyId"))
+                        .targetCompanyId((String) record.get("targetCompanyId"))
+                        .relationshipType((String) record.get("relType"))
+                        .confidenceScore((Double) record.get("confidenceScore"))
+                        .confirmedBy((String) record.get("confirmedBy"))
+                        .projectId((String) record.get("projectId"))
+                        .candidateId((String) record.get("candidateId"))
+                        .startDate(StringUtils.hasText(startDateStr) ? LocalDate.parse(startDateStr) : null)
+                        .endDate(StringUtils.hasText(endDateStr) ? LocalDate.parse(endDateStr) : null)
+                        .status((String) record.get("status"))
+                        .metadata(parsedMetadata)
+                        .build();
+                })
+                .toList();
+    }
+
     public List<GraphCompanyDto> getCompaniesByRelationshipType(String relType) {
         if (!relType.matches("^[A-Z_]+$")) {
             return List.of();

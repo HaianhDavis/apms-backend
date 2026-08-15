@@ -1,13 +1,28 @@
 package com.apms.domain.assistant.service;
 
+import com.apms.common.enums.ExternalDataCategory;
+import com.apms.domain.assistant.dto.AiNavigationAction;
 import com.apms.domain.assistant.dto.AiSourceReference;
 import com.apms.domain.assistant.dto.AssistantContext;
+import com.apms.domain.assistant.dto.OwnerContextResult;
+import com.apms.domain.assistant.dto.OwnerIntent;
+import com.apms.domain.dashboard.dto.OwnerInsightDto;
+import com.apms.domain.dashboard.dto.RelationshipClosenessDistributionDto;
+import com.apms.domain.dashboard.dto.RelationshipClosenessOverviewDto;
+import com.apms.domain.dashboard.service.DashboardService;
+import com.apms.domain.dashboard.service.OwnerInsightsService;
+import com.apms.domain.externaldata.ExternalDataItem;
+import com.apms.domain.externaldata.repository.mongo.ExternalDataRepository;
+import com.apms.domain.graph.dto.CompanyRelationshipDto;
+import com.apms.domain.graph.dto.GraphCompanyDto;
+import com.apms.domain.graph.service.GraphService;
 import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.profile.closeness.CompanyRelationshipClosenessRepository;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
-import com.apms.domain.score.ScoreSnapshot;
-import com.apms.domain.score.repository.sql.ScoreSnapshotRepository;
+import com.apms.domain.profile.service.OwnerOrganizationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -17,271 +32,410 @@ import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-/**
- * Builds AssistantContext for Business Owner queries.
- *
- * Context resolution order:
- *   1. Owner organization is always the root (companyId = OWNER_ORG_COMPANY_ID).
- *      For dev: "6a31a0000000000000000000" (APMS Demo Organization).
- *   2. Load bidirectional Neo4j relationships from the owner org node.
- *   3. Collect related companyIds from those relationships.
- *   4. Load MongoDB company_profiles by those companyIds.
- *   5. Load SQL score_snapshots for each related profile.
- *
- * If request.companyProfileId is provided (from UI):
- *   - Focus on that company immediately (no text matching needed).
- *
- * If not provided:
- *   - Try name matching from question as fallback.
- *   - 0 matches  -> full ecosystem context.
- *   - 1 match    -> focused company context.
- *   - >1 matches -> clarification response (not a technical exception, handled in service).
- *
- * Approved data only:
- *   - MongoDB company_profiles
- *   - Neo4j Company nodes + approved relationships
- *   - SQL score_snapshots
- *   NOT: raw_documents, ai_extraction_results, company_candidates
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class OwnerAssistantContextService {
 
     private final CompanyProfileRepository companyProfileRepository;
-    private final ScoreSnapshotRepository scoreSnapshotRepository;
     private final Neo4jClient neo4jClient;
-    private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
+    private final OwnerOrganizationService ownerOrganizationService;
+    private final DashboardService dashboardService;
+    private final OwnerInsightsService ownerInsightsService;
+    private final GraphService graphService;
+    private final CompanyRelationshipClosenessRepository closenessRepository;
+    private final ExternalDataRepository externalDataRepository;
 
-    // ── Public entry point ────────────────────────────────────────────────────
+    public OwnerContextResult buildContext(String companyProfileId, String question) {
+        OwnerIntent intent = detectOwnerIntent(question);
+        
+        if (intent == OwnerIntent.INTERNAL_NEWS_PROTECTED) {
+            return OwnerContextResult.builder()
+                    .intent(intent)
+                    .deterministic(true)
+                    .directAnswer("Internal News is protected data and is not accessible through the AI Assistant.\nPlease view it directly through the authorized Internal News section.\n")
+                    .context(AssistantContext.builder().contextText("").sources(List.of()).build())
+                    .build();
+        }
 
-    /**
-     * @param companyProfileId explicit company from UI (may be null)
-     * @param question         free-text owner question
-     */
-    public AssistantContext buildContext(String companyProfileId, String question) {
+        CompanyProfile ownerProfile = ownerOrganizationService.resolveApprovedOwnerProfile();
+        String ownerBusinessCompanyId = ownerProfile.getCompanyId();
+        String ownerMongoId = ownerProfile.getId();
+
         List<AiSourceReference> sources = new ArrayList<>();
         StringBuilder ctx = new StringBuilder();
-
         ctx.append("APMS Executive Business Intelligence Data\n");
+        ctx.append("Owner Organization: ").append(resolveCompanyName(ownerProfile)).append("\n\n");
 
-        Optional<CompanyProfile> ownerProfileOpt = ownerOrganizationService.findOwnerCompanyProfile();
-        String ownerName = ownerProfileOpt.map(p -> {
-            if (p.getIdentity() != null && StringUtils.hasText(p.getIdentity().getTradeName())) {
-                return p.getIdentity().getTradeName();
-            } else if (p.getIdentity() != null && StringUtils.hasText(p.getIdentity().getLegalName())) {
-                return p.getIdentity().getLegalName();
-            } else {
-                return p.getCompanyId();
-            }
-        }).orElse(ownerOrganizationService.getOwnerCompanyId());
-
-        ctx.append("Owner Organization: ").append(ownerName).append("\n\n");
-
-        // ── 1. Load Neo4j relationships from owner org ────────────────────────
-        OwnerRelationshipResult ownerRels = loadOwnerOrgRelationships(sources, ctx);
-
-        // ── 2. Load company_profiles for related companies ────────────────────
-        List<CompanyProfile> relatedProfiles = loadRelatedProfiles(ownerRels.relatedCompanyIds, sources);
-
-        // ── 3a. Explicit companyProfileId from UI ─────────────────────────────
+        CompanyProfile pageContextTarget = null;
         if (StringUtils.hasText(companyProfileId)) {
-            CompanyProfile target = relatedProfiles.stream()
-                    .filter(p -> companyProfileId.equals(p.getId()))
-                    .findFirst()
-                    .orElseGet(() -> companyProfileRepository.findById(companyProfileId).orElse(null));
+            pageContextTarget = companyProfileRepository.findById(companyProfileId).orElse(null);
+        }
 
-            if (target != null) {
-                return buildFocusedCompanyContext(target, ownerRels, sources, ctx);
+        CompanyProfile targetProfile = null;
+        List<CompanyProfile> compareTargets = new ArrayList<>();
+        boolean targetRequired = isCompanyTargetRequired(intent);
+        boolean targetOptional = intent == OwnerIntent.RELATIONSHIP_CLOSENESS;
+        
+        if (intent == OwnerIntent.COMPANY_COMPARE) {
+            compareTargets = resolveCompareTargets(question, pageContextTarget);
+            if (compareTargets.size() < 2) {
+                throw new ClarificationRequiredException("Please specify two companies to compare (e.g., 'Compare FPT and CMC').");
+            }
+            return buildCompareContext(compareTargets, sources, ctx);
+        } else if (targetRequired || targetOptional) {
+            targetProfile = resolveSingleTarget(question, pageContextTarget);
+            if (targetProfile == null && targetRequired) {
+                return OwnerContextResult.builder()
+                        .intent(intent)
+                        .deterministic(true)
+                        .directAnswer("I could not find an approved company profile matching the company you asked about. Please check the name or navigate to a company profile.")
+                        .context(AssistantContext.builder().contextText("").sources(List.of()).build())
+                        .build();
+            }
+        }
+
+        // Handle deterministic intents
+        if (isDeterministic(intent)) {
+            return handleDeterministic(intent, ownerBusinessCompanyId, ownerMongoId, targetProfile, sources, ctx);
+        }
+
+        // Handle Gemini-assisted intents
+        return handleGeminiAssisted(intent, ownerBusinessCompanyId, ownerMongoId, targetProfile, sources, ctx);
+    }
+
+    private OwnerContextResult handleDeterministic(OwnerIntent intent, String ownerBusinessCompanyId, String ownerMongoId, CompanyProfile targetProfile, List<AiSourceReference> sources, StringBuilder ctx) {
+        String directAnswer = null;
+        List<AiNavigationAction> navigationActions = new ArrayList<>();
+
+        if (intent == OwnerIntent.PARTNERS || intent == OwnerIntent.POTENTIAL_PARTNERS || 
+            intent == OwnerIntent.COMPETITORS || intent == OwnerIntent.CUSTOMERS || intent == OwnerIntent.SUPPLIERS) {
+            
+            String relType = switch (intent) {
+                case PARTNERS -> "PARTNER_WITH";
+                case POTENTIAL_PARTNERS -> "POTENTIAL_PARTNER_OF";
+                case COMPETITORS -> "COMPETITOR_OF";
+                case CUSTOMERS -> "CUSTOMER_OF";
+                case SUPPLIERS -> "SUPPLIER_OF";
+                default -> "";
+            };
+            String title = switch (intent) {
+                case PARTNERS -> "Current Partners";
+                case POTENTIAL_PARTNERS -> "Potential Partners";
+                case COMPETITORS -> "Competitors";
+                case CUSTOMERS -> "Customers";
+                case SUPPLIERS -> "Suppliers";
+                default -> "";
+            };
+            
+            List<GraphCompanyDto> rels = graphService.getCompaniesByRelationshipType(relType);
+            if (rels.isEmpty()) {
+                directAnswer = "There are currently no companies recorded as " + relType.replace("_", " ").toLowerCase() + " in APMS.";
             } else {
-                log.warn("companyProfileId {} not found in approved data.", companyProfileId);
-                ctx.append("Requested company not found in approved data.\n");
-                return buildEcosystemContext(relatedProfiles, ownerRels, sources, ctx);
-            }
-        }
-
-        // ── 3b. Try name matching from question ───────────────────────────────
-        List<CompanyProfile> matched = resolveCompaniesFromQuestion(question, relatedProfiles);
-
-        if (matched.size() > 1) {
-            // Signal clarification needed — callers catch this and respond gracefully
-            String names = matched.stream()
-                    .map(p -> p.getIdentity() != null ? resolveCompanyName(p) : "Unknown")
-                    .collect(Collectors.joining(", "));
-            throw new ClarificationRequiredException(
-                    "I found multiple companies matching your question: " + names
-                    + ". Could you please clarify which company you mean?");
-        }
-
-        if (matched.size() == 1) {
-            return buildFocusedCompanyContext(matched.get(0), ownerRels, sources, ctx);
-        }
-
-        // ── 3c. Ecosystem-level context ───────────────────────────────────────
-        return buildEcosystemContext(relatedProfiles, ownerRels, sources, ctx);
-    }
-
-    // ── Private builders ──────────────────────────────────────────────────────
-
-    private AssistantContext buildFocusedCompanyContext(
-            CompanyProfile profile,
-            OwnerRelationshipResult ownerRels,
-            List<AiSourceReference> sources,
-            StringBuilder ctx) {
-
-        sources.add(AiSourceReference.builder()
-                .type("company_profiles")
-                .id(profile.getId())
-                .title(resolveCompanyName(profile))
-                .build());
-
-        ctx.append(formatProfile(profile));
-
-        // Focused relationships: only those touching this company
-        String targetCompanyId = profile.getCompanyId();
-        List<String> focusedRels = ownerRels.formattedRelationships.stream()
-                .filter(r -> r.contains(resolveCompanyName(profile))
-                        || (StringUtils.hasText(targetCompanyId) && r.contains(targetCompanyId)))
-                .toList();
-
-        if (!focusedRels.isEmpty()) {
-            ctx.append("=== RELATIONSHIPS TO OWNER ORGANIZATION ===\n");
-            focusedRels.forEach(r -> ctx.append("  - ").append(r).append("\n"));
-            ctx.append("\n");
-        } else if (!ownerRels.formattedRelationships.isEmpty()) {
-            ctx.append("=== ALL OWNER ORGANIZATION RELATIONSHIPS ===\n");
-            ownerRels.formattedRelationships.forEach(r -> ctx.append("  - ").append(r).append("\n"));
-            ctx.append("\n");
-        }
-
-        ScoreSnapshot latestScore = null;
-        if (StringUtils.hasText(profile.getCompanyId())) {
-            latestScore = getLatestScore(profile.getCompanyId());
-            if (latestScore != null) {
-                sources.add(AiSourceReference.builder()
-                        .type("score_snapshots")
-                        .id(String.valueOf(latestScore.getScoreSnapshotId()))
-                        .title("Latest score (" + latestScore.getRuleVersion() + ")")
-                        .build());
-                ctx.append(formatScore(resolveCompanyName(profile), latestScore));
-            }
-        }
-
-        return AssistantContext.builder()
-                .companyProfile(profile)
-                .formattedRelationships(ownerRels.formattedRelationships)
-                .latestScore(latestScore)
-                .contextText(ctx.toString())
-                .sources(sources)
-                .build();
-    }
-
-    private AssistantContext buildEcosystemContext(
-            List<CompanyProfile> relatedProfiles,
-            OwnerRelationshipResult ownerRels,
-            List<AiSourceReference> sources,
-            StringBuilder ctx) {
-
-        ctx.append("=== ECOSYSTEM EXECUTIVE SUMMARY ===\n\n");
-
-        if (relatedProfiles.isEmpty()) {
-            ctx.append("No approved company profiles found in the owner organization's business ecosystem.\n");
-        } else {
-            sources.add(AiSourceReference.builder()
-                    .type("company_profiles")
-                    .id(ownerOrganizationService.getOwnerCompanyId())
-                    .title("Ecosystem profiles")
-                    .build());
-            relatedProfiles.forEach(p -> ctx.append(formatProfile(p)));
-        }
-
-        // Scores for related companies
-        boolean hasScores = false;
-        StringBuilder scoresCtx = new StringBuilder();
-        for (CompanyProfile p : relatedProfiles) {
-            if (!StringUtils.hasText(p.getCompanyId())) continue;
-            ScoreSnapshot s = getLatestScore(p.getCompanyId());
-            if (s != null) {
-                hasScores = true;
-                scoresCtx.append(formatScore(resolveCompanyName(p), s));
-            }
-        }
-
-        if (hasScores) {
-            sources.add(AiSourceReference.builder()
-                    .type("score_snapshots")
-                    .id(ownerOrganizationService.getOwnerCompanyId())
-                    .title("Ecosystem score snapshots")
-                    .build());
-            ctx.append("=== ECOSYSTEM SCORES ===\n");
-            ctx.append(scoresCtx);
-        }
-
-        return AssistantContext.builder()
-                .formattedRelationships(ownerRels.formattedRelationships)
-                .contextText(ctx.toString())
-                .sources(sources)
-                .build();
-    }
-
-    // ── Neo4j helper ──────────────────────────────────────────────────────────
-
-    /**
-     * Loads all bidirectional relationships from the owner org node.
-     * Collects the companyIds of all connected companies for subsequent profile loading.
-     * Does NOT filter by projectId — owner-level view is across all approved relationships.
-     */
-    private OwnerRelationshipResult loadOwnerOrgRelationships(List<AiSourceReference> sources, StringBuilder ctx) {
-        List<String> formattedRelationships = new ArrayList<>();
-        Set<String> relatedCompanyIds = new LinkedHashSet<>();
-
-        try {
-            String cypher = """
-                MATCH (owner:Company)-[r]-(other:Company)
-                WHERE owner.companyId = $ownerCompanyId
-                RETURN owner.name AS ownerName, type(r) AS relType, other.name AS otherName,
-                       other.companyId AS otherCompanyId, startNode(r) = owner AS isOutgoing
-                """;
-            var records = neo4jClient.query(cypher)
-                    .bindAll(Map.of("ownerCompanyId", ownerOrganizationService.getOwnerCompanyId()))
-                    .fetch().all();
-
-            for (var record : records) {
-                String ownerName = (String) record.get("ownerName");
-                String relType = (String) record.get("relType");
-                String otherName = (String) record.get("otherName");
-                String otherCompanyId = (String) record.get("otherCompanyId");
-                boolean isOutgoing = (Boolean) record.get("isOutgoing");
-
-                String formatted = isOutgoing
-                        ? (ownerName + " " + relType + " " + otherName)
-                        : (otherName + " " + relType + " " + ownerName);
-                formattedRelationships.add(formatted);
-
-                if (StringUtils.hasText(otherCompanyId)) {
-                    relatedCompanyIds.add(otherCompanyId);
+                StringBuilder sb = new StringBuilder(title + "\n\n");
+                int count = 1;
+                for (GraphCompanyDto rel : rels) {
+                    sb.append(count++).append(". ").append(rel.getName()).append("\n");
                 }
+                sb.append("\nTotal: ").append(rels.size());
+                directAnswer = sb.toString();
             }
-
-            if (!formattedRelationships.isEmpty()) {
-                sources.add(AiSourceReference.builder()
-                        .type("neo4j_relationships")
-                        .id(ownerOrganizationService.getOwnerCompanyId())
-                        .title("Approved relationship graph")
-                        .build());
-                ctx.append("=== OWNER ORGANIZATION RELATIONSHIPS (APPROVED NEO4J DATA) ===\n");
-                formattedRelationships.forEach(r -> ctx.append("  - ").append(r).append("\n"));
-                ctx.append("\n");
+        } else if (intent == OwnerIntent.COMPANY_RELATIONSHIP && targetProfile != null) {
+            String targetBusinessId = targetProfile.getCompanyId();
+            if (StringUtils.hasText(targetBusinessId) && StringUtils.hasText(ownerBusinessCompanyId)) {
+                List<CompanyRelationshipDto> pairs = graphService.getPairRelationships(ownerBusinessCompanyId, targetBusinessId);
+                if (pairs.isEmpty()) {
+                    directAnswer = "No approved relationship between your company and " + resolveCompanyName(targetProfile) + " is currently recorded in APMS.";
+                } else {
+                    CompanyRelationshipDto pair = pairs.get(0);
+                    String prettyType = pair.getRelationshipType().replace("_", " ").toLowerCase();
+                    String capsType = Arrays.stream(prettyType.split(" ")).map(w -> StringUtils.capitalize(w)).collect(Collectors.joining(" "));
+                    directAnswer = resolveCompanyName(targetProfile) + " is currently recorded as a " + 
+                                   capsType + " of your company in APMS.\n\n" +
+                                   "Relationship: " + capsType;
+                }
+            } else {
+                directAnswer = "Could not resolve relationship graph identifiers for the requested companies.";
             }
-
-        } catch (Exception e) {
-            log.warn("Could not load Neo4j relationships for owner org {}: {}", ownerOrganizationService.getOwnerCompanyId(), e.getMessage());
+            navigationActions.add(buildNavigationAction(targetProfile));
+        } else if (intent == OwnerIntent.ECOSYSTEM_OVERVIEW) {
+            var summary = dashboardService.getSummary();
+            directAnswer = "Business Ecosystem Overview\n\n" +
+                           "Total Related Companies: " + summary.getTotalRelatedCompanies() + "\n\n" +
+                           "Partners: " + summary.getPartnerCount() + "\n" +
+                           "Potential Partners: " + summary.getPotentialPartnerCount() + "\n" +
+                           "Competitors: " + summary.getCompetitorCount() + "\n" +
+                           "Customers: " + summary.getCustomerCount() + "\n" +
+                           "Suppliers: " + summary.getSupplierCount() + "\n";
+        } else if (intent == OwnerIntent.RELATIONSHIP_CLOSENESS) {
+            if (targetProfile != null) {
+                var closeness = closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerMongoId, targetProfile.getId()).orElse(null);
+                if (closeness == null) {
+                    directAnswer = "The relationship with " + resolveCompanyName(targetProfile) + " is currently UNRATED.";
+                } else {
+                    directAnswer = "The relationship with " + resolveCompanyName(targetProfile) + " is rated at " + closeness.getStars() + " stars.";
+                }
+                navigationActions.add(buildNavigationAction(targetProfile));
+            } else {
+                List<String> ecosystemCompanyIds = getCanonicalEcosystemCompanyIds(ownerBusinessCompanyId);
+                List<CompanyProfile> ecosystemProfiles = loadRelatedProfiles(ecosystemCompanyIds);
+                List<String> targetMongoIds = ecosystemProfiles.stream().map(CompanyProfile::getId).toList();
+                
+                var closenessRecords = closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileIdIn(ownerMongoId, targetMongoIds);
+                Map<String, Integer> closenessMap = closenessRecords.stream()
+                        .collect(Collectors.toMap(com.apms.domain.profile.closeness.CompanyRelationshipCloseness::getTargetCompanyProfileId, com.apms.domain.profile.closeness.CompanyRelationshipCloseness::getStars));
+                
+                Map<Integer, List<String>> byStars = new HashMap<>();
+                List<String> unrated = new ArrayList<>();
+                for (CompanyProfile p : ecosystemProfiles) {
+                    Integer stars = closenessMap.get(p.getId());
+                    if (stars == null) {
+                        unrated.add(resolveCompanyName(p));
+                    } else {
+                        byStars.computeIfAbsent(stars, k -> new ArrayList<>()).add(resolveCompanyName(p));
+                    }
+                }
+                
+                StringBuilder sb = new StringBuilder("Relationships Needing Attention\n\n");
+                for (int i = 5; i >= 1; i--) {
+                    if (byStars.containsKey(i)) {
+                        String label = switch(i) {
+                            case 1 -> "Contact Only";
+                            case 2 -> "Weak";
+                            case 3 -> "Established";
+                            case 4 -> "Close";
+                            case 5 -> "Strategic";
+                            default -> "Unknown";
+                        };
+                        for (String n : byStars.get(i)) {
+                            sb.append(n).append("\nCloseness: ").append(label).append(" (").append(i).append("/5)\n\n");
+                        }
+                    }
+                }
+                if (!unrated.isEmpty()) {
+                    sb.append("Unrated:\n");
+                    unrated.forEach(n -> sb.append("- ").append(n).append("\n"));
+                }
+                directAnswer = sb.toString();
+            }
+        } else if (intent == OwnerIntent.COMPANY_PROFILE && targetProfile != null) {
+            directAnswer = buildStructuredCompanyProfileText(targetProfile);
+            navigationActions.add(buildNavigationAction(targetProfile));
+            sources.add(AiSourceReference.builder().type("company_profiles").id(targetProfile.getId()).title(resolveCompanyName(targetProfile)).build());
+        } else if (intent == OwnerIntent.COMPANY_PUBLIC_NEWS && targetProfile != null) {
+            var news = externalDataRepository.findByCategoryAndRelatedCompanyId(ExternalDataCategory.NEWS, targetProfile.getCompanyId());
+            if (news.isEmpty()) {
+                directAnswer = "No recent public updates for " + resolveCompanyName(targetProfile) + " are currently stored in APMS.";
+            } else {
+                StringBuilder sb = new StringBuilder("Recent Public Updates for " + resolveCompanyName(targetProfile) + "\n\n");
+                int count = 1;
+                for (ExternalDataItem item : news) {
+                    sb.append(count++).append(". ").append(item.getTitle()).append("\n");
+                    sb.append("Published: ").append(item.getPublishedAt() != null ? item.getPublishedAt().toString() : "Unknown").append("\n");
+                    sb.append("Source: ").append(StringUtils.hasText(item.getUrl()) ? item.getUrl() : "Unknown").append("\n\n");
+                    if (StringUtils.hasText(item.getSummary())) {
+                        sb.append(item.getSummary()).append("\n\n");
+                    }
+                }
+                directAnswer = sb.toString();
+                sources.add(AiSourceReference.builder().type("external_data").id(targetProfile.getId()).title("Public News").build());
+            }
+            navigationActions.add(buildNavigationAction(targetProfile));
+        } else if (intent == OwnerIntent.OUT_OF_SCOPE) {
+            directAnswer = "I can help with your APMS business ecosystem, company relationships, risks, opportunities, company intelligence, and strategic insights.\nThis question is outside the available Owner AI scope.";
         }
 
-        return new OwnerRelationshipResult(formattedRelationships, new ArrayList<>(relatedCompanyIds));
+        if (directAnswer != null) {
+            return OwnerContextResult.builder()
+                    .intent(intent)
+                    .deterministic(true)
+                    .directAnswer(directAnswer)
+                    .navigationActions(navigationActions)
+                    .context(AssistantContext.builder().contextText(ctx.toString()).sources(sources).companyProfile(targetProfile).build())
+                    .build();
+        }
+        
+        return handleGeminiAssisted(intent, ownerBusinessCompanyId, ownerMongoId, targetProfile, sources, ctx);
     }
 
-    private List<CompanyProfile> loadRelatedProfiles(List<String> relatedCompanyIds, List<AiSourceReference> sources) {
+    private OwnerContextResult handleGeminiAssisted(OwnerIntent intent, String ownerBusinessCompanyId, String ownerMongoId, CompanyProfile targetProfile, List<AiSourceReference> sources, StringBuilder ctx) {
+        List<AiNavigationAction> navActions = new ArrayList<>();
+        
+        if (targetProfile != null) {
+            navActions.add(buildNavigationAction(targetProfile));
+            ctx.append(buildStructuredCompanyProfileText(targetProfile)).append("\n");
+            sources.add(AiSourceReference.builder().type("company_profiles").id(targetProfile.getId()).title(resolveCompanyName(targetProfile)).build());
+        }
+
+        if (intent == OwnerIntent.RISKS || intent == OwnerIntent.OPPORTUNITIES || intent == OwnerIntent.RECENT_SIGNALS || intent == OwnerIntent.STRATEGIC_RECOMMENDATION || intent == OwnerIntent.OWNER_INSIGHTS) {
+            List<String> ecosystemCompanyIds = new ArrayList<>(getCanonicalEcosystemCompanyIds(ownerBusinessCompanyId));
+            ecosystemCompanyIds.add(ownerBusinessCompanyId); // Include owner
+            
+            if (intent == OwnerIntent.RISKS || intent == OwnerIntent.STRATEGIC_RECOMMENDATION || intent == OwnerIntent.RECENT_SIGNALS) {
+                var risks = externalDataRepository.findTop5ByCategoryAndRelatedCompanyIdInOrderByPublishedAtDesc(ExternalDataCategory.RISK, ecosystemCompanyIds);
+                if (risks.isEmpty() && intent == OwnerIntent.RISKS) {
+                    return OwnerContextResult.builder().intent(intent).deterministic(true)
+                            .directAnswer("No current risk signals are stored for your business ecosystem in APMS.")
+                            .context(AssistantContext.builder().contextText("").sources(List.of()).build()).build();
+                }
+                ctx.append("=== RECENT RISKS ===\n");
+                risks.forEach(r -> ctx.append("- ").append(r.getTitle()).append(" (").append(r.getRelatedCompanyName()).append(")\n"));
+                if (!risks.isEmpty()) sources.add(AiSourceReference.builder().type("external_data").id("risks").title("Risk Signals").build());
+            }
+            if (intent == OwnerIntent.OPPORTUNITIES || intent == OwnerIntent.STRATEGIC_RECOMMENDATION || intent == OwnerIntent.RECENT_SIGNALS) {
+                var opps = externalDataRepository.findTop5ByCategoryAndRelatedCompanyIdInOrderByPublishedAtDesc(ExternalDataCategory.OPPORTUNITY, ecosystemCompanyIds);
+                if (opps.isEmpty() && intent == OwnerIntent.OPPORTUNITIES) {
+                    return OwnerContextResult.builder().intent(intent).deterministic(true)
+                            .directAnswer("No current opportunity signals are stored for your business ecosystem in APMS.")
+                            .context(AssistantContext.builder().contextText("").sources(List.of()).build()).build();
+                }
+                ctx.append("=== RECENT OPPORTUNITIES ===\n");
+                opps.forEach(r -> ctx.append("- ").append(r.getTitle()).append(" (").append(r.getRelatedCompanyName()).append(")\n"));
+                if (!opps.isEmpty()) sources.add(AiSourceReference.builder().type("external_data").id("opportunities").title("Opportunity Signals").build());
+            }
+            if (intent == OwnerIntent.RECENT_SIGNALS) {
+                var allRecent = externalDataRepository.findTop5ByRelatedCompanyIdInOrderByPublishedAtDesc(ecosystemCompanyIds);
+                if (allRecent.isEmpty()) {
+                    return OwnerContextResult.builder().intent(intent).deterministic(true)
+                            .directAnswer("No recent external signals are currently stored for your business ecosystem in APMS.")
+                            .context(AssistantContext.builder().contextText("").sources(List.of()).build()).build();
+                }
+                ctx.append("=== RECENT SIGNALS ===\n");
+                allRecent.forEach(r -> ctx.append("- ").append(r.getTitle()).append(" [").append(r.getCategory()).append("] (").append(r.getRelatedCompanyName()).append(")\n"));
+            }
+            if (intent == OwnerIntent.OWNER_INSIGHTS || intent == OwnerIntent.STRATEGIC_RECOMMENDATION) {
+                var insights = ownerInsightsService.getInsights(null, null, null, null, PageRequest.of(0, 10));
+                if (insights.isEmpty() && intent == OwnerIntent.OWNER_INSIGHTS) {
+                    return OwnerContextResult.builder().intent(intent).deterministic(true)
+                            .directAnswer("No actionable Owner insights are currently available in APMS.")
+                            .context(AssistantContext.builder().contextText("").sources(List.of()).build()).build();
+                }
+                ctx.append("=== ACTIONABLE INSIGHTS ===\n");
+                insights.getContent().forEach(i -> ctx.append("- [").append(i.getType()).append("] ").append(i.getTitle()).append("\n"));
+                if (!insights.isEmpty()) sources.add(AiSourceReference.builder().type("owner_insights").id("insights").title("Owner Insights").build());
+            }
+        }
+
+        return OwnerContextResult.builder()
+                .intent(intent)
+                .deterministic(false)
+                .navigationActions(navActions)
+                .context(AssistantContext.builder().contextText(ctx.toString()).sources(sources).companyProfile(targetProfile).build())
+                .build();
+    }
+    
+    private OwnerContextResult buildCompareContext(List<CompanyProfile> targets, List<AiSourceReference> sources, StringBuilder ctx) {
+        List<AiNavigationAction> navs = new ArrayList<>();
+        ctx.append("=== COMPANY COMPARISON ===\n");
+        for (CompanyProfile p : targets) {
+            navs.add(buildNavigationAction(p));
+            ctx.append(formatProfile(p));
+            sources.add(AiSourceReference.builder().type("company_profiles").id(p.getId()).title(resolveCompanyName(p)).build());
+        }
+        return OwnerContextResult.builder()
+                .intent(OwnerIntent.COMPANY_COMPARE)
+                .deterministic(false)
+                .navigationActions(navs)
+                .context(AssistantContext.builder().contextText(ctx.toString()).sources(sources).build())
+                .build();
+    }
+
+    private AiNavigationAction buildNavigationAction(CompanyProfile profile) {
+        return AiNavigationAction.builder()
+                .type("COMPANY_PROFILE")
+                .label("View " + resolveCompanyName(profile) + " Profile")
+                .companyProfileId(profile.getId())
+                .companyId(profile.getCompanyId())
+                .companyName(resolveCompanyName(profile))
+                .build();
+    }
+
+    private boolean isDeterministic(OwnerIntent intent) {
+        return intent == OwnerIntent.ECOSYSTEM_OVERVIEW ||
+               intent == OwnerIntent.PARTNERS ||
+               intent == OwnerIntent.POTENTIAL_PARTNERS ||
+               intent == OwnerIntent.COMPETITORS ||
+               intent == OwnerIntent.CUSTOMERS ||
+               intent == OwnerIntent.SUPPLIERS ||
+               intent == OwnerIntent.COMPANY_RELATIONSHIP ||
+               intent == OwnerIntent.INTERNAL_NEWS_PROTECTED ||
+               intent == OwnerIntent.OUT_OF_SCOPE ||
+               intent == OwnerIntent.RELATIONSHIP_CLOSENESS ||
+               intent == OwnerIntent.COMPANY_PROFILE ||
+               intent == OwnerIntent.COMPANY_PUBLIC_NEWS;
+    }
+
+    private OwnerIntent detectOwnerIntent(String question) {
+        String lower = question.toLowerCase();
+        
+        if (lower.contains("internal news") || lower.contains("internal information") || lower.contains("confidential")) {
+            return OwnerIntent.INTERNAL_NEWS_PROTECTED;
+        }
+        
+        if (lower.contains("weather") || lower.contains("recipe") || lower.contains("sports") || lower.contains("swot is")) {
+            return OwnerIntent.OUT_OF_SCOPE;
+        }
+        
+        if (lower.contains("relationship with") || lower.contains("connected to") || lower.contains("relationship do we have")) {
+            return OwnerIntent.COMPANY_RELATIONSHIP;
+        }
+        if (lower.contains("compare") || (lower.contains("difference") && lower.contains("and"))) {
+            return OwnerIntent.COMPANY_COMPARE;
+        }
+        if (lower.contains("potential partner")) {
+            return OwnerIntent.POTENTIAL_PARTNERS;
+        }
+        if (lower.contains("partner")) {
+            return OwnerIntent.PARTNERS;
+        }
+        if (lower.contains("competitor")) {
+            return OwnerIntent.COMPETITORS;
+        }
+        if (lower.contains("customer")) {
+            return OwnerIntent.CUSTOMERS;
+        }
+        if (lower.contains("supplier")) {
+            return OwnerIntent.SUPPLIERS;
+        }
+        if (lower.contains("weak") || lower.contains("close") || lower.contains("unrated") || lower.contains("rated") || lower.contains("closeness")) {
+            return OwnerIntent.RELATIONSHIP_CLOSENESS;
+        }
+        if (lower.contains("risk")) {
+            return OwnerIntent.RISKS;
+        }
+        if (lower.contains("opportunit")) {
+            return OwnerIntent.OPPORTUNITIES;
+        }
+        if (lower.contains("signal") || lower.contains("recent external")) {
+            return OwnerIntent.RECENT_SIGNALS;
+        }
+        if (lower.contains("insight") || lower.contains("recommendation") || lower.contains("review") || lower.contains("focus on")) {
+            return OwnerIntent.OWNER_INSIGHTS;
+        }
+        if (lower.contains("ecosystem")) {
+            return OwnerIntent.ECOSYSTEM_OVERVIEW;
+        }
+        if (lower.contains("public news") || lower.contains("public update")) {
+            return OwnerIntent.COMPANY_PUBLIC_NEWS;
+        }
+        if (lower.contains("strateg") || lower.contains("attention to")) {
+            return OwnerIntent.STRATEGIC_RECOMMENDATION;
+        }
+        
+        return OwnerIntent.COMPANY_PROFILE;
+    }
+
+    private List<String> getCanonicalEcosystemCompanyIds(String ownerCompanyId) {
+        String cypher = "MATCH (:Company {companyId: $ownerId})-[r:PARTNER_WITH|POTENTIAL_PARTNER_OF|COMPETITOR_OF|CUSTOMER_OF|SUPPLIER_OF]-(t:Company) RETURN DISTINCT t.companyId as targetId";
+        return neo4jClient.query(cypher)
+                .bindAll(Map.of("ownerId", ownerCompanyId))
+                .fetchAs(String.class)
+                .mappedBy((ts, record) -> record.get("targetId").asString())
+                .all()
+                .stream().toList();
+    }
+
+    private List<CompanyProfile> loadRelatedProfiles(List<String> relatedCompanyIds) {
         if (relatedCompanyIds.isEmpty()) return List.of();
         List<CompanyProfile> profiles = new ArrayList<>();
         for (String companyId : relatedCompanyIds) {
@@ -290,26 +444,129 @@ public class OwnerAssistantContextService {
         return profiles;
     }
 
-    // ── Utilities ─────────────────────────────────────────────────────────────
-
-    private ScoreSnapshot getLatestScore(String companyId) {
-        List<ScoreSnapshot> snapshots = scoreSnapshotRepository.findByCompanyIdAndEvaluatedRoleIsNullOrderByCreatedAtDesc(companyId);
-        return snapshots.isEmpty() ? null : snapshots.get(0);
+    private boolean isCompanyTargetRequired(OwnerIntent intent) {
+        return intent == OwnerIntent.COMPANY_PROFILE || 
+               intent == OwnerIntent.COMPANY_PUBLIC_NEWS || 
+               intent == OwnerIntent.COMPANY_RELATIONSHIP || 
+               intent == OwnerIntent.COMPANY_COMPARE;
     }
 
-    private List<CompanyProfile> resolveCompaniesFromQuestion(String question, List<CompanyProfile> profiles) {
-        String normalizedQ = removeAccents(question.toLowerCase().replaceAll("\\s+", " "));
-        List<CompanyProfile> matched = new ArrayList<>();
-        for (CompanyProfile p : profiles) {
+    private CompanyProfile resolveSingleTarget(String question, CompanyProfile pageContextTarget) {
+        String lowerQ = question.toLowerCase();
+        boolean isContextual = lowerQ.contains("this company") || lowerQ.contains("this organization") || 
+                               lowerQ.contains("the current company") || lowerQ.contains("this business");
+                               
+        String extracted = extractCompanyKeyword(question);
+        
+        if (StringUtils.hasText(extracted) && !isContextual) {
+            CompanyProfile explicitMatch = rankAndSelectMatch(extracted);
+            if (explicitMatch != null) return explicitMatch;
+            
+            throw new ClarificationRequiredException("I could not find an approved company profile matching \"" + extracted + "\" in APMS.");
+        }
+        
+        if (isContextual) {
+            if (pageContextTarget != null) return pageContextTarget;
+            throw new ClarificationRequiredException("Please specify the company name or open a company profile first.");
+        }
+        
+        if (pageContextTarget != null && (!StringUtils.hasText(extracted) || extracted.equals("about"))) {
+            return pageContextTarget;
+        }
+        
+        return null;
+    }
+
+    private String extractCompanyKeyword(String question) {
+        String lower = question.toLowerCase();
+        String keyword = lower.replace("find", "")
+                              .replace("search for", "")
+                              .replace("what do we know about", "")
+                              .replace("company profile", "")
+                              .replace("compare", "")
+                              .replace("what relationship do we have with", "")
+                              .replace("relationship do we have with", "")
+                              .replace("what is our relationship with", "")
+                              .replace("how close is our relationship with", "")
+                              .replace("what public news do we have about", "")
+                              .replace("tell me about", "")
+                              .replace("public news", "")
+                              .replace("about", "")
+                              .replace("with", "")
+                              .replace("?", "")
+                              .replace(".", "")
+                              .trim();
+        if (keyword.startsWith("what ")) {
+            keyword = keyword.substring(5).trim();
+        }
+        return keyword;
+    }
+
+    private CompanyProfile rankAndSelectMatch(String keyword) {
+        if (!StringUtils.hasText(keyword) || keyword.length() < 2) return null;
+        
+        // Use page request to get potential matches
+        org.springframework.data.domain.Page<CompanyProfile> page = companyProfileRepository.searchByName(keyword, org.springframework.data.domain.PageRequest.of(0, 10));
+        if (page == null) return null;
+        List<CompanyProfile> candidates = page.stream().filter(p -> "APPROVED".equals(p.getReviewStatus())).toList();
+        
+        if (candidates.isEmpty()) return null;
+        if (candidates.size() == 1) return candidates.get(0);
+        
+        // Ranked matching
+        CompanyProfile exactInsensitiveTradeMatch = null;
+        CompanyProfile exactInsensitiveLegalMatch = null;
+        CompanyProfile uniquePartialTradeMatch = null;
+        CompanyProfile uniquePartialLegalMatch = null;
+        
+        int partialTradeCount = 0;
+        int partialLegalCount = 0;
+        
+        String lowerKeyword = keyword.toLowerCase();
+        
+        for (CompanyProfile p : candidates) {
             if (p.getIdentity() == null) continue;
-            String legal = normalize(p.getIdentity().getLegalName());
-            String trade = normalize(p.getIdentity().getTradeName());
-            if ((StringUtils.hasText(legal) && normalizedQ.contains(legal)) ||
-                (StringUtils.hasText(trade) && normalizedQ.contains(trade))) {
-                matched.add(p);
+            String trade = p.getIdentity().getTradeName();
+            String legal = p.getIdentity().getLegalName();
+            
+            if (StringUtils.hasText(trade) && trade.toLowerCase().equals(lowerKeyword)) {
+                exactInsensitiveTradeMatch = p;
+            }
+            if (StringUtils.hasText(legal) && legal.toLowerCase().equals(lowerKeyword)) {
+                exactInsensitiveLegalMatch = p;
+            }
+            if (StringUtils.hasText(trade) && trade.toLowerCase().contains(lowerKeyword)) {
+                uniquePartialTradeMatch = p;
+                partialTradeCount++;
+            }
+            if (StringUtils.hasText(legal) && legal.toLowerCase().contains(lowerKeyword)) {
+                uniquePartialLegalMatch = p;
+                partialLegalCount++;
             }
         }
-        return matched;
+        
+        if (exactInsensitiveTradeMatch != null) return exactInsensitiveTradeMatch;
+        if (exactInsensitiveLegalMatch != null) return exactInsensitiveLegalMatch;
+        if (partialTradeCount == 1) return uniquePartialTradeMatch;
+        if (partialLegalCount == 1) return uniquePartialLegalMatch;
+        
+        // If multiple partials remain, ambiguity clarification required.
+        throw new ClarificationRequiredException("I found multiple approved company profiles matching \"" + keyword + "\". Please specify the company you mean.");
+    }
+
+    private List<CompanyProfile> resolveCompareTargets(String question, CompanyProfile pageContext) {
+        String lower = question.toLowerCase();
+        String cleaned = lower.replace("compare", "").replace("?", "").replace(".", "").trim();
+        String[] parts = cleaned.split(" and ");
+        if (parts.length == 2) {
+            CompanyProfile p1 = rankAndSelectMatch(parts[0].trim());
+            CompanyProfile p2 = rankAndSelectMatch(parts[1].trim());
+            List<CompanyProfile> res = new ArrayList<>();
+            if (p1 != null) res.add(p1);
+            if (p2 != null) res.add(p2);
+            return res;
+        }
+        return List.of();
     }
 
     private String normalize(String s) {
@@ -331,6 +588,41 @@ public class OwnerAssistantContextService {
         return StringUtils.hasText(name) ? name : "Unknown Company";
     }
 
+    private String buildStructuredCompanyProfileText(CompanyProfile profile) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(resolveCompanyName(profile)).append("\n\n");
+        if (profile.getIdentity() != null) {
+            sb.append("Legal Name:\n").append(profile.getIdentity().getLegalName()).append("\n\n");
+        }
+        if (profile.getBusiness() != null && profile.getBusiness().getIndustries() != null && !profile.getBusiness().getIndustries().isEmpty()) {
+            sb.append("Industries:\n");
+            for (String ind : profile.getBusiness().getIndustries()) {
+                sb.append("- ").append(ind).append("\n");
+            }
+            sb.append("\n");
+        }
+        if (profile.getBusiness() != null && StringUtils.hasText(profile.getBusiness().getBusinessModel())) {
+            sb.append("Business Model:\n").append(profile.getBusiness().getBusinessModel()).append("\n\n");
+        }
+        if (profile.getInsights() != null) {
+            if (profile.getInsights().getStrengths() != null && !profile.getInsights().getStrengths().isEmpty()) {
+                sb.append("Strengths:\n");
+                for (String s : profile.getInsights().getStrengths()) {
+                    sb.append("- ").append(s).append("\n");
+                }
+                sb.append("\n");
+            }
+            if (profile.getInsights().getWeaknesses() != null && !profile.getInsights().getWeaknesses().isEmpty()) {
+                sb.append("Weaknesses:\n");
+                for (String w : profile.getInsights().getWeaknesses()) {
+                    sb.append("- ").append(w).append("\n");
+                }
+                sb.append("\n");
+            }
+        }
+        return sb.toString().trim();
+    }
+
     private String formatProfile(CompanyProfile profile) {
         StringBuilder sb = new StringBuilder();
         sb.append("--- ").append(resolveCompanyName(profile)).append(" ---\n");
@@ -341,6 +633,11 @@ public class OwnerAssistantContextService {
             sb.append("Industries: ").append(profile.getBusiness().getIndustries()).append("\n");
             sb.append("Business Model: ").append(profile.getBusiness().getBusinessModel()).append("\n");
         }
+        if (profile.getFinancial() != null) {
+            if (profile.getFinancial().getRevenue() != null) {
+                sb.append("Financial Revenue: ").append(profile.getFinancial().getRevenue()).append(" ").append(profile.getFinancial().getRevenueCurrency()).append("\n");
+            }
+        }
         if (profile.getInsights() != null) {
             sb.append("Strengths: ").append(profile.getInsights().getStrengths()).append("\n");
             sb.append("Weaknesses: ").append(profile.getInsights().getWeaknesses()).append("\n");
@@ -350,17 +647,4 @@ public class OwnerAssistantContextService {
         sb.append("\n");
         return sb.toString();
     }
-
-    private String formatScore(String companyName, ScoreSnapshot score) {
-        return "--- Score: " + companyName + " ---\n"
-                + "Total Score: " + score.getTotalScore() + "\n"
-                + "Partner Fit: " + score.getPartnerFitScore() + "\n"
-                + "Competition Level: " + score.getCompetitionLevel() + "\n"
-                + "Risk Level: " + score.getRiskLevel() + "\n"
-                + "Relationship Strength: " + score.getRelationshipStrength() + "\n\n";
-    }
-
-    // ── Inner result type ─────────────────────────────────────────────────────
-
-    record OwnerRelationshipResult(List<String> formattedRelationships, List<String> relatedCompanyIds) {}
 }

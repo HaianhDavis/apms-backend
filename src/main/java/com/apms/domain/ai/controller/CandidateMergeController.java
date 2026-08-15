@@ -27,17 +27,17 @@ public class CandidateMergeController {
      * The generated draft is NOT submitted — Staff must separately choose
      * one draft and submit it via the task submission endpoint.
      */
-    @PostMapping("/from-extractions")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
-    public ResponseEntity<MergeCandidateResponse> mergeExtractionsIntoCandidate(
-            @PathVariable Long projectId,
-            @PathVariable Long taskId,
-            @Valid @RequestBody MergeExtractionsIntoCandidateRequest request,
-            @AuthenticationPrincipal UserDetailsImpl currentUser) {
-
-        MergeCandidateResponse response = mergeService.mergeExtractionsIntoCandidate(
-                projectId, taskId, request.getExtractionIds(), request.getNote(), currentUser.getId());
-
-        return ResponseEntity.ok(response);
-    }
+//    @PostMapping("/from-extractions")
+//    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+//    public ResponseEntity<MergeCandidateResponse> mergeExtractionsIntoCandidate(
+//            @PathVariable Long projectId,
+//            @PathVariable Long taskId,
+//            @Valid @RequestBody MergeExtractionsIntoCandidateRequest request,
+//            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+//
+//        MergeCandidateResponse response = mergeService.mergeExtractionsIntoCandidate(
+//                projectId, taskId, request.getExtractionIds(), request.getNote(), currentUser.getId());
+//
+//        return ResponseEntity.ok(response);
+//    }
 }

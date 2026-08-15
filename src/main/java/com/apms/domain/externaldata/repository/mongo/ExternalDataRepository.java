@@ -6,6 +6,7 @@ import java.util.List;
 
 public interface ExternalDataRepository extends MongoRepository<ExternalDataItem, String> {
     List<ExternalDataItem> findByRelatedCompanyId(String relatedCompanyId);
+    List<ExternalDataItem> findByCategoryAndRelatedCompanyId(com.apms.common.enums.ExternalDataCategory category, String relatedCompanyId);
     
     long countByCategoryAndRelatedCompanyIdIn(com.apms.common.enums.ExternalDataCategory category, java.util.Collection<String> companyIds);
     List<ExternalDataItem> findTop5ByCategoryAndRelatedCompanyIdInOrderByPublishedAtDesc(com.apms.common.enums.ExternalDataCategory category, java.util.Collection<String> companyIds);
