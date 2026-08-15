@@ -52,6 +52,7 @@ public class CompanyProfileUpdateProposalService {
         }
 
         CompanyProfileUpdateProposal proposal = CompanyProfileUpdateProposal.builder()
+                .origin(com.apms.common.enums.ProposalOrigin.PROJECT)
                 .projectId(projectId)
                 .taskId(taskId)
                 .companyProfileId(request.getCompanyProfileId())
@@ -74,6 +75,43 @@ public class CompanyProfileUpdateProposalService {
         proposal = proposalRepository.save(proposal);
 
         auditLogService.log(currentUser.getId(), AuditAction.PROFILE_UPDATE_PROPOSAL_CREATED, "CompanyProfileUpdateProposal", proposal.getId(), "Proposal created for profile: " + request.getCompanyProfileId());
+
+        return toResponse(proposal);
+    }
+
+    @Transactional
+    public CompanyProfileUpdateProposalResponse createMonitoringProposal(CreateCompanyProfileUpdateProposalRequest request) {
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) {
+            throw new AccessDeniedException("Unauthorized");
+        }
+
+        if (!companyProfileRepository.existsById(request.getCompanyProfileId())) {
+            throw new ResourceNotFoundException("Target CompanyProfile does not exist");
+        }
+
+        CompanyProfileUpdateProposal proposal = CompanyProfileUpdateProposal.builder()
+                .origin(com.apms.common.enums.ProposalOrigin.MONITORING)
+                .companyProfileId(request.getCompanyProfileId())
+                .proposedIdentity(request.getProposedIdentity())
+                .proposedBusiness(request.getProposedBusiness())
+                .proposedContact(request.getProposedContact())
+                .proposedInsights(request.getProposedInsights())
+                .proposedFinancial(request.getProposedFinancial())
+                .proposedMarket(request.getProposedMarket())
+                .proposedInnovation(request.getProposedInnovation())
+                .proposedRisk(request.getProposedRisk())
+                .proposedCompliance(request.getProposedCompliance())
+                .sourceDocumentIds(request.getSourceDocumentIds())
+                .extractionId(request.getExtractionId())
+                .changeSummary(request.getChangeSummary())
+                .status(SubmissionStatus.DRAFT)
+                .submittedBy(currentUser.getId())
+                .build();
+
+        proposal = proposalRepository.save(proposal);
+
+        auditLogService.log(currentUser.getId(), AuditAction.PROFILE_UPDATE_PROPOSAL_CREATED, "CompanyProfileUpdateProposal", proposal.getId(), "Monitoring Proposal created for profile: " + request.getCompanyProfileId());
 
         return toResponse(proposal);
     }
@@ -235,9 +273,17 @@ public class CompanyProfileUpdateProposalService {
             throw new AccessDeniedException("Unauthorized");
         }
 
-        if (!hasRole(currentUser, SystemRole.SYSTEM_ADMIN) &&
-            !projectRepository.existsByIdAndMembersAccountId(proposal.getProjectId(), currentUser.getId())) {
-            throw new AccessDeniedException("Access denied to this proposal");
+        if (!hasRole(currentUser, SystemRole.SYSTEM_ADMIN)) {
+            if (proposal.getOrigin() == com.apms.common.enums.ProposalOrigin.MONITORING) {
+                if (!hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER) && 
+                    !hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_STAFF)) {
+                    throw new AccessDeniedException("Access denied to this monitoring proposal");
+                }
+            } else {
+                if (!projectRepository.existsByIdAndMembersAccountId(proposal.getProjectId(), currentUser.getId())) {
+                    throw new AccessDeniedException("Access denied to this proposal");
+                }
+            }
         }
 
         return toResponse(proposal);

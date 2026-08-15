@@ -96,6 +96,13 @@ public class CompanyProfile {
     // Profile Metadata
     // ─────────────────────────────────────────────────────────────
 
+    /**
+     * The ID of the Business Development Manager responsible for this company profile.
+     * Established via Project ownership, enabling exclusive authorization for
+     * managing Company Continuous Monitoring.
+     */
+    private Long responsibleManagerId;
+
     @Builder.Default
     private SourceRefs sourceRefs = new SourceRefs();
 

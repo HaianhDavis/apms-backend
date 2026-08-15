@@ -66,6 +66,7 @@ public class ProfileService {
     private final TrackedCompanyRepository trackedCompanyRepository;
     private final TrackedCompanyCache trackedCompanyCache;
     private final com.apms.domain.project.service.ProjectTargetProfileResolver projectTargetProfileResolver;
+    private final com.apms.domain.user.repository.sql.AccountRepository accountRepository;
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER
@@ -161,6 +162,11 @@ public class ProfileService {
                         .build())
                 .build();
 
+        Long canonicalManagerId = findCanonicalManager(project);
+        if (canonicalManagerId != null) {
+            profile.setResponsibleManagerId(canonicalManagerId);
+        }
+
         addSourceRefs(profile, project, candidate);
 
         profile = profileRepository.save(profile);
@@ -201,6 +207,13 @@ public class ProfileService {
         profile.getMetadata().setUpdatedAt(LocalDateTime.now());
         profile.getMetadata().setLastModifiedBy("SYSTEM");
 
+        if (profile.getResponsibleManagerId() == null) {
+            Long canonicalManagerId = findCanonicalManager(project);
+            if (canonicalManagerId != null) {
+                profile.setResponsibleManagerId(canonicalManagerId);
+            }
+        }
+
         addSourceRefs(profile, project, candidate);
 
         profile = profileRepository.save(profile);
@@ -239,6 +252,25 @@ public class ProfileService {
         lifecycle.setStatus(candidate.getStatus());
         lifecycle.setConvertedCompanyProfileId(profile.getCompanyId());
         candidateRepository.save(candidate);
+    }
+
+    private Long findCanonicalManager(Project project) {
+        if (project.getMembers() == null) return null;
+        java.util.List<com.apms.domain.project.ProjectMember> activeManagers = project.getMembers().stream()
+                .filter(m -> m.getMemberRole() == com.apms.common.enums.MemberRole.MANAGER 
+                        && Boolean.TRUE.equals(m.getAccount().getIsActive()))
+                .toList();
+        
+        if (activeManagers.size() == 1) {
+            return activeManagers.get(0).getAccountId();
+        } else if (activeManagers.isEmpty()) {
+            com.apms.domain.user.Account creator = project.getCreatedByAccount();
+            if (creator != null && Boolean.TRUE.equals(creator.getIsActive()) && 
+                creator.getRoles().contains(com.apms.common.enums.SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
+                return creator.getId();
+            }
+        }
+        return null;
     }
 
     private java.util.List<String> resolveSourceDocumentIds(CompanyCandidate candidate) {
@@ -790,7 +822,48 @@ public class ProfileService {
                 .tags(p.getTags())
                 .metadata(p.getMetadata())
                 .version(p.getVersion())
+                .responsibleManagerId(p.getResponsibleManagerId())
                 .build();
+    }
+
+    public void transferResponsibility(String companyId, Long targetManagerId, UserDetailsImpl currentUser) {
+        CompanyProfile profile = findProfileByCompanyIdOrThrow(companyId);
+
+        com.apms.domain.user.Account target = accountRepository.findById(targetManagerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Target manager not found with id: " + targetManagerId));
+        
+        if (!Boolean.TRUE.equals(target.getIsActive()) || 
+            !target.getRoles().contains(com.apms.common.enums.SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
+            throw new BusinessValidationException("Target account must be an active BUSINESS_DEVELOPMENT_MANAGER");
+        }
+
+        if (profile.getResponsibleManagerId() == null) {
+            if (!currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"))) {
+                throw new org.springframework.security.access.AccessDeniedException("Only SYSTEM_ADMIN can assign responsibility to a legacy profile");
+            }
+        } else {
+            if (!currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN")) &&
+                !currentUser.getId().equals(profile.getResponsibleManagerId())) {
+                throw new org.springframework.security.access.AccessDeniedException("Only the current responsible Manager or SYSTEM_ADMIN can transfer responsibility");
+            }
+        }
+
+        profile.setResponsibleManagerId(target.getId());
+        profileRepository.save(profile);
+        
+        auditLogService.log(
+                currentUser.getId(),
+                com.apms.common.enums.AuditAction.COMPANY_PROFILE_RESPONSIBILITY_TRANSFERRED,
+                "CompanyProfile",
+                profile.getId(),
+                "Responsibility transferred to manager: " + target.getId()
+        );
+    }
+
+    private CompanyProfile findProfileByCompanyIdOrThrow(String companyId) {
+        return profileRepository.findByCompanyId(companyId)
+                .or(() -> profileRepository.findById(companyId))
+                .orElseThrow(() -> new ResourceNotFoundException("Company profile not found: " + companyId));
     }
 
     private String resolveRelationshipType(String companyId) {

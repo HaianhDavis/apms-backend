@@ -8,6 +8,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.mapping.Document;
+import com.apms.common.enums.ProposalOrigin;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,8 +22,15 @@ public class CompanyProfileUpdateProposal {
     @Id
     private String id;
 
+    @Builder.Default
+    private ProposalOrigin origin = ProposalOrigin.PROJECT;
+
     private Long projectId;
     private Long taskId;
+
+    public ProposalOrigin getOrigin() {
+        return origin != null ? origin : ProposalOrigin.PROJECT;
+    }
 
     @org.springframework.data.annotation.Version
     private Long documentVersion;

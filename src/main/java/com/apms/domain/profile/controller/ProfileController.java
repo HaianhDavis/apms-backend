@@ -112,4 +112,19 @@ public class ProfileController {
         profileService.deleteProfile(companyId);
         return ResponseEntity.ok(ApiResponse.success(null, "Profile deleted"));
     }
+
+    // ─────────────────────────────────────────────
+    // PUT /api/v1/company-profiles/{companyId}/responsible-manager
+    // Role: SYSTEM_ADMIN, BUSINESS_DEVELOPMENT_MANAGER
+    // ─────────────────────────────────────────────
+    @PutMapping("/{companyId}/responsible-manager")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<ApiResponse<Void>> transferResponsibility(
+            @PathVariable String companyId,
+            @jakarta.validation.Valid @RequestBody com.apms.domain.profile.dto.TransferResponsibilityRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        profileService.transferResponsibility(companyId, request.getManagerId(), currentUser);
+        return ResponseEntity.ok(ApiResponse.success(null, "Responsibility transferred successfully"));
+    }
 }

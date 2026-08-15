@@ -59,4 +59,11 @@ public class CompanyProfileUpdateProposalController {
     public ResponseEntity<CompanyProfileUpdateProposalResponse> getProposal(@PathVariable String id) {
         return ResponseEntity.ok(proposalService.getProposal(id));
     }
+
+    @PostMapping("/profile-update-proposals/monitoring")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<CompanyProfileUpdateProposalResponse> createMonitoringProposal(
+            @Valid @RequestBody CreateCompanyProfileUpdateProposalRequest request) {
+        return ResponseEntity.ok(proposalService.createMonitoringProposal(request));
+    }
 }

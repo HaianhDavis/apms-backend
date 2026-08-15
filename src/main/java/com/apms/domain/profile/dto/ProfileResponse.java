@@ -30,4 +30,5 @@ public class ProfileResponse {
     private List<String> tags;
     private CompanyProfile.Metadata metadata;
     private Integer version;
+    private Long responsibleManagerId;
 }
