@@ -5,6 +5,7 @@ import com.apms.domain.ai.dto.PartnerCriterionSuggestionResponse;
 import com.apms.domain.score.draft.AutomaticSuggestion;
 import com.apms.domain.score.draft.RoleEvaluationDraft;
 import com.apms.domain.score.draft.ApprovedSourceReference;
+import com.apms.domain.score.draft.EvidenceRecord;
 import com.apms.domain.score.dto.draft.PartnerCriterionContext;
 import com.apms.domain.score.enums.CriterionSuggestionMethod;
 import com.apms.domain.score.enums.CriterionSuggestionReviewStatus;
@@ -21,7 +22,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 import com.apms.common.exception.BusinessConflictException;
 
@@ -44,28 +48,13 @@ public class PartnerSuggestionGenerationService {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new BusinessValidationException("Draft not found"));
 
-        if (draft.getPinnedSourceReferences() == null || draft.getPinnedSourceReferences().isEmpty()) {
-            return "NO_SOURCES_PINNED";
-        }
-
-        com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse readiness;
-        if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.POTENTIAL_PARTNER) {
-            readiness = potentialPartnerSufficiencyEvaluator.evaluate(draft);
-        } else if (draft.getEvaluatedRole() == com.apms.domain.company.enums.CompanyRole.CUSTOMER) {
-            readiness = customerSufficiencyEvaluator.evaluate(draft);
-        } else {
-            readiness = sufficiencyEvaluator.evaluate(draft);
-        }
-        com.apms.domain.score.dto.draft.CriterionReadinessResult criterionReadiness = readiness.getCriterionResults().get(criterionKey);
-
-        if (criterionReadiness != null && criterionReadiness.getSufficiencyStatus() == PartnerDataSufficiencyEvaluator.SufficiencyStatus.INCOMPLETE) {
-            return "NEEDS_MORE_DATA";
+        if (!hasPinnedSources(draft, criterionKey) && !hasSelectedEvidence(draft, criterionKey)) {
+            return "NO_EVIDENCE_SELECTED";
         }
 
         String currentHash = draft.getSourceSnapshotHash();
-        List<String> sortedSourceRefIds = draft.getPinnedSourceReferences().stream()
-                .filter(r -> r.getCriterionKey() == null || r.getCriterionKey().equals(criterionKey))
-                .map(ApprovedSourceReference::getReferenceId)
+        Set<String> allowedEvidenceReferenceIds = buildAllowedEvidenceReferenceIds(draft, criterionKey);
+        List<String> sortedSourceRefIds = allowedEvidenceReferenceIds.stream()
                 .sorted()
                 .collect(Collectors.toList());
 
@@ -129,14 +118,14 @@ public class PartnerSuggestionGenerationService {
         PartnerCriterionContext context = contextProvider.buildContext(draft, criterionKey);
         String promptTemplate = promptProvider.getPromptTemplate(criterionKey);
         String aiResponseJson = aiProvider.generateSuggestionJson(context, promptTemplate);
-        PartnerCriterionSuggestionResponse validatedResponse = validator.validateAndMap(aiResponseJson, criterionKey, draft.getPinnedSourceReferences());
+        PartnerCriterionSuggestionResponse validatedResponse = validator.validateAndMap(aiResponseJson, criterionKey, allowedEvidenceReferenceIds);
 
         // Reload draft to apply results
         RoleEvaluationDraft reloadedDraft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new BusinessValidationException("Draft not found"));
 
         boolean isStale = !draft.getWorkingRevisionNumber().equals(reloadedDraft.getWorkingRevisionNumber()) ||
-                          !currentHash.equals(reloadedDraft.getSourceSnapshotHash());
+                          !Objects.equals(currentHash, reloadedDraft.getSourceSnapshotHash());
 
         List<PartnerSuggestionGenerationMetadata> reloadedMetadata = reloadedDraft.getGenerationIdempotency()
                 .getOrDefault(criterionKey, new ArrayList<>());
@@ -164,6 +153,7 @@ public class PartnerSuggestionGenerationService {
             suggestion.setSourceSnapshotHash(currentHash);
             suggestion.setDraftRevisionNumber(draft.getWorkingRevisionNumber());
             suggestion.setValidationStatus(CriterionSuggestionValidationStatus.PASS);
+            suggestion.setSuggestedRawScore(validatedResponse.getSuggestedRawScore());
             suggestion.setSuggestionRationale(validatedResponse.getRationale());
             suggestion.setExplanation(validatedResponse.getRationale());
             suggestion.setConfidence(validatedResponse.getConfidence());
@@ -190,6 +180,38 @@ public class PartnerSuggestionGenerationService {
         }
 
         return isStale ? "STALE_GENERATION" : "GENERATED";
+    }
+
+    private boolean hasPinnedSources(RoleEvaluationDraft draft, String criterionKey) {
+        return draft.getPinnedSourceReferences() != null
+                && draft.getPinnedSourceReferences().stream()
+                .anyMatch(ref -> ref.getCriterionKey() == null || ref.getCriterionKey().equals(criterionKey));
+    }
+
+    private boolean hasSelectedEvidence(RoleEvaluationDraft draft, String criterionKey) {
+        return draft.getCriterionEvidence() != null
+                && draft.getCriterionEvidence().getOrDefault(criterionKey, List.of()).stream()
+                .anyMatch(evidence -> evidence.getEvidenceId() != null
+                        && evidence.getRawDocumentId() != null
+                        && !evidence.getRawDocumentId().isBlank());
+    }
+
+    private Set<String> buildAllowedEvidenceReferenceIds(RoleEvaluationDraft draft, String criterionKey) {
+        Set<String> ids = new LinkedHashSet<>();
+        if (draft.getPinnedSourceReferences() != null) {
+            draft.getPinnedSourceReferences().stream()
+                    .filter(ref -> ref.getCriterionKey() == null || ref.getCriterionKey().equals(criterionKey))
+                    .map(ApprovedSourceReference::getReferenceId)
+                    .filter(Objects::nonNull)
+                    .forEach(ids::add);
+        }
+        if (draft.getCriterionEvidence() != null) {
+            draft.getCriterionEvidence().getOrDefault(criterionKey, List.of()).stream()
+                    .map(EvidenceRecord::getEvidenceId)
+                    .filter(Objects::nonNull)
+                    .forEach(ids::add);
+        }
+        return ids;
     }
 
 }

@@ -23,7 +23,7 @@ public class CompanyProfileUpdateProposalController {
     private final ExtractionMergeService mergeService;
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/profile-update-proposals")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessProject(#projectId))")
     public ResponseEntity<CompanyProfileUpdateProposalResponse> createProposal(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
@@ -40,7 +40,7 @@ public class CompanyProfileUpdateProposalController {
      * Does NOT update the CompanyProfile — Manager approval via the review endpoint is still required.
      */
     @PostMapping("/projects/{projectId}/tasks/{taskId}/profile-update-proposals/from-extractions")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessProject(#projectId))")
     public ResponseEntity<MergeProposalResponse> createProposalFromExtractions(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
@@ -55,7 +55,7 @@ public class CompanyProfileUpdateProposalController {
     }
 
     @GetMapping("/profile-update-proposals/{id}")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessProposal(#id))")
     public ResponseEntity<CompanyProfileUpdateProposalResponse> getProposal(@PathVariable String id) {
         return ResponseEntity.ok(proposalService.getProposal(id));
     }

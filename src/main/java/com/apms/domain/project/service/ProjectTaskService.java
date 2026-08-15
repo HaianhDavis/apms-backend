@@ -1,9 +1,8 @@
 package com.apms.domain.project.service;
 
-import com.apms.common.enums.AuditAction;
-import com.apms.common.enums.SystemRole;
-import com.apms.common.enums.TaskStatus;
-import com.apms.common.enums.TaskType;
+import com.apms.common.enums.*;
+import com.apms.common.enums.CandidateStatus;
+import com.apms.common.exception.BusinessValidationException;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.ai.AiExtractionCache;
 import com.apms.domain.ai.dto.ExtractionQualityStatus;
@@ -19,7 +18,6 @@ import com.apms.domain.project.dto.ProjectTaskSubmissionResponse;
 import com.apms.domain.project.dto.WorkbenchDocumentResponse;
 import com.apms.domain.project.dto.CandidateDraftSummary;
 import com.apms.domain.project.dto.ProposalDraftSummary;
-import com.apms.common.enums.TaskAction;
 import com.apms.domain.document.service.DocumentService;
 import com.apms.domain.document.dto.ImportJobResponse;
 import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
@@ -28,12 +26,14 @@ import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
 import com.apms.domain.project.ProjectTaskSubmission;
 import com.apms.domain.candidate.CompanyCandidate;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
-import com.apms.common.enums.ProjectType;
-import com.apms.common.enums.SubmissionStatus;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.project.repository.sql.ProjectTaskRepository;
+import com.apms.domain.score.draft.RoleEvaluationDraft;
+import com.apms.domain.score.enums.RoleEvaluationStatus;
+import com.apms.domain.score.repository.mongo.RoleEvaluationDraftRepository;
 import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
+import com.apms.domain.notification.service.NotificationService;
 import com.apms.security.UserDetailsImpl;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
@@ -48,13 +48,18 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ProjectTaskService {
+    private static final DateTimeFormatter PROJECT_END_DATE_FORMATTER =
+            DateTimeFormatter.ofPattern("MMM dd, yyyy", Locale.ENGLISH);
 
     private final ProjectTaskRepository projectTaskRepository;
     private final ProjectRepository projectRepository;
@@ -65,6 +70,8 @@ public class ProjectTaskService {
     private final CompanyCandidateRepository candidateRepository;
     private final CompanyProfileUpdateProposalRepository proposalRepository;
     private final ProjectTaskSubmissionRepository submissionRepository;
+    private final RoleEvaluationDraftRepository roleEvaluationDraftRepository;
+    private final NotificationService notificationService;
     private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
 
     @Transactional
@@ -80,6 +87,8 @@ public class ProjectTaskService {
         Account createdBy = accountRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
 
+        validateTaskDueDateWithinProject(request.getDueDate(), project);
+
         Account assignedTo = null;
         if (request.getAssignedToUserId() != null) {
             if (!projectRepository.existsByIdAndMembersAccountId(projectId, request.getAssignedToUserId())) {
@@ -89,18 +98,25 @@ public class ProjectTaskService {
                     .orElseThrow(() -> new ResourceNotFoundException("Assigned account not found"));
         }
 
-        if (request.getTaskType() == TaskType.PARTNER_CONTRACT_COLLECTION || request.getTaskType() == TaskType.COMPANY_NEWS_RESEARCH) {
+        if (request.getTaskType() == TaskType.COMPANY_NEWS_RESEARCH) {
             if (!org.springframework.util.StringUtils.hasText(request.getTargetCompanyProfileId())) {
-                throw new com.apms.common.exception.BusinessValidationException("targetCompanyProfileId is required for " + request.getTaskType().name());
+                // Auto-resolve from project if not explicitly provided
+                if (org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId())) {
+                    request.setTargetCompanyProfileId(project.getTargetCompanyProfileId());
+                } else {
+                    throw new com.apms.common.exception.BusinessValidationException("targetCompanyProfileId is required for " + request.getTaskType().name());
+                }
             }
         }
 
         if (org.springframework.util.StringUtils.hasText(request.getTargetCompanyProfileId())) {
-            com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findById(request.getTargetCompanyProfileId())
+            com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findByCompanyId(request.getTargetCompanyProfileId())
+                    .or(() -> companyProfileRepository.findById(request.getTargetCompanyProfileId()))
                     .orElseThrow(() -> new com.apms.common.exception.BusinessValidationException("Target company profile not found"));
             if (Boolean.TRUE.equals(profile.getIsDeleted())) {
                 throw new com.apms.common.exception.BusinessValidationException("Target company profile is deleted");
             }
+            request.setTargetCompanyProfileId(profile.getCompanyId());
         }
 
         if (request.getTaskType() == TaskType.DOCUMENT_COLLECTION) {
@@ -117,7 +133,6 @@ public class ProjectTaskService {
                 .createdByAccount(createdBy)
                 .status(TaskStatus.TODO)
                 .taskType(request.getTaskType() != null ? request.getTaskType() : TaskType.GENERAL_TASK)
-                .targetCompanyProfileId(request.getTargetCompanyProfileId())
                 .build();
 
         task = projectTaskRepository.save(task);
@@ -199,28 +214,27 @@ public class ProjectTaskService {
             statusChanged = true;
         }
 
+        Account newlyAssignedTo = null;
+
         if (!isStaff || isAdminOrManager) {
             if (request.getTitle() != null) task.setTitle(request.getTitle());
             if (request.getDescription() != null) task.setDescription(request.getDescription());
             if (request.getPriority() != null) task.setPriority(request.getPriority());
-            if (request.getDueDate() != null) task.setDueDate(request.getDueDate());
+            if (request.getDueDate() != null) {
+                validateTaskDueDateWithinProject(request.getDueDate(), task.getProject());
+                task.setDueDate(request.getDueDate());
+            }
             if (request.getTaskType() != null && task.getStatus() != TaskStatus.DONE && task.getStatus() != TaskStatus.CANCELLED) {
                 task.setTaskType(request.getTaskType());
             }
             if (request.getTargetCompanyProfileId() != null) {
-                com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findById(request.getTargetCompanyProfileId())
+                com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findByCompanyId(request.getTargetCompanyProfileId())
+                        .or(() -> companyProfileRepository.findById(request.getTargetCompanyProfileId()))
                         .orElseThrow(() -> new com.apms.common.exception.BusinessValidationException("Target company profile not found"));
                 if (Boolean.TRUE.equals(profile.getIsDeleted())) {
                     throw new com.apms.common.exception.BusinessValidationException("Target company profile is deleted");
                 }
-                task.setTargetCompanyProfileId(request.getTargetCompanyProfileId());
-            }
-
-            TaskType effectiveTaskType = request.getTaskType() != null ? request.getTaskType() : task.getTaskType();
-            if (effectiveTaskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
-                if (!org.springframework.util.StringUtils.hasText(task.getTargetCompanyProfileId())) {
-                     throw new com.apms.common.exception.BusinessValidationException("targetCompanyProfileId is required for PARTNER_CONTRACT_COLLECTION");
-                }
+                task.setTargetCompanyProfileId(profile.getCompanyId());
             }
 
             if (request.getAssignedToUserId() != null) {
@@ -232,6 +246,7 @@ public class ProjectTaskService {
                     Account newAssignedTo = accountRepository.findById(request.getAssignedToUserId())
                             .orElseThrow(() -> new ResourceNotFoundException("Assigned account not found"));
                     task.setAssignedToAccount(newAssignedTo);
+                    newlyAssignedTo = newAssignedTo;
                     auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_ASSIGNED, "ProjectTask", String.valueOf(task.getId()), "Task reassigned to user: " + newAssignedTo.getId());
                 }
             }
@@ -243,17 +258,56 @@ public class ProjectTaskService {
         if (statusChanged) {
             auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_STATUS_CHANGED, "ProjectTask", String.valueOf(task.getId()), "Task status changed to " + task.getStatus());
         }
+        if (newlyAssignedTo != null) {
+            Account sender = accountRepository.findById(currentUser.getId()).orElse(null);
+            notificationService.notifyTaskAssigned(task, newlyAssignedTo, sender);
+        }
 
         return toResponse(task);
     }
 
-    @Transactional(readOnly = true)
+    private void validateTaskDueDateWithinProject(LocalDateTime dueDate, Project project) {
+        if (dueDate == null || project == null || project.getPlannedEndDate() == null) {
+            return;
+        }
+        if (dueDate.toLocalDate().isAfter(project.getPlannedEndDate())) {
+            throw new BusinessValidationException(
+                    "Task due date cannot be later than the project's planned end date ("
+                            + project.getPlannedEndDate().format(PROJECT_END_DATE_FORMATTER)
+                            + ").");
+        }
+    }
+
+    @Transactional
+    public void deleteTask(Long projectId, Long taskId) {
+        ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
+
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new IllegalArgumentException("Task does not belong to the specified project");
+        }
+
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) {
+            throw new AccessDeniedException("Unauthorized");
+        }
+
+        List<ProjectTaskSubmission> submissions = submissionRepository.findByProjectTask_Id(taskId);
+        if (!submissions.isEmpty()) {
+            submissionRepository.deleteAll(submissions);
+        }
+
+        projectTaskRepository.delete(task);
+        auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_UPDATED, "ProjectTask", String.valueOf(taskId), "Task deleted");
+    }
+
+    @Transactional
     public ProjectTaskWorkbenchResponse getTaskWorkbench(Long projectId, Long taskId) {
         ProjectTask task = projectTaskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
 
         if (!task.getProject().getId().equals(projectId)) {
-            throw new com.apms.common.exception.BusinessValidationException("Task does not belong to the specified project");
+            throw new IllegalArgumentException("Task does not belong to the specified project");
         }
 
         UserDetailsImpl currentUser = getCurrentUser();
@@ -263,6 +317,9 @@ public class ProjectTaskService {
 
         Project project = task.getProject();
         TaskType tType = task.getTaskType() != null ? task.getTaskType() : TaskType.GENERAL_TASK;
+        if (tType == TaskType.ROLE_EVALUATION) {
+            syncSubmittedRoleEvaluationState(projectId, task, currentUser);
+        }
 
         // 1. Evaluate actions
         List<TaskAction> actions = evaluateAvailableActions(currentUser, task, project, tType);
@@ -271,6 +328,8 @@ public class ProjectTaskService {
         List<ImportJobResponse> rawDocuments;
         if (tType == TaskType.COMPANY_DATA_PREPARATION) {
             rawDocuments = documentService.getTaskImportJobs(projectId, taskId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
+        } else if (tType == TaskType.PARTNER_CONTRACT_COLLECTION) {
+            rawDocuments = documentService.getPartnerContractTaskDocuments(projectId, taskId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
         } else {
             rawDocuments = documentService.getProjectImportJobs(projectId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
         }
@@ -340,6 +399,8 @@ public class ProjectTaskService {
                         .findFirst().orElse(null);
                 return CandidateDraftSummary.builder()
                         .candidateId(c.getId())
+                        .candidateName(candidateDisplayName(c))
+                        .candidateIndustry(candidateIndustry(c))
                         .status(c.getStatus())
                         .taskId(c.getTaskId())
                         .extractionIds(c.getExtractionIds())
@@ -406,7 +467,9 @@ public class ProjectTaskService {
                 .projectType(project.getProjectType())
                 .projectStatus(project.getStatus())
                 .targetCompanyName(project.getTargetCompanyName())
-                .targetCompanyProfileId(project.getTargetCompanyProfileId())
+                .targetCompanyProfileId(org.springframework.util.StringUtils.hasText(task.getTargetCompanyProfileId())
+                        ? task.getTargetCompanyProfileId()
+                        : project.getTargetCompanyProfileId())
                 .targetRelationshipType(project.getTargetRelationshipType())
                 .availableActions(actions)
                 .documents(documents)
@@ -414,6 +477,87 @@ public class ProjectTaskService {
                 .profileUpdateProposalDrafts(proposalSummaries)
                 .submissions(submissions)
                 .build();
+    }
+
+    private void syncSubmittedRoleEvaluationState(Long projectId, ProjectTask task, UserDetailsImpl currentUser) {
+        List<RoleEvaluationDraft> reviewDrafts = roleEvaluationDraftRepository
+                .findByProjectIdAndTaskIdOrderByCreatedAtDesc(projectId, task.getId())
+                .stream()
+                .filter(draft -> draft.getStatus() == RoleEvaluationStatus.IN_REVIEW || draft.getStatus() == RoleEvaluationStatus.APPROVED)
+                .toList();
+        if (reviewDrafts.isEmpty()) {
+            return;
+        }
+
+        Account submittedBy = task.getAssignedToAccount();
+        if (submittedBy == null) {
+            submittedBy = accountRepository.findById(currentUser.getId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
+        }
+
+        List<ProjectTaskSubmission> submissions = submissionRepository.findByProjectTask_Id(task.getId());
+        boolean hasApprovedDraft = reviewDrafts.stream().anyMatch(draft -> draft.getStatus() == RoleEvaluationStatus.APPROVED);
+        for (RoleEvaluationDraft draft : reviewDrafts) {
+            Account submissionAccount = submittedBy;
+            if (draft.getSubmittedByAccountId() != null) {
+                submissionAccount = accountRepository.findById(draft.getSubmittedByAccountId()).orElse(submittedBy);
+            }
+            Account finalSubmissionAccount = submissionAccount;
+
+            ProjectTaskSubmission submission = submissions.stream()
+                    .filter(item -> "ROLE_EVALUATION_DRAFT".equals(item.getTargetEntityType())
+                            && draft.getId().equals(item.getTargetEntityId()))
+                    .findFirst()
+                    .orElseGet(() -> ProjectTaskSubmission.builder()
+                            .project(task.getProject())
+                            .projectTask(task)
+                            .submissionType(SubmissionType.ROLE_EVALUATION)
+                            .targetEntityType("ROLE_EVALUATION_DRAFT")
+                            .targetEntityId(draft.getId())
+                            .submittedByAccount(finalSubmissionAccount)
+                            .build());
+            submission.setStatus(draft.getStatus() == RoleEvaluationStatus.APPROVED ? SubmissionStatus.APPROVED : SubmissionStatus.IN_REVIEW);
+            submission.setSubmittedByAccount(submissionAccount);
+            submission.setSubmittedAt(draft.getSubmittedAt() != null ? draft.getSubmittedAt() : LocalDateTime.now());
+            submissionRepository.save(submission);
+        }
+
+        TaskStatus targetStatus = hasApprovedDraft ? TaskStatus.DONE : TaskStatus.IN_REVIEW;
+        if (task.getStatus() != targetStatus) {
+            task.setStatus(targetStatus);
+            task.setCompletedAt(hasApprovedDraft ? LocalDateTime.now() : null);
+            projectTaskRepository.save(task);
+        }
+    }
+
+    private String candidateDisplayName(CompanyCandidate candidate) {
+        if (candidate.getIdentity() == null) {
+            return "Candidate " + candidate.getId().substring(Math.max(0, candidate.getId().length() - 8));
+        }
+        if (candidate.getIdentity().getTradeName() != null && !candidate.getIdentity().getTradeName().isBlank()) {
+            return candidate.getIdentity().getTradeName();
+        }
+        if (candidate.getIdentity().getLegalName() != null && !candidate.getIdentity().getLegalName().isBlank()) {
+            return candidate.getIdentity().getLegalName();
+        }
+        return "Candidate " + candidate.getId().substring(Math.max(0, candidate.getId().length() - 8));
+    }
+
+    private int candidateDraftStatusRank(CandidateStatus status) {
+        if (status == CandidateStatus.DRAFT) return 0;
+        if (status == CandidateStatus.PENDING_REVIEW) return 1;
+        if (status == CandidateStatus.REJECTED) return 2;
+        if (status == CandidateStatus.APPROVED) return 3;
+        return 4;
+    }
+
+    private String candidateIndustry(CompanyCandidate candidate) {
+        if (candidate.getBusiness() == null
+                || candidate.getBusiness().getIndustries() == null
+                || candidate.getBusiness().getIndustries().isEmpty()) {
+            return null;
+        }
+        return String.join(", ", candidate.getBusiness().getIndustries());
     }
 
     private List<TaskAction> evaluateAvailableActions(UserDetailsImpl user, ProjectTask task, Project project, TaskType taskType) {
@@ -450,11 +594,7 @@ public class ProjectTaskService {
                 } else if (taskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
                     actions.add(TaskAction.VIEW_DOCUMENTS);
                     actions.add(TaskAction.UPLOAD_DOCUMENT);
-                    actions.add(TaskAction.RUN_AI_EXTRACTION);
-                    actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
-                    actions.add(TaskAction.EDIT_EXTRACTION_RESULT);
-                    actions.add(TaskAction.REVIEW_EXTRACTION_RESULT);
-                    actions.add(TaskAction.SUBMIT_SELECTED_DRAFT);
+                    actions.add(TaskAction.SUBMIT_WORK);
                 } else if (taskType == TaskType.COMPANY_NEWS_RESEARCH) {
                     actions.add(TaskAction.CREATE_NEWS_DRAFT);
                     actions.add(TaskAction.VIEW_NEWS_DRAFTS);
@@ -481,9 +621,6 @@ public class ProjectTaskService {
                 } else if (project.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY) {
                     actions.add(TaskAction.VIEW_PROFILE_UPDATE_PROPOSAL_DRAFTS);
                 }
-            } else if (taskType == TaskType.PARTNER_CONTRACT_COLLECTION) {
-                actions.add(TaskAction.VIEW_EXTRACTION_RESULT);
-                actions.add(TaskAction.REVIEW_EXTRACTION_RESULT);
             } else if (taskType == TaskType.COMPANY_NEWS_RESEARCH) {
                 actions.add(TaskAction.VIEW_NEWS_DRAFTS);
             }
@@ -522,7 +659,9 @@ public class ProjectTaskService {
                 .updatedAt(task.getUpdatedAt())
                 .completedAt(task.getCompletedAt())
                 .taskType(task.getTaskType() != null ? task.getTaskType() : TaskType.GENERAL_TASK)
-                .targetCompanyProfileId(task.getTargetCompanyProfileId())
+                .targetCompanyProfileId(org.springframework.util.StringUtils.hasText(task.getTargetCompanyProfileId())
+                        ? task.getTargetCompanyProfileId()
+                        : task.getProject().getTargetCompanyProfileId())
                 .build();
     }
 

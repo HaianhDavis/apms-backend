@@ -4,6 +4,7 @@ import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.CompanyProfileVersion;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -13,6 +14,7 @@ public class CompanyProfileIdentifierResolver {
 
     private final CompanyProfileRepository companyProfileRepository;
     private final CompanyProfileVersionRepository companyProfileVersionRepository;
+    private final ObjectMapper objectMapper;
 
     /**
      * Resolves the stable companyId (UUID) to the actual CompanyProfile.
@@ -36,7 +38,30 @@ public class CompanyProfileIdentifierResolver {
      * Resolves the profile version using the MongoDB _id (which is expected by the version repository).
      */
     public CompanyProfileVersion resolveVersion(String profileDocumentId, Integer version) {
-        return companyProfileVersionRepository.findByCompanyProfileIdAndVersion(profileDocumentId, version)
+        Integer resolvedVersion = version != null ? version : 1;
+        return companyProfileVersionRepository.findByCompanyProfileIdAndVersion(profileDocumentId, resolvedVersion)
+                .orElseGet(() -> createMissingVersionSnapshot(profileDocumentId, resolvedVersion));
+    }
+
+    private CompanyProfileVersion createMissingVersionSnapshot(String profileDocumentId, Integer version) {
+        CompanyProfile profile = companyProfileRepository.findById(profileDocumentId)
                 .orElseThrow(() -> new IllegalArgumentException("Profile version not found: " + profileDocumentId + " v" + version));
+
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> snapshotMap = objectMapper.convertValue(profile, java.util.Map.class);
+
+        CompanyProfileVersion snapshot = CompanyProfileVersion.builder()
+                .companyProfileId(profile.getId())
+                .companyId(profile.getCompanyId())
+                .version(version)
+                .snapshot(snapshotMap)
+                .sourceDocumentIds(profile.getSourceRefs() != null && profile.getSourceRefs().getRawDocumentIds() != null
+                        ? new java.util.ArrayList<>(profile.getSourceRefs().getRawDocumentIds())
+                        : java.util.List.of())
+                .changeSummary("Backfilled profile version snapshot for role evaluation.")
+                .createdBy(null)
+                .build();
+
+        return companyProfileVersionRepository.save(snapshot);
     }
 }

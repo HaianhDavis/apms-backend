@@ -24,8 +24,7 @@ import org.springframework.context.annotation.FilterType;
         "com.apms.domain.contract.repository.mongo",
         "com.apms.domain.chat.repository",
         "com.apms.domain.companymember.repository",
-        "com.apms.domain.news.repository",
-        "com.apms.domain.listingdata.repository.mongo"
+        "com.apms.domain.news.repository"
     },
     includeFilters = @Filter(type = FilterType.ASSIGNABLE_TYPE, classes = MongoRepository.class)
 )

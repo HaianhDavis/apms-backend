@@ -69,6 +69,8 @@ public class PotentialPartnerEvaluationApprovedEventProcessor implements RoleEva
         calcRequest.setApprovalIdempotencyKey(event.getId());
         calcRequest.setApprovedRoleEvaluationVersionId(version.getId());
         calcRequest.setApprovedRoleEvaluationVersionNumber(version.getVersionNumber());
+        calcRequest.setEvaluatorRole(version.getEvaluatorRole());
+        calcRequest.setAuthoritative(version.getAuthoritative());
 
         Map<String, BigDecimal> scores = new HashMap<>();
         Map<String, java.util.List<String>> evidenceMap = new HashMap<>();

@@ -13,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.UUID;
-import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -34,9 +33,14 @@ public class RefreshTokenService {
         Account account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
 
-        // Keep separate sessions per device/tab. Replacing one account-wide
-        // row caused an older browser tab to invalidate the active profile/chat session.
-        RefreshToken refreshToken = RefreshToken.builder().account(account).build();
+        if (!Boolean.TRUE.equals(account.getIsActive()) || !Boolean.TRUE.equals(account.getEmailVerified())) {
+            throw new BusinessValidationException("Account is not eligible for token refresh");
+        }
+
+        RefreshToken refreshToken = refreshTokenRepository.findByAccount(account)
+                .orElse(RefreshToken.builder()
+                        .account(account)
+                        .build());
 
         refreshToken.setTokenHash(hashedToken);
         refreshToken.setExpiryDate(Instant.now().plusMillis(refreshTokenDurationMs));
@@ -62,19 +66,36 @@ public class RefreshTokenService {
         Account account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new BusinessValidationException("Account not found for token"));
 
-        List<RefreshToken> tokens = refreshTokenRepository.findAllByAccount(account);
-        return tokens.stream()
-                .filter(token -> !token.isRevoked())
-                .filter(token -> token.getExpiryDate().compareTo(Instant.now()) >= 0)
-                .filter(token -> passwordEncoder.matches(rawToken, token.getTokenHash()))
-                .findFirst()
-                .orElseThrow(() -> new BusinessValidationException("Refresh token mismatch or expired. Please sign in again"));
+        if (!Boolean.TRUE.equals(account.getIsActive()) || !Boolean.TRUE.equals(account.getEmailVerified())) {
+            throw new BusinessValidationException("Account is not eligible for token refresh");
+        }
+
+        RefreshToken token = refreshTokenRepository.findByAccount(account)
+                .orElseThrow(() -> new BusinessValidationException("Refresh token not found"));
+
+        if (token.isRevoked()) {
+            throw new BusinessValidationException("Refresh token is revoked");
+        }
+
+        if (!passwordEncoder.matches(rawToken, token.getTokenHash())) {
+            throw new BusinessValidationException("Refresh token mismatch");
+        }
+
+        if (token.getExpiryDate().compareTo(Instant.now()) < 0) {
+            refreshTokenRepository.delete(token);
+            throw new BusinessValidationException("Refresh token was expired. Please make a new login request");
+        }
+
+        return token;
     }
 
     @Transactional
     public void revokeToken(Long accountId) {
         Account account = accountRepository.findById(accountId).orElseThrow();
-        refreshTokenRepository.findAllByAccount(account).forEach(token -> token.setRevoked(true));
-        refreshTokenRepository.flush();
+        refreshTokenRepository.findByAccount(account)
+                .ifPresent(token -> {
+                    token.setRevoked(true);
+                    refreshTokenRepository.save(token);
+                });
     }
 }

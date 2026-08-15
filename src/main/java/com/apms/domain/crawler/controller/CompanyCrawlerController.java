@@ -26,7 +26,7 @@ public class CompanyCrawlerController {
     private final CompanyCrawlerService companyCrawlerService;
 
     @GetMapping("/companies/{companyId}/articles")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN','BUSINESS_OWNER','BUSINESS_DEVELOPMENT_MANAGER','BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN','BUSINESS_OWNER','BUSINESS_DEVELOPMENT_MANAGER','BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyId)")
     public ResponseEntity<ApiResponse<PageResponse<ExternalDataItemResponse>>> getCompanyArticles(
             @PathVariable String companyId,
             @RequestParam(defaultValue = "0") int page,
@@ -40,7 +40,7 @@ public class CompanyCrawlerController {
     }
 
     @GetMapping("/company-profiles/{companyId}/news")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN','BUSINESS_OWNER','BUSINESS_DEVELOPMENT_MANAGER','BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN','BUSINESS_OWNER','BUSINESS_DEVELOPMENT_MANAGER','BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyId)")
     public ResponseEntity<ApiResponse<PageResponse<ExternalDataItemResponse>>> getCompanyProfileNews(
             @PathVariable String companyId,
             @RequestParam(defaultValue = "0") int page,
@@ -50,7 +50,7 @@ public class CompanyCrawlerController {
     }
 
     @PostMapping("/crawler/companies/{companyId}/trigger")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN','BUSINESS_DEVELOPMENT_MANAGER','BUSINESS_OWNER','BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN','BUSINESS_DEVELOPMENT_MANAGER','BUSINESS_OWNER','BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyId)")
     public ResponseEntity<Map<String, Object>> triggerCompanyCrawl(@PathVariable String companyId) {
         log.info("Triggering crawler specifically for companyId: {}", companyId);
         boolean started = companyCrawlerService.triggerCompanyCrawl(companyId);
@@ -71,7 +71,7 @@ public class CompanyCrawlerController {
     }
 
     @GetMapping("/crawler/companies/{companyId}/status")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN','BUSINESS_DEVELOPMENT_MANAGER','BUSINESS_OWNER','BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN','BUSINESS_DEVELOPMENT_MANAGER','BUSINESS_OWNER','BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyId)")
     public ResponseEntity<Map<String, Object>> getCompanyCrawlStatus(@PathVariable String companyId) {
         String status = companyCrawlerService.getCrawlStatus(companyId);
         return ResponseEntity.ok(Map.of(

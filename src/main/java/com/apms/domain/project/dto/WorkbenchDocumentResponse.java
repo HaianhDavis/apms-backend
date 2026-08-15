@@ -26,7 +26,7 @@ public class WorkbenchDocumentResponse extends ImportJobResponse {
                                      String latestExtractionId, ExtractionQualityStatus extractionQualityStatus,
                                      Double evidenceCoverageRate, Double completenessRate,
                                      Integer warningFields, Integer failedFields, boolean canGenerateDraft) {
-        super(id, projectId, rawDocumentId, inputType, sourceType, fileName, status, uploadedBy, startedAt, completedAt, errorMessage, createdAt);
+        super(id, projectId, rawDocumentId, inputType, sourceType, fileName, status, uploadedBy, null, null, null, null, null, startedAt, completedAt, errorMessage, createdAt);
         this.latestExtractionId = latestExtractionId;
         this.extractionQualityStatus = extractionQualityStatus;
         this.evidenceCoverageRate = evidenceCoverageRate;

@@ -9,11 +9,11 @@ import java.time.LocalDateTime;
 @Builder
 public class AuditLogResponse {
     private Long id;
-    private Long actorUserId;
+    private Long actorAccountId;
     private String actorEmail;
     private String action;
     private String entityType;
     private String entityId;
-    private String details;
-    private LocalDateTime createdAt;
+    private String detail;
+    private LocalDateTime timestamp;
 }

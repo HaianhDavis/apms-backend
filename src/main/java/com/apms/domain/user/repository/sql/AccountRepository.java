@@ -8,11 +8,9 @@ import java.util.Optional;
 
 public interface AccountRepository extends JpaRepository<Account, Long> {
     Optional<Account> findByEmail(String email);
+    Optional<Account> findByEmailIgnoreCase(String email);
+    List<Account> findTop10ByEmailContainingIgnoreCaseAndIsActiveTrue(String email);
     boolean existsByEmail(String email);
 
-    /** Returns only non-deleted accounts. */
-    List<Account> findAllByDeletedAtIsNull();
-
-    /** Find active (non-deleted, non-locked) accounts. */
-    List<Account> findAllByDeletedAtIsNullAndIsActiveTrue();
+    List<Account> findByEmailVerifiedFalse();
 }

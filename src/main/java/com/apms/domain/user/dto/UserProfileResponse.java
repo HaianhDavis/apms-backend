@@ -15,5 +15,6 @@ public class UserProfileResponse {
     private String fullName;
     private Set<SystemRole> roles;
     private Boolean enabled;
+    private Boolean emailVerified;
     private LocalDateTime createdAt;
 }

@@ -30,10 +30,12 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
-    @GetMapping("/users")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
-    public ResponseEntity<ApiResponse<List<UserProfileResponse>>> getAllUsers() {
-        return ResponseEntity.ok(ApiResponse.success(userService.getAllUsers()));
+    @GetMapping("/users/search")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<List<UserProfileResponse>>> searchUsers(
+            @RequestParam(required = false) String email) {
+
+        return ResponseEntity.ok(ApiResponse.success(userService.searchActiveUsersByEmail(email)));
     }
 
     @PostMapping("/users")
@@ -47,6 +49,12 @@ public class UserController {
                 .body(ApiResponse.success(response, "User created successfully"));
     }
 
+    @GetMapping("/users")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<List<UserProfileResponse>>> listUsers() {
+        return ResponseEntity.ok(ApiResponse.success(userService.listUsers()));
+    }
+
     @PatchMapping("/users/{userId}")
     @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateUser(
@@ -56,22 +64,6 @@ public class UserController {
 
         UserProfileResponse response = userService.updateUser(userId, request, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(response, "User updated successfully"));
-    }
-
-    /**
-     * Admin password reset. Accepts only newPassword (BCrypt hashed server-side).
-     * Password is NEVER returned in response and NEVER logged in audit detail.
-     * Only SYSTEM_ADMIN can call this endpoint.
-     */
-    @PatchMapping("/users/{userId}/password")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
-    public ResponseEntity<ApiResponse<Void>> resetUserPassword(
-            @PathVariable Long userId,
-            @Valid @RequestBody ResetPasswordRequest request,
-            @AuthenticationPrincipal UserDetailsImpl currentUser) {
-
-        userService.resetUserPassword(userId, request.getNewPassword(), currentUser.getId());
-        return ResponseEntity.ok(ApiResponse.success(null, "Password reset successfully"));
     }
 
     @PatchMapping("/users/{userId}/status")
@@ -85,18 +77,15 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(null, "User status updated"));
     }
 
-    /**
-     * Soft delete a user. Sets deletedAt timestamp and deactivates the account.
-     * Cannot delete own account or the last SYSTEM_ADMIN.
-     */
-    @DeleteMapping("/users/{userId}")
+    @PatchMapping("/users/{userId}/password")
     @PreAuthorize("hasRole('SYSTEM_ADMIN')")
-    public ResponseEntity<ApiResponse<Void>> deleteUser(
+    public ResponseEntity<ApiResponse<Void>> resetPassword(
             @PathVariable Long userId,
+            @Valid @RequestBody ResetPasswordRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
-        userService.softDeleteUser(userId, currentUser.getId());
-        return ResponseEntity.ok(ApiResponse.success(null, "User deleted successfully"));
+        userService.resetPassword(userId, request, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(null, "Password reset"));
     }
 
     @GetMapping("/roles")

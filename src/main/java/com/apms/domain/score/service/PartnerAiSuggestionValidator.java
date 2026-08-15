@@ -2,7 +2,6 @@ package com.apms.domain.score.service;
 
 import com.apms.common.exception.BusinessValidationException;
 import com.apms.domain.ai.dto.PartnerCriterionSuggestionResponse;
-import com.apms.domain.score.draft.ApprovedSourceReference;
 import com.apms.domain.score.registry.CanonicalRoleCriteria;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -23,16 +22,16 @@ public class PartnerAiSuggestionValidator {
     private final ObjectMapper objectMapper;
 
     private static final Set<String> ALLOWED_FIELDS = Set.of(
-            "criterionKey", "rationale", "missingDataNotes", "confidence", "evidenceReferenceIds"
+            "criterionKey", "suggestedRawScore", "rationale", "missingDataNotes", "confidence", "evidenceReferenceIds"
     );
 
     private static final Set<String> FORBIDDEN_FIELDS = Set.of(
-            "score", "rawScore", "suggestedRawScore", "criterionScore", "componentScores",
+            "score", "rawScore", "criterionScore", "componentScores",
             "normalizedScore", "weightedScore", "weight", "weights", "ahpWeight",
             "overallScore", "companyRole", "relationshipType", "calculationDetails"
     );
 
-    public PartnerCriterionSuggestionResponse validateAndMap(String jsonResponse, String requestedCriterionKey, List<ApprovedSourceReference> pinnedReferences) {
+    public PartnerCriterionSuggestionResponse validateAndMap(String jsonResponse, String requestedCriterionKey, Set<String> allowedEvidenceReferenceIds) {
         try {
             JsonNode root = objectMapper.readTree(jsonResponse);
 
@@ -50,19 +49,27 @@ public class PartnerAiSuggestionValidator {
                 throw new BusinessValidationException("Criterion is not a canonical PARTNER criterion");
             }
 
-            // 4. Validate confidence
+            // 4. Validate suggested score
+            if (response.getSuggestedRawScore() != null) {
+                if (response.getSuggestedRawScore().compareTo(BigDecimal.ZERO) < 0 ||
+                    response.getSuggestedRawScore().compareTo(new BigDecimal("100")) > 0) {
+                    throw new BusinessValidationException("suggestedRawScore must be between 0 and 100");
+                }
+            }
+
+            // 5. Validate confidence
             if (response.getConfidence() != null) {
                 if (response.getConfidence().compareTo(BigDecimal.ZERO) < 0 || response.getConfidence().compareTo(BigDecimal.ONE) > 0) {
                     throw new BusinessValidationException("Confidence must be between 0 and 1");
                 }
             }
 
-            // 5. Validate rationale
+            // 6. Validate rationale
             if (response.getRationale() == null || response.getRationale().trim().isEmpty()) {
                 throw new BusinessValidationException("Rationale must be non-blank");
             }
 
-            // 6. Validate evidenceReferenceIds
+            // 7. Validate evidenceReferenceIds
             List<String> evidenceIds = response.getEvidenceReferenceIds();
             if (evidenceIds != null && !evidenceIds.isEmpty()) {
                 Set<String> uniqueIds = new HashSet<>(evidenceIds);
@@ -70,24 +77,11 @@ public class PartnerAiSuggestionValidator {
                     throw new BusinessValidationException("evidenceReferenceIds contains duplicates");
                 }
 
-                Set<String> validIds = new HashSet<>();
-                for (ApprovedSourceReference ref : pinnedReferences) {
-                    validIds.add(ref.getReferenceId());
-                }
+                Set<String> validIds = allowedEvidenceReferenceIds != null ? allowedEvidenceReferenceIds : Set.of();
 
                 for (String id : evidenceIds) {
                     if (!validIds.contains(id)) {
-                        throw new BusinessValidationException("evidenceReferenceId " + id + " does not belong to the pinned source set");
-                    }
-
-                    // Further criterion association validation
-                    ApprovedSourceReference matchingRef = pinnedReferences.stream()
-                            .filter(r -> r.getReferenceId().equals(id))
-                            .findFirst().orElseThrow();
-
-                    if (matchingRef.getCriterionKey() != null && !matchingRef.getCriterionKey().equals(requestedCriterionKey)) {
-                        // Assuming globally shared if criterionKey is null
-                        throw new BusinessValidationException("evidenceReferenceId " + id + " is associated with a different criterion");
+                        throw new BusinessValidationException("evidenceReferenceId " + id + " does not belong to the selected evidence set");
                     }
                 }
             }

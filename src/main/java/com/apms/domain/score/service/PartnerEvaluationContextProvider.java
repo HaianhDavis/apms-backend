@@ -6,6 +6,9 @@ import com.apms.domain.contract.entity.PartnerContractVersion;
 import com.apms.domain.contract.entity.PartnerContractClauseVersion;
 import com.apms.domain.contract.repository.sql.PartnerContractClauseVersionRepository;
 import com.apms.domain.contract.repository.sql.PartnerContractVersionRepository;
+import com.apms.domain.document.RawDocument;
+import com.apms.domain.document.repository.mongo.RawDocumentRepository;
+import com.apms.domain.document.service.DocumentTextExtractionService;
 import com.apms.domain.profile.CompanyProfileVersion;
 import com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository;
 import com.apms.domain.rolemetric.entity.RoleMetricEvidenceVersion;
@@ -13,6 +16,7 @@ import com.apms.domain.rolemetric.entity.RoleMetricRecordVersion;
 import com.apms.domain.rolemetric.repository.RoleMetricEvidenceVersionRepository;
 import com.apms.domain.rolemetric.repository.RoleMetricRecordVersionRepository;
 import com.apms.domain.score.draft.ApprovedSourceReference;
+import com.apms.domain.score.draft.EvidenceRecord;
 import com.apms.domain.score.draft.RoleEvaluationDraft;
 import com.apms.domain.score.dto.draft.PartnerCriterionContext;
 import com.apms.domain.score.enums.ApprovedSourceType;
@@ -41,11 +45,18 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
     private final RoleMetricEvidenceVersionRepository metricEvidenceVersionRepository;
     private final PartnerContractVersionRepository contractVersionRepository;
     private final PartnerContractClauseVersionRepository clauseVersionRepository;
+    private final RawDocumentRepository rawDocumentRepository;
+    private final DocumentTextExtractionService documentTextExtractionService;
     private final ObjectMapper objectMapper;
 
     public PartnerCriterionContext buildContext(RoleEvaluationDraft draft, String criterionKey) {
-        if (draft.getPinnedSourceReferences() == null || draft.getPinnedSourceReferences().isEmpty()) {
-            throw new BusinessValidationException("Draft has no pinned source references");
+        boolean hasPinnedSources = draft.getPinnedSourceReferences() != null && !draft.getPinnedSourceReferences().isEmpty();
+        boolean hasSelectedEvidence = draft.getCriterionEvidence() != null
+                && draft.getCriterionEvidence().getOrDefault(criterionKey, List.of()).stream()
+                .anyMatch(evidence -> evidence.getRawDocumentId() != null && !evidence.getRawDocumentId().isBlank());
+
+        if (!hasPinnedSources && !hasSelectedEvidence) {
+            throw new BusinessValidationException("Draft has no selected evidence");
         }
 
         // We check project and target company against draft itself implicitly,
@@ -58,7 +69,7 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
 
         List<Map<String, Object>> pinnedSources = new ArrayList<>();
 
-        for (ApprovedSourceReference ref : draft.getPinnedSourceReferences()) {
+        for (ApprovedSourceReference ref : draft.getPinnedSourceReferences() != null ? draft.getPinnedSourceReferences() : List.<ApprovedSourceReference>of()) {
             if (ref.getCriterionKey() != null && !ref.getCriterionKey().equals(criterionKey)) {
                 continue; // skip if it's strictly for another criterion, unless it's global
             }
@@ -103,6 +114,15 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
                 }
 
                 pinnedSources.add(sourceData);
+        }
+
+        for (EvidenceRecord evidence : draft.getCriterionEvidence() != null
+                ? draft.getCriterionEvidence().getOrDefault(criterionKey, List.of())
+                : List.<EvidenceRecord>of()) {
+            Map<String, Object> evidenceData = loadSelectedEvidence(evidence);
+            if (!evidenceData.isEmpty()) {
+                pinnedSources.add(evidenceData);
+            }
         }
 
         return PartnerCriterionContext.builder()
@@ -170,6 +190,43 @@ public class PartnerEvaluationContextProvider implements RoleEvaluationContextPr
 
 
         return data;
+    }
+
+    private Map<String, Object> loadSelectedEvidence(EvidenceRecord evidence) {
+        Map<String, Object> data = new HashMap<>();
+        if (evidence == null || evidence.getRawDocumentId() == null || evidence.getRawDocumentId().isBlank()) {
+            return data;
+        }
+
+        RawDocument rawDocument = rawDocumentRepository.findById(evidence.getRawDocumentId())
+                .orElseThrow(() -> new BusinessValidationException("Evidence document not found: " + evidence.getRawDocumentId()));
+
+        data.put("referenceId", evidence.getEvidenceId());
+        data.put("sourceType", "PROJECT_DOCUMENT");
+        data.put("rawDocumentId", rawDocument.getId());
+        if (rawDocument.getSource() != null) {
+            data.put("fileName", rawDocument.getSource().getFileName());
+            data.put("documentType", rawDocument.getSource().getType());
+            data.put("originalUrl", rawDocument.getSource().getOriginalUrl());
+            data.put("text", trimForAi(documentTextExtractionService.extractText(rawDocument), 12000));
+        }
+        if (rawDocument.getStorage() != null) {
+            data.put("mimeType", rawDocument.getStorage().getMimeType());
+            data.put("sizeBytes", rawDocument.getStorage().getSizeBytes());
+        }
+        data.put("note", evidence.getNote());
+        data.put("evidenceCategory", evidence.getEvidenceCategory());
+        return data;
+    }
+
+    private String trimForAi(String value, int maxLength) {
+        if (value == null) {
+            return "";
+        }
+        if (value.length() <= maxLength) {
+            return value;
+        }
+        return value.substring(0, maxLength) + "...";
     }
 
     private void verifyHash(Object entityData, String expectedHash) {

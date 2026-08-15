@@ -72,8 +72,7 @@ public class DashboardService {
         List<RecentActivityDto> recentActivities = buildRecentActivities(ecosystemBusinessIds, targetProfiles);
 
         return DashboardSummaryDto.builder()
-                .totalCompanyProfiles(profileRepository.countProjectScopedProfilesExcludingCompany(
-                        ownerOrganizationService.getOwnerCompanyProfileId()))
+                .totalCompanyProfiles(profileRepository.count())
                 .totalProjects(projectRepository.count())
                 .totalCandidates(candidateRepository.count())
                 .approvedCandidates(candidateRepository.countByStatus(CandidateStatus.APPROVED))

@@ -4,6 +4,7 @@ import com.apms.common.response.ApiResponse;
 import com.apms.common.response.PageResponse;
 import com.apms.domain.report.dto.CompanyReportItemResponse;
 import com.apms.domain.report.service.ReportService;
+import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -11,9 +12,11 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/v1/reports")
@@ -21,6 +24,7 @@ import java.time.LocalDateTime;
 public class ReportController {
 
     private final ReportService reportService;
+    private final com.apms.common.security.StaffCompanyScopeEvaluator companyScope;
 
     @GetMapping("/companies")
     @PreAuthorize("hasAnyRole('SYSTEM_ADMIN','BUSINESS_OWNER','BUSINESS_DEVELOPMENT_MANAGER','BUSINESS_DEVELOPMENT_STAFF')")
@@ -31,10 +35,12 @@ public class ReportController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
+        Set<String> allowedCompanyIds = companyScope.allowedCompanyIds();
         PageResponse<CompanyReportItemResponse> response = PageResponse.of(
-                reportService.getCompanyReports(relationshipType, companyProfileId, keyword, fromDate, toDate, PageRequest.of(page, size)));
+                reportService.getCompanyReports(relationshipType, companyProfileId, keyword, fromDate, toDate, allowedCompanyIds, PageRequest.of(page, size)));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

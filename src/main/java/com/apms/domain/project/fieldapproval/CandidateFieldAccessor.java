@@ -1,9 +1,11 @@
 package com.apms.domain.project.fieldapproval;
 
 import com.apms.domain.candidate.CompanyCandidate;
+import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiConsumer;
@@ -24,10 +26,6 @@ public class CandidateFieldAccessor {
         register("identity.taxCode", false, false, false,
                 c -> c.getIdentity() != null ? c.getIdentity().getTaxCode() : null,
                 (c, v) -> ensureIdentity(c).setTaxCode((String) v));
-        register("identity.registrationNumber", false, false, false,
-                c -> c.getIdentity() != null ? c.getIdentity().getRegistrationNumber() : null,
-                (c, v) -> ensureIdentity(c).setRegistrationNumber((String) v));
-
         // business
         register("business.industries", false, true, false,
                 c -> c.getBusiness() != null ? c.getBusiness().getIndustries() : null,
@@ -52,6 +50,9 @@ public class CandidateFieldAccessor {
         register("companySize.employeeCount", false, false, false,
                 c -> c.getCompanySize() != null ? c.getCompanySize().getEmployeeCount() : null,
                 (c, v) -> ensureCompanySize(c).setEmployeeCount((Integer) v));
+        register("companySize.revenueTier", false, false, false,
+                c -> c.getCompanySize() != null ? c.getCompanySize().getRevenueTier() : null,
+                (c, v) -> ensureCompanySize(c).setRevenueTier((String) v));
 
         // contact
         register("contact.website", false, false, false,
@@ -63,9 +64,21 @@ public class CandidateFieldAccessor {
         register("contact.phones", false, true, false,
                 c -> c.getContact() != null ? c.getContact().getPhones() : null,
                 (c, v) -> ensureContact(c).setPhones((List<String>) v));
-        register("contact.addresses", false, true, true,
-                c -> c.getContact() != null ? c.getContact().getAddresses() : null,
-                (c, v) -> ensureContact(c).setAddresses((List<CompanyCandidate.Address>) v));
+        register("contact.address", false, false, false,
+                c -> {
+                    if (c.getContact() == null || c.getContact().getAddresses() == null || c.getContact().getAddresses().isEmpty()) {
+                        return null;
+                    }
+                    return c.getContact().getAddresses().get(0).getFullAddress();
+                },
+                (c, v) -> {
+                    CompanyCandidate.Contact contact = ensureContact(c);
+                    CompanyCandidate.Address address = CompanyCandidate.Address.builder()
+                            .type("HEADQUARTERS")
+                            .fullAddress((String) v)
+                            .build();
+                    contact.setAddresses(StringUtils.hasText((String) v) ? java.util.List.of(address) : Collections.emptyList());
+                });
 
         // insights
         register("insights.strengths", false, true, false,
@@ -80,6 +93,23 @@ public class CandidateFieldAccessor {
         register("insights.threats", false, true, false,
                 c -> c.getInsights() != null ? c.getInsights().getThreats() : null,
                 (c, v) -> ensureInsights(c).setThreats((List<String>) v));
+
+        // analysis
+        register("financial", false, false, false,
+                CompanyCandidate::getFinancial,
+                (c, v) -> c.setFinancial((com.apms.domain.company.model.FinancialInfo) v));
+        register("innovation", false, false, false,
+                CompanyCandidate::getInnovation,
+                (c, v) -> c.setInnovation((com.apms.domain.company.model.InnovationInfo) v));
+        register("market", false, false, false,
+                CompanyCandidate::getMarket,
+                (c, v) -> c.setMarket((com.apms.domain.company.model.MarketInfo) v));
+        register("risk", false, false, false,
+                CompanyCandidate::getRisk,
+                (c, v) -> c.setRisk((com.apms.domain.company.model.RiskInfo) v));
+        register("compliance", false, false, false,
+                CompanyCandidate::getCompliance,
+                (c, v) -> c.setCompliance((com.apms.domain.company.model.ComplianceInfo) v));
     }
 
     private static void register(String path, boolean required, boolean collection, boolean ordered,

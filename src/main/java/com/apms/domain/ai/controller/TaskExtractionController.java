@@ -24,7 +24,7 @@ public class TaskExtractionController {
     private final TaskExtractionOrchestrator orchestrator;
 
     @PostMapping
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessProject(#projectId)")
     public ResponseEntity<ApiResponse<AiExtractionJobResponse>> extractMultipleDocuments(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
@@ -41,7 +41,7 @@ public class TaskExtractionController {
     }
 
     @GetMapping("/{jobId}")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessProject(#projectId)")
     public ResponseEntity<ApiResponse<AiExtractionJobResponse>> getExtractionJobStatus(
             @PathVariable Long projectId,
             @PathVariable Long taskId,

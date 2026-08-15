@@ -25,7 +25,9 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -45,6 +47,24 @@ public class ReportService {
             String keyword,
             LocalDateTime fromDate,
             LocalDateTime toDate,
+            Pageable pageable) {
+        return getCompanyReports(relationshipType, companyProfileId, keyword, fromDate, toDate, null, pageable);
+    }
+
+    /**
+     * Same as {@link #getCompanyReports(String, String, String, LocalDateTime, LocalDateTime, Pageable)}
+     * but restricted to the given companyIds for scoped callers (Staff).
+     *
+     * @param allowedCompanyIds the only companyIds the caller may see, or {@code null} for unrestricted access.
+     */
+    @Transactional(readOnly = true)
+    public Page<CompanyReportItemResponse> getCompanyReports(
+            String relationshipType,
+            String companyProfileId,
+            String keyword,
+            LocalDateTime fromDate,
+            LocalDateTime toDate,
+            Set<String> allowedCompanyIds,
             Pageable pageable) {
 
         Criteria criteria = Criteria.where("isDeleted").ne(true);
@@ -84,7 +104,18 @@ public class ReportService {
                 return Page.empty(pageable);
             }
 
-            criteria.and("companyId").in(neo4jCompanyIds);
+            if (allowedCompanyIds != null) {
+                Set<String> companyIdFilter = new LinkedHashSet<>(allowedCompanyIds);
+                companyIdFilter.retainAll(neo4jCompanyIds);
+                if (companyIdFilter.isEmpty()) {
+                    return Page.empty(pageable);
+                }
+                criteria.and("companyId").in(companyIdFilter);
+            } else {
+                criteria.and("companyId").in(neo4jCompanyIds);
+            }
+        } else if (allowedCompanyIds != null) {
+            criteria.and("companyId").in(allowedCompanyIds);
         }
 
         Query query = new Query(criteria);

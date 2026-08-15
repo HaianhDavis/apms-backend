@@ -3,6 +3,7 @@ package com.apms.domain.score.draft;
 import com.apms.domain.score.enums.EvaluationCompletenessStatus;
 import com.apms.domain.score.enums.RoleEvaluationStatus;
 import com.apms.domain.company.enums.CompanyRole;
+import com.apms.common.enums.SystemRole;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -58,6 +59,11 @@ public class RoleEvaluationVersion {
     private Long approvedByAccountId;
     private LocalDateTime approvedAt;
     private String reviewComment;
+
+    private SystemRole evaluatorRole;
+
+    @Builder.Default
+    private Boolean authoritative = false;
 
     @Builder.Default
     private Integer schemaVersion = 1;

@@ -6,6 +6,10 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
 public interface ProjectTaskRepository extends JpaRepository<ProjectTask, Long>, JpaSpecificationExecutor<ProjectTask> {
     int countByProjectIdAndStatusIn(Long projectId, java.util.Collection<com.apms.common.enums.TaskStatus> statuses);
+    java.util.List<ProjectTask> findByProjectIdAndTaskTypeAndTargetCompanyProfileIdIsNull(Long projectId, com.apms.common.enums.TaskType taskType);
+    boolean existsByProjectIdAndAssignedToAccountIdAndStatusNotIn(Long projectId, Long assignedToAccountId, java.util.Collection<com.apms.common.enums.TaskStatus> statuses);
+
+    void deleteByProjectId(Long projectId);
 
     public interface ProjectTaskStats {
         Long getProjectId();

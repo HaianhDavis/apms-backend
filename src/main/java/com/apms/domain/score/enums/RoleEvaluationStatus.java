@@ -6,6 +6,7 @@ public enum RoleEvaluationStatus {
     REVISION_REQUIRED,
     APPROVAL_PROCESSING,
     APPROVED,
+    FINAL,
     APPROVAL_FAILED,
     REJECTED
 }

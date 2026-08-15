@@ -4,6 +4,7 @@ import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.SubmissionStatus;
 import com.apms.common.enums.SystemRole;
 import com.apms.common.enums.TaskStatus;
+import com.apms.common.enums.TaskType;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
@@ -52,6 +53,7 @@ public class ProjectTaskSubmissionService {
     private final AuditLogService auditLogService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final List<ProjectTaskSubmissionApprovalHandler> approvalHandlers;
+    private final com.apms.domain.notification.service.NotificationService notificationService;
 
     @org.springframework.beans.factory.annotation.Autowired
     @org.springframework.context.annotation.Lazy
@@ -110,6 +112,8 @@ public class ProjectTaskSubmissionService {
         Account submitter = accountRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
 
+        LocalDateTime now = LocalDateTime.now();
+
         // 1. Ask the target entity to prepare its field approvals and return the submittedRevisionNumber
         Integer revision = null;
         if (StringUtils.hasText(request.getTargetEntityId())) {
@@ -135,7 +139,7 @@ public class ProjectTaskSubmissionService {
                 if (task.getStatus() != TaskStatus.IN_REVIEW) {
                     task.setStatus(TaskStatus.IN_REVIEW);
                     task.setCompletedAt(null);
-                    taskRepository.save(task);
+                    taskRepository.saveAndFlush(task);
                 }
                 return toResponse(existingSub.get());
             }
@@ -153,6 +157,7 @@ public class ProjectTaskSubmissionService {
                 .targetEntityId(request.getTargetEntityId())
                 .status(SubmissionStatus.IN_REVIEW)
                 .note(request.getNote())
+                .submittedAt(now)
                 .submittedRevisionNumber(revision)
                 .submittedAt(LocalDateTime.now())
                 .build();
@@ -174,7 +179,7 @@ public class ProjectTaskSubmissionService {
                 if (task.getStatus() != TaskStatus.IN_REVIEW) {
                     task.setStatus(TaskStatus.IN_REVIEW);
                     task.setCompletedAt(null);
-                    taskRepository.save(task);
+                    taskRepository.saveAndFlush(task);
                 }
                 return toResponse(existingSub.get());
             } else {
@@ -185,11 +190,16 @@ public class ProjectTaskSubmissionService {
         // Update task status
         task.setStatus(TaskStatus.IN_REVIEW);
         task.setCompletedAt(null);
-        taskRepository.save(task);
+        taskRepository.saveAndFlush(task);
 
         // Target entity is already updated by the delegated submit call above.
 
-        auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMITTED, "ProjectTask", String.valueOf(task.getId()), "Task submitted for review");
+        auditLogService.log(
+                currentUser.getId(),
+                AuditAction.PROJECT_TASK_SUBMITTED,
+                "ProjectTask",
+                String.valueOf(task.getId()),
+                "Task submitted for review");
 
         return toResponse(submission);
     }
@@ -250,6 +260,12 @@ public class ProjectTaskSubmissionService {
 
         LocalDateTime now = LocalDateTime.now();
         ProjectTask task = submission.getProjectTask();
+
+        if (request.getDecision() == com.apms.common.enums.ReviewDecision.REJECT
+                && isDocumentSubmission(submission)
+                && !StringUtils.hasText(request.getComment())) {
+            throw new com.apms.common.exception.BusinessValidationException("Reject reason is required for document submissions.");
+        }
 
         submission.setReviewedByAccount(reviewer);
         submission.setReviewedAt(now);
@@ -349,7 +365,14 @@ public class ProjectTaskSubmissionService {
                         proposalRepository.save(proposal);
 
                         auditLogService.log(currentUser.getId(), AuditAction.PROFILE_UPDATE_PROPOSAL_APPLIED, "CompanyProfileUpdateProposal", proposal.getId(), "Proposal applied and profile updated");
+
+                        log.info("Profile update proposal {} source documents remain as research/evidence only; they are not published to Company Profile documents.", proposal.getId());
                     }
+                } else if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyCandidate".equals(submission.getTargetEntityType())) {
+                    candidateService.approveCandidate(
+                            submission.getTargetEntityId(),
+                            new com.apms.domain.candidate.dto.ApproveCandidateRequest(),
+                            reviewer.getId());
                 } else if (submission.getSubmissionType() == com.apms.common.enums.SubmissionType.COMPANY_MEMBER_RESEARCH) {
                     companyMemberResearchService.handleApproval(submission, reviewer.getId(), request.getComment());
                 } else {
@@ -363,7 +386,7 @@ public class ProjectTaskSubmissionService {
                 break;
 
             case REJECT:
-                submission.setStatus(SubmissionStatus.REJECTED);
+                submission.setStatus(SubmissionStatus.CHANGES_REQUESTED);
                 task.setStatus(TaskStatus.IN_PROGRESS);
                 task.setCompletedAt(null);
                 auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMISSION_REJECTED, "ProjectTaskSubmission", String.valueOf(submissionId), "Submission rejected");
@@ -374,12 +397,19 @@ public class ProjectTaskSubmissionService {
                         proposal.setReviewComment(request.getComment());
                         proposalRepository.save(proposal);
                     });
+                } else if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyCandidate".equals(submission.getTargetEntityType())) {
+                    candidateService.sendBackCandidate(submission.getTargetEntityId(), reviewer.getId());
                 } else {
+                    boolean handled = false;
                     for (ProjectTaskSubmissionApprovalHandler handler : approvalHandlers) {
                         if (handler.supports(submission.getSubmissionType())) {
                             handler.handleRejection(submission, reviewer.getId(), request.getComment());
+                            handled = true;
                             break;
                         }
+                    }
+                    if (!handled && submission.getSubmissionType() == com.apms.common.enums.SubmissionType.DOCUMENT_COLLECTION) {
+                        notifyDocumentCollectionRejected(submission, reviewer.getId(), request.getComment());
                     }
                 }
                 break;
@@ -403,7 +433,23 @@ public class ProjectTaskSubmissionService {
         submissionRepository.save(submission);
         taskRepository.save(task);
 
+        if (request.getDecision() == com.apms.common.enums.ReviewDecision.REJECT || request.getDecision() == com.apms.common.enums.ReviewDecision.REQUEST_REVISION) {
+            Account recipient = submission.getSubmittedByAccount() != null ? submission.getSubmittedByAccount() : task.getAssignedToAccount();
+            if (recipient != null) {
+                notificationService.notifyTaskChangesRequested(task, submission, recipient, reviewer, request.getComment());
+            }
+        }
+
         return toResponse(submission);
+    }
+
+    private boolean isDocumentSubmission(ProjectTaskSubmission submission) {
+        return submission.getSubmissionType() == com.apms.common.enums.SubmissionType.DOCUMENT_COLLECTION
+                || submission.getSubmissionType() == com.apms.common.enums.SubmissionType.PARTNER_CONTRACT_COLLECTION;
+    }
+
+    private void notifyDocumentCollectionRejected(ProjectTaskSubmission submission, Long reviewerId, String comment) {
+        notificationService.notifyDocumentRejected(submission, null, "Document package", reviewerId, comment);
     }
 
     @Transactional

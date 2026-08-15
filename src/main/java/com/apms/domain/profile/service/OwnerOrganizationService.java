@@ -12,7 +12,6 @@ import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 
@@ -64,21 +63,6 @@ public class OwnerOrganizationService {
             return false;
         }
         return getOwnerCompanyId().equals(companyId.trim());
-    }
-
-    /**
-     * Returns every identifier historically used for the owner node in Neo4j.
-     * Older graph records used the Mongo profile ID; current profile data uses
-     * the universal companyId. Both must resolve to FPT while data is migrated.
-     */
-    public List<String> getOwnerGraphCompanyIds() {
-        LinkedHashSet<String> identifiers = new LinkedHashSet<>();
-        identifiers.add(getOwnerCompanyProfileId());
-        findOwnerCompanyProfile()
-                .map(CompanyProfile::getCompanyId)
-                .filter(StringUtils::hasText)
-                .ifPresent(identifiers::add);
-        return new ArrayList<>(identifiers);
     }
 
     /**

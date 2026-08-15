@@ -17,18 +17,21 @@ public class ProfileResponse {
     private CompanyProfile.CompanySize companySize;
     private CompanyProfile.Contact contact;
     private CompanyProfile.Insights insights;
-    private List<CompanyProfile.CompanyMember> companyMembers;
 
     private com.apms.domain.company.model.FinancialInfo financial;
     private com.apms.domain.company.model.MarketInfo market;
     private com.apms.domain.company.model.InnovationInfo innovation;
     private com.apms.domain.company.model.RiskInfo risk;
     private com.apms.domain.company.model.ComplianceInfo compliance;
+    private List<CompanyProfile.CompanyMember> companyMembers;
+    private List<CompanyProfile.FinancialReport> financialReports;
 
     private String reviewStatus;
+    private String relationshipType;
     private List<String> tags;
     private CompanyProfile.Metadata metadata;
     private Integer version;
+
     private String stockTicker;
-    private com.apms.common.enums.StockExchange stockExchange;
+    private String stockExchange;
 }

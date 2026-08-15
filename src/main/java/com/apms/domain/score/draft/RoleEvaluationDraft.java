@@ -1,6 +1,7 @@
 package com.apms.domain.score.draft;
 
 import com.apms.domain.company.enums.CompanyRole;
+import com.apms.common.enums.SystemRole;
 import com.apms.domain.score.enums.RoleEvaluationStatus;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -118,6 +119,11 @@ public class RoleEvaluationDraft {
     private Long reviewedByAccountId;
     private LocalDateTime reviewedAt;
     private String reviewComment;
+
+    private SystemRole evaluatorRole;
+
+    @Builder.Default
+    private Boolean ownerFinalized = false;
 
     private LocalDateTime approvalProcessingStartedAt;
     private String approvalFailureReason;

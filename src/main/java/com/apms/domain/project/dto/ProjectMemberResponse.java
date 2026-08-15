@@ -12,6 +12,8 @@ public class ProjectMemberResponse {
 
     private Long id;
     private Long accountId;
+    private String email;
+    private String fullName;
     private MemberRole memberRole;
     private LocalDateTime joinedAt;
 }

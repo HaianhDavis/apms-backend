@@ -4,6 +4,7 @@ import com.apms.common.enums.SystemRole;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.util.Set;
@@ -18,7 +19,11 @@ public class CreateUserRequest {
     private String fullName;
 
     @NotBlank
+    @Size(min = 8, max = 72)
     private String password;
+
+    @NotBlank
+    private String confirmPassword;
 
     @NotEmpty
     private Set<SystemRole> roles;

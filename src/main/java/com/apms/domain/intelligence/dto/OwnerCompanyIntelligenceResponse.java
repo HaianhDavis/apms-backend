@@ -1,25 +1,14 @@
 package com.apms.domain.intelligence.dto;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
-/** Stable, nullable-safe read model for the Owner Company Intelligence drawer. */
 public record OwnerCompanyIntelligenceResponse(
-        Company company,
-        Relationship relationship,
-        ExecutiveBrief executiveBrief,
-        AiSummary aiSummary,
-        List<News> news,
-        List<TimelineEvent> timeline,
-        List<MarketExpansion> marketExpansion,
-        List<HiringSignal> hiring,
-        List<FinancialSignal> financial,
-        List<Person> leadership,
-        List<Product> products,
-        List<Evidence> evidence,
-        Metadata metadata) {
-
+        Company company, Relationship relationship, ExecutiveBrief executiveBrief,
+        AiSummary aiSummary, List<News> news, List<TimelineEvent> timeline,
+        List<MarketExpansion> marketExpansion, List<HiringSignal> hiring,
+        List<FinancialSignal> financial, List<Person> leadership, List<Product> products,
+        List<Evidence> evidence, Metadata metadata) {
     public record Company(String id, String name, String legalName, String ticker, String website,
                           String headquarters, List<String> industries, List<String> markets,
                           String businessModel, Integer employeeCount) {}
@@ -34,11 +23,10 @@ public record OwnerCompanyIntelligenceResponse(
     public record TimelineEvent(String id, LocalDateTime date, String eventType, String summary,
                                 String impact, String source, String sourceUrl) {}
     public record MarketExpansion(String market, String eventType, String description,
-                                  String businessImpact, String source, String sourceUrl,
-                                  LocalDateTime date) {}
+                                  String businessImpact, String source, String sourceUrl, LocalDateTime date) {}
     public record HiringSignal(String title, String trend, String description, String source,
                                String sourceUrl, LocalDateTime date) {}
-    public record FinancialSignal(String name, BigDecimal value, String currency, LocalDateTime period) {}
+    public record FinancialSignal(String name, String value, String currency, LocalDateTime period) {}
     public record Person(String name, String position, String sourceUrl, LocalDateTime researchedAt) {}
     public record Product(String name, String category, String description) {}
     public record Evidence(String sourceName, String sourceType, String sourceUrl,

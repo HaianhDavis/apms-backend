@@ -2,8 +2,10 @@ package com.apms.config;
 
 import com.apms.security.AuthEntryPointJwt;
 import com.apms.security.AuthTokenFilter;
+import com.apms.security.IpWhitelistFilter;
 import com.apms.security.UserDetailsServiceImpl;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -11,7 +13,6 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
-import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -29,13 +30,15 @@ public class SecurityConfig {
     private final UserDetailsServiceImpl userDetailsService;
     private final AuthEntryPointJwt unauthorizedHandler;
     private final AuthTokenFilter authTokenFilter;
-    private final IpWhitelistFilter ipWhitelistFilter;
+    private final ObjectProvider<IpWhitelistFilter> ipWhitelistFilterProvider;
 
     @Bean
     public DaoAuthenticationProvider authenticationProvider() {
         DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
+
         authProvider.setUserDetailsService(userDetailsService);
         authProvider.setPasswordEncoder(passwordEncoder());
+
         return authProvider;
     }
 
@@ -51,13 +54,8 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-<<<<<<< HEAD
-        http.cors(Customizer.withDefaults())
-                .csrf(AbstractHttpConfigurer::disable)
-=======
         http.csrf(AbstractHttpConfigurer::disable)
                 .cors(Customizer.withDefaults())
->>>>>>> origin/nguyen-feature
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(unauthorizedHandler))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth ->
@@ -77,9 +75,11 @@ public class SecurityConfig {
                 );
 
         http.authenticationProvider(authenticationProvider());
-        // IP whitelist filter runs before JWT auth filter
-        http.addFilterBefore(ipWhitelistFilter, UsernamePasswordAuthenticationFilter.class);
         http.addFilterBefore(authTokenFilter, UsernamePasswordAuthenticationFilter.class);
+        IpWhitelistFilter whitelistFilter = ipWhitelistFilterProvider.getIfAvailable();
+        if (whitelistFilter != null) {
+            http.addFilterBefore(whitelistFilter, AuthTokenFilter.class);
+        }
 
         return http.build();
     }

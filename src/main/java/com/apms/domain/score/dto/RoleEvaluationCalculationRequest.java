@@ -1,6 +1,7 @@
 package com.apms.domain.score.dto;
 
 import com.apms.domain.company.enums.CompanyRole;
+import com.apms.common.enums.SystemRole;
 import lombok.Builder;
 import lombok.Data;
 
@@ -37,4 +38,9 @@ public class RoleEvaluationCalculationRequest {
     // --- Phase 2C.9A Cross-Role Traceability Hardening ---
     private String approvedRoleEvaluationVersionId;
     private Integer approvedRoleEvaluationVersionNumber;
+
+    private SystemRole evaluatorRole;
+
+    @Builder.Default
+    private Boolean authoritative = false;
 }

@@ -128,12 +128,6 @@ public class ProjectChatService {
     }
 
     private void validateProjectMembership(Long projectId, UserDetailsImpl user) {
-        boolean hasGlobalChatAccess = user.getAuthorities().stream().anyMatch(authority ->
-                authority.getAuthority().equals("ROLE_SYSTEM_ADMIN")
-                        || authority.getAuthority().equals("ROLE_BUSINESS_OWNER"));
-        if (hasGlobalChatAccess) {
-            return;
-        }
         if (!projectMemberRepository.existsByProject_IdAndAccount_Id(projectId, user.getId())) {
             throw new AccessDeniedException("User is not a member of this project");
         }

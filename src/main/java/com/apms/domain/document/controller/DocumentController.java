@@ -84,7 +84,7 @@ public class DocumentController {
     // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @GetMapping("/import-jobs/{importJobId}")
-    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @companyScope.canAccessImportJob(#importJobId)")
     public ResponseEntity<ApiResponse<ImportJobResponse>> getImportJob(
             @PathVariable Long importJobId) {
 

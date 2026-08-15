@@ -1,9 +1,19 @@
 package com.apms.domain.score.service;
 
+import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.OutboxEventStatus;
+import com.apms.common.enums.SubmissionStatus;
+import com.apms.common.enums.SubmissionType;
+import com.apms.common.enums.SystemRole;
+import com.apms.common.enums.TaskStatus;
+import com.apms.common.exception.BusinessValidationException;
+import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.company.enums.CompanyRole;
 import com.apms.domain.project.ProjectTask;
 import com.apms.domain.project.ProjectTaskSubmission;
+import com.apms.domain.project.repository.sql.ProjectTaskRepository;
+import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
+import com.apms.domain.score.draft.CriterionInput;
 import com.apms.domain.score.draft.RoleEvaluationDraft;
 import com.apms.domain.score.dto.draft.SubmitRoleEvaluationRequest;
 import com.apms.domain.score.enums.RoleEvaluationOutboxEventType;
@@ -12,6 +22,8 @@ import com.apms.domain.score.outbox.RoleEvaluationOutboxEvent;
 import com.apms.domain.score.enums.EvaluationCompletenessStatus;
 import com.apms.domain.score.outbox.RoleEvaluationOutboxPayload;
 import com.apms.domain.score.outbox.RoleEvaluationOutboxPayloadHasher;
+import com.apms.domain.score.registry.CanonicalRoleCriteria;
+import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -19,17 +31,22 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Component
 @RequiredArgsConstructor
 public class PartnerRoleEvaluationSubmissionStrategy implements RoleEvaluationSubmissionStrategy {
 
     private final MongoTemplate mongoTemplate;
+    private final ProjectTaskRepository taskRepository;
+    private final ProjectTaskSubmissionRepository submissionRepository;
     private final AccountRepository accountRepository;
     private final PartnerDataSufficiencyEvaluator sufficiencyEvaluator;
+    private final AuditLogService auditLogService;
 
     @Override
     public boolean supports(CompanyRole role) {
@@ -37,23 +54,22 @@ public class PartnerRoleEvaluationSubmissionStrategy implements RoleEvaluationSu
     }
 
     @Override
-    @Transactional(transactionManager = "mongoTransactionManager")
     public void submit(RoleEvaluationDraft draft, ProjectTask task, ProjectTaskSubmission existingSubmission, SubmitRoleEvaluationRequest request, Long accountId) {
 
         // 1. Validations
-        if (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(accountId)) {
-            throw new IllegalStateException("Only assigned staff can submit");
+        SystemRole evaluatorRole = RoleEvaluationAuthorityResolver.currentEvaluatorRoleOrDefault(SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        boolean managerOrOwner = evaluatorRole == SystemRole.BUSINESS_DEVELOPMENT_MANAGER || evaluatorRole == SystemRole.BUSINESS_OWNER;
+        if (!managerOrOwner
+                && (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(accountId))) {
+            throw new IllegalStateException("Only assigned staff, Manager, or Owner can submit");
         }
 
         if (draft.getStaleTargetProfile() || draft.getStaleReferenceProfile() || draft.getStaleRuleSet()) {
             throw new IllegalStateException("Cannot submit draft with stale dependencies");
         }
 
-        // Completeness logic
-        com.apms.domain.score.dto.draft.RoleEvaluationReadinessResponse readiness = sufficiencyEvaluator.evaluate(draft);
-        if (!readiness.isStaffMaySubmit() || readiness.getAggregateCompletenessStatus() == EvaluationCompletenessStatus.INCOMPLETE) {
-            throw new IllegalStateException("Data is INCOMPLETE. 6 canonical criteria are required or insufficient data.");
-        }
+        validateStaffConfirmedCriteria(draft);
+        EvaluationCompletenessStatus completenessStatus = EvaluationCompletenessStatus.COMPLETE;
 
         String eventId = draft.getId() + "_" + draft.getWorkingRevisionNumber() + "_SUBMITTED";
 
@@ -68,7 +84,7 @@ public class PartnerRoleEvaluationSubmissionStrategy implements RoleEvaluationSu
                 .actorAccountId(accountId)
                 .submittedRevisionNumber(draft.getWorkingRevisionNumber())
                 .submittedSourceSnapshotHash(draft.getSourceSnapshotHash())
-                .aggregateCompletenessStatus(readiness.getAggregateCompletenessStatus())
+                .aggregateCompletenessStatus(completenessStatus)
                 .occurredAt(LocalDateTime.now())
                 .payloadVersion(1)
                 .build();
@@ -104,5 +120,53 @@ public class PartnerRoleEvaluationSubmissionStrategy implements RoleEvaluationSu
         if (modified == 0) {
             throw new IllegalStateException("Draft state changed or optimistic lock failed");
         }
+
+        Account account = accountRepository.findById(accountId)
+                .orElseThrow(() -> new IllegalStateException("Account not found: " + accountId));
+
+        ProjectTaskSubmission submission = existingSubmission != null
+                ? existingSubmission
+                : ProjectTaskSubmission.builder()
+                .project(task.getProject())
+                .projectTask(task)
+                .submissionType(SubmissionType.ROLE_EVALUATION)
+                .targetEntityType("ROLE_EVALUATION_DRAFT")
+                .targetEntityId(draft.getId())
+                .submittedByAccount(account)
+                .build();
+        submission.setStatus(SubmissionStatus.IN_REVIEW);
+        submission.setSubmittedByAccount(account);
+        submission.setSubmittedAt(LocalDateTime.now());
+        submissionRepository.save(submission);
+
+        task.setStatus(TaskStatus.IN_REVIEW);
+        task.setCompletedAt(null);
+        taskRepository.save(task);
+
+        auditLogService.log(accountId, AuditAction.PARTNER_EVALUATION_SUBMITTED, "ROLE_EVALUATION_DRAFT", draft.getId(),
+                "Submitted partner evaluation for review");
+    }
+
+    private void validateStaffConfirmedCriteria(RoleEvaluationDraft draft) {
+        List<String> missing = CanonicalRoleCriteria.PARTNER_CRITERIA.stream()
+                .filter(criterionKey -> !isCriterionComplete(draft, criterionKey))
+                .toList();
+
+        if (!missing.isEmpty()) {
+            throw new BusinessValidationException("Data is INCOMPLETE. Staff score, reason, and evidence are required for all 6 PARTNER criteria. Missing: " + String.join(", ", missing));
+        }
+    }
+
+    private boolean isCriterionComplete(RoleEvaluationDraft draft, String criterionKey) {
+        CriterionInput input = draft.getCriterionInputs() != null ? draft.getCriterionInputs().get(criterionKey) : null;
+        boolean hasScore = input != null
+                && input.getRawScore() != null
+                && input.getRawScore().compareTo(BigDecimal.ZERO) >= 0
+                && input.getRawScore().compareTo(new BigDecimal("100")) <= 0;
+        boolean hasReason = input != null && StringUtils.hasText(input.getExplanation());
+        boolean hasEvidence = draft.getCriterionEvidence() != null
+                && draft.getCriterionEvidence().getOrDefault(criterionKey, List.of()).stream()
+                .anyMatch(evidence -> StringUtils.hasText(evidence.getEvidenceId()) || StringUtils.hasText(evidence.getRawDocumentId()));
+        return hasScore && hasReason && hasEvidence;
     }
 }

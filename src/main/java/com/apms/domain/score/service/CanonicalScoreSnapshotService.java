@@ -112,6 +112,8 @@ public class CanonicalScoreSnapshotService {
         snapshot.setApprovalIdempotencyKey(request.getApprovalIdempotencyKey());
         snapshot.setApprovedRoleEvaluationVersionId(request.getApprovedRoleEvaluationVersionId());
         snapshot.setApprovedRoleEvaluationVersionNumber(request.getApprovedRoleEvaluationVersionNumber());
+        snapshot.setEvaluatorRole(request.getEvaluatorRole());
+        snapshot.setAuthoritative(Boolean.TRUE.equals(request.getAuthoritative()));
 
         // Legacy structural fields (companyId, project, candidateId, ruleVersion) are left null.
         // Legacy score fields (partnerFitScore, competitionLevel, etc.) are left null.

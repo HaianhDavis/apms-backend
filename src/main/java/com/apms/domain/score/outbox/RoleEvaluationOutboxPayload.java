@@ -1,6 +1,7 @@
 package com.apms.domain.score.outbox;
 
 import com.apms.domain.score.enums.EvaluationCompletenessStatus;
+import com.apms.common.enums.SystemRole;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -27,6 +28,8 @@ public class RoleEvaluationOutboxPayload {
     private Integer approvedVersionNumber;
     private String managerFeedback;
     private String managerJustification;
+    private SystemRole evaluatorRole;
+    private Boolean authoritative;
     private EvaluationCompletenessStatus aggregateCompletenessStatus;
     private LocalDateTime occurredAt;
     private Integer payloadVersion;

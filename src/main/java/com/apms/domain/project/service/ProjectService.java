@@ -8,11 +8,12 @@ import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectMember;
 import com.apms.domain.project.dto.*;
+import com.apms.domain.project.dto.DuplicateCompanyCheckResponse;
 import com.apms.domain.project.repository.sql.ProjectMemberRepository;
 import com.apms.domain.project.repository.sql.ProjectRepository;
-import com.apms.domain.profile.CompanyProfile;
-import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
+import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
+import com.apms.domain.user.repository.sql.UserProfileRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -23,7 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import com.apms.domain.project.repository.sql.ProjectTaskRepository;
+import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
+import com.apms.domain.document.repository.sql.ImportJobRepository;
 import com.apms.domain.audit.service.AuditLogService;
+import com.apms.domain.notification.service.NotificationService;
 import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.TaskStatus;
 import com.apms.domain.project.dto.UpdateProjectStatusRequest;
@@ -34,9 +38,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -47,11 +48,14 @@ public class ProjectService {
     private final ProjectRepository projectRepository;
     private final ProjectMemberRepository projectMemberRepository;
     private final AccountRepository accountRepository;
+    private final UserProfileRepository userProfileRepository;
     private final Neo4jClient neo4jClient;
     private final ProjectTaskRepository projectTaskRepository;
+    private final ProjectTaskSubmissionRepository projectTaskSubmissionRepository;
+    private final ImportJobRepository importJobRepository;
     private final AuditLogService auditLogService;
     private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
-    private final CompanyProfileRepository companyProfileRepository;
+    private final NotificationService notificationService;
 
     // ─────────────────────────────────────────────
     // CREATE
@@ -112,7 +116,6 @@ public class ProjectService {
                 .build();
 
         project = projectRepository.save(project);
-        linkCompanyProfile(project, creatorAccountId);
 
         // Creator is automatically added as MANAGER
         ProjectMember creator = ProjectMember.builder()
@@ -124,49 +127,6 @@ public class ProjectService {
 
         log.info("Project created: id={}, type={}, createdBy={}", project.getId(), project.getProjectType(), creatorAccountId);
         return toResponse(project, List.of(creator));
-    }
-
-    private void linkCompanyProfile(Project project, Long creatorAccountId) {
-        String projectId = String.valueOf(project.getId());
-
-        if (project.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY) {
-            CompanyProfile profile = companyProfileRepository.findById(project.getTargetCompanyProfileId())
-                    .or(() -> companyProfileRepository.findByCompanyId(project.getTargetCompanyProfileId()))
-                    .orElseThrow(() -> new ResourceNotFoundException(
-                            "Target CompanyProfile not found: " + project.getTargetCompanyProfileId()));
-            if (profile.getSourceRefs() == null) {
-                profile.setSourceRefs(new CompanyProfile.SourceRefs());
-            }
-            if (profile.getSourceRefs().getProjectIds() == null) {
-                profile.getSourceRefs().setProjectIds(new HashSet<>());
-            }
-            profile.getSourceRefs().getProjectIds().add(projectId);
-            companyProfileRepository.save(profile);
-            return;
-        }
-
-        String companyProfileId = UUID.randomUUID().toString();
-        CompanyProfile profile = CompanyProfile.builder()
-                .id(companyProfileId)
-                .companyId(companyProfileId)
-                .identity(CompanyProfile.Identity.builder()
-                        .legalName(project.getTargetCompanyName().trim())
-                        .tradeName(project.getTargetCompanyName().trim())
-                        .build())
-                .reviewStatus("PENDING_RESEARCH")
-                .sourceRefs(CompanyProfile.SourceRefs.builder()
-                        .projectIds(new HashSet<>(Set.of(projectId)))
-                        .build())
-                .metadata(CompanyProfile.Metadata.builder()
-                        .createdBy(String.valueOf(creatorAccountId))
-                        .createdAt(LocalDateTime.now())
-                        .updatedAt(LocalDateTime.now())
-                        .build())
-                .build();
-        companyProfileRepository.save(profile);
-
-        project.setTargetCompanyProfileId(companyProfileId);
-        projectRepository.save(project);
     }
 
     // ─────────────────────────────────────────────
@@ -182,19 +142,15 @@ public class ProjectService {
 
     @Transactional(readOnly = true)
     public Page<ProjectResponse> getAllProjects(ProjectStatus status, ProjectType type, Pageable pageable) {
-        return getAllProjects(status, type, pageable, null);
+        return getAllProjects(status, type, pageable, null, false);
     }
 
     @Transactional(readOnly = true)
-    public Page<ProjectResponse> getAllProjects(
-            ProjectStatus status,
-            ProjectType type,
-            Pageable pageable,
-            Long memberAccountId) {
+    public Page<ProjectResponse> getAllProjects(ProjectStatus status, ProjectType type, Pageable pageable, Long accountId, boolean restrictToMembership) {
         Page<Project> page;
 
-        if (memberAccountId != null) {
-            page = projectRepository.findAccessibleProjects(memberAccountId, status, type, pageable);
+        if (restrictToMembership && accountId != null) {
+            page = projectRepository.findVisibleProjectsForMember(accountId, status, type, pageable);
         } else if (status != null && type != null) {
             page = projectRepository.findByStatusAndProjectType(status, type, pageable);
         } else if (status != null) {
@@ -315,26 +271,72 @@ public class ProjectService {
     // ─────────────────────────────────────────────
 
     @Transactional
-    public ProjectMemberResponse addMember(Long projectId, AddMemberRequest request) {
+    public void deleteProject(Long id, Long actorId) {
+        Project project = findProjectOrThrow(id);
+
+        if (project.getStatus() != ProjectStatus.DRAFT && project.getStatus() != ProjectStatus.COMPLETED) {
+            throw new BusinessValidationException(
+                    "Only draft or done projects can be deleted. In progress projects cannot be deleted.");
+        }
+
+        String projectName = project.getProjectName();
+        ProjectStatus status = project.getStatus();
+
+        projectTaskSubmissionRepository.deleteByProject_Id(id);
+        projectTaskRepository.deleteByProjectId(id);
+        importJobRepository.deleteByProject_Id(id);
+        projectMemberRepository.deleteByProject_Id(id);
+        projectRepository.delete(project);
+
+        auditLogService.log(actorId, AuditAction.PROJECT_ARCHIVED, "Project", String.valueOf(id),
+                "Project deleted: " + projectName + " (" + status + ")");
+        log.info("Project deleted: id={}, name={}, status={}, actor={}", id, projectName, status, actorId);
+    }
+
+    @Transactional
+    public ProjectMemberResponse addMember(Long projectId, AddMemberRequest request, Long actorId) {
         findProjectOrThrow(projectId);
 
-        if (!accountRepository.existsById(request.getAccountId())) {
-            throw new ResourceNotFoundException("Account not found with id: " + request.getAccountId());
+        Account account = resolveMemberAccount(request);
+        Long accountId = account.getId();
+
+        if (Boolean.FALSE.equals(account.getIsActive())) {
+            throw new BusinessValidationException("Account is disabled: " + account.getEmail());
         }
-        if (projectMemberRepository.existsByProject_IdAndAccount_Id(projectId, request.getAccountId())) {
-            throw new BusinessValidationException("Account " + request.getAccountId() + " is already a member of project " + projectId);
+
+        if (projectMemberRepository.existsByProject_IdAndAccount_Id(projectId, accountId)) {
+            throw new BusinessValidationException("Account " + accountId + " is already a member of project " + projectId);
         }
 
         Project project = findProjectOrThrow(projectId);
         ProjectMember member = ProjectMember.builder()
                 .project(project)
-                .account(accountRepository.getReferenceById(request.getAccountId()))
+                .account(account)
                 .memberRole(request.getMemberRole())
                 .build();
 
         member = projectMemberRepository.save(member);
-        log.info("Member added: projectId={}, accountId={}, role={}", projectId, request.getAccountId(), request.getMemberRole());
+        if (request.getMemberRole() == MemberRole.STAFF) {
+            Account sender = actorId != null ? accountRepository.findById(actorId).orElse(null) : null;
+            notificationService.notifyProjectMemberAdded(project, account, sender);
+        }
+        log.info("Member added: projectId={}, accountId={}, email={}, role={}", projectId, accountId, account.getEmail(), request.getMemberRole());
         return toMemberResponse(member);
+    }
+
+    private Account resolveMemberAccount(AddMemberRequest request) {
+        if (request.getAccountId() != null) {
+            return accountRepository.findById(request.getAccountId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Account not found with id: " + request.getAccountId()));
+        }
+
+        if (StringUtils.hasText(request.getEmail())) {
+            String email = request.getEmail().trim();
+            return accountRepository.findByEmailIgnoreCase(email)
+                    .orElseThrow(() -> new ResourceNotFoundException("Account not found with email: " + email));
+        }
+
+        throw new BusinessValidationException("Either accountId or email is required");
     }
 
     @Transactional
@@ -356,8 +358,30 @@ public class ProjectService {
             throw new BusinessValidationException("Cannot remove the last MANAGER from a project.");
         }
 
+        // Prevent removing staff if they have active or in-progress tasks assigned
+        boolean hasActiveTasks = projectTaskRepository.existsByProjectIdAndAssignedToAccountIdAndStatusNotIn(
+                projectId, accountId, List.of(TaskStatus.DONE, TaskStatus.CANCELLED));
+        if (hasActiveTasks) {
+            throw new BusinessValidationException("Cannot remove member from project because they have active or in-progress tasks assigned. All assigned tasks must be completed before removal.");
+        }
+
         projectMemberRepository.deleteByProject_IdAndAccount_Id(projectId, accountId);
         log.info("Member removed: projectId={}, accountId={}", projectId, accountId);
+
+        try {
+            Project project = findProjectOrThrow(projectId);
+            Account removedAccount = accountRepository.findById(accountId).orElse(null);
+            org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            Account sender = null;
+            if (auth != null && auth.getPrincipal() instanceof com.apms.security.UserDetailsImpl u) {
+                sender = accountRepository.findById(u.getId()).orElse(null);
+            }
+            if (removedAccount != null && project != null) {
+                notificationService.notifyProjectMemberRemoved(project, removedAccount, sender);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to send project member removed notification: {}", e.getMessage());
+        }
     }
 
     // ─────────────────────────────────────────────
@@ -457,11 +481,48 @@ public class ProjectService {
     }
 
     private ProjectMemberResponse toMemberResponse(ProjectMember m) {
+        Account account = m.getAccount();
+        Long accountId = m.getAccountId();
+        String email = account != null ? account.getEmail() : null;
+        String fullName = accountId == null ? null : userProfileRepository.findByAccountId(accountId)
+                .map(profile -> (profile.getFirstName() + " " + profile.getLastName()).trim())
+                .filter(name -> !name.isBlank())
+                .orElse(email);
+
         return ProjectMemberResponse.builder()
                 .id(m.getId())
-                .accountId(m.getAccountId())
+                .accountId(accountId)
+                .email(email)
+                .fullName(fullName)
                 .memberRole(m.getMemberRole())
                 .joinedAt(m.getJoinedAt())
+                .build();
+    }
+
+    public DuplicateCompanyCheckResponse checkDuplicateCompanyName(String companyName, Long excludeProjectId) {
+        if (!StringUtils.hasText(companyName) || companyName.trim().length() < 2) {
+            return DuplicateCompanyCheckResponse.builder()
+                    .duplicate(false)
+                    .matchingProjects(List.of())
+                    .build();
+        }
+
+        List<Project> matches = projectRepository.findByTargetCompanyNameContainingIgnoreCase(
+                companyName.trim(), excludeProjectId);
+
+        List<DuplicateCompanyCheckResponse.MatchingProject> matchingProjects = matches.stream()
+                .map(p -> DuplicateCompanyCheckResponse.MatchingProject.builder()
+                        .id(p.getId())
+                        .projectName(p.getProjectName())
+                        .targetCompanyName(p.getTargetCompanyName())
+                        .status(p.getStatus().name())
+                        .projectType(p.getProjectType().name())
+                        .build())
+                .toList();
+
+        return DuplicateCompanyCheckResponse.builder()
+                .duplicate(!matchingProjects.isEmpty())
+                .matchingProjects(matchingProjects)
                 .build();
     }
 }

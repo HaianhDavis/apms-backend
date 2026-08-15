@@ -27,10 +27,12 @@ public class RoleEvaluationApprovalService {
     private final ProjectTaskRepository taskRepository;
     private final ProjectTaskSubmissionRepository submissionRepository;
     private final List<RoleEvaluationApprovalStrategy> strategies;
+    private final RoleEvaluationAuthorityService authorityService;
 
     public void reviewDraft(String draftId, ReviewRoleEvaluationRequest request, Long accountId, String idempotencyKeyHeader) {
         RoleEvaluationDraft draft = draftRepository.findById(draftId)
                 .orElseThrow(() -> new IllegalArgumentException("Draft not found: " + draftId));
+        authorityService.assertManagerMayReview(draft);
 
         if (draft.getStatus() != RoleEvaluationStatus.IN_REVIEW && draft.getStatus() != RoleEvaluationStatus.APPROVAL_FAILED) {
             throw new IllegalStateException("Draft cannot be reviewed in current state: " + draft.getStatus());

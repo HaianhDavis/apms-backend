@@ -1,0 +1,230 @@
+package com.apms.common.security;
+
+import com.apms.common.enums.ProjectStatus;
+import com.apms.common.enums.SystemRole;
+import com.apms.domain.ai.AiExtractionCache;
+import com.apms.domain.ai.repository.mongo.AiExtractionCacheRepository;
+import com.apms.domain.document.ImportJob;
+import com.apms.domain.document.repository.sql.ImportJobRepository;
+import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.profile.CompanyProfileUpdateProposal;
+import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
+import com.apms.domain.profile.repository.mongo.CompanyProfileUpdateProposalRepository;
+import com.apms.domain.profile.service.OwnerOrganizationService;
+import com.apms.domain.project.repository.sql.ProjectRepository;
+import com.apms.domain.score.draft.RoleEvaluationDraft;
+import com.apms.domain.score.repository.mongo.RoleEvaluationDraftRepository;
+import com.apms.security.UserDetailsImpl;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+
+import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+
+/**
+ * Spring Security Expression component that enforces the BUSINESS_DEVELOPMENT_STAFF
+ * data-scope rule at the backend.
+ *
+ * Business rule:
+ *   A Staff member may access a Company if:
+ *     A) it is the APMS Owner Company (global access for every Staff member), OR
+ *     B) the company is the target of a Project the Staff member is assigned to.
+ *
+ * All other roles (SYSTEM_ADMIN, BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER)
+ * keep their current system-wide access and are never restricted by this guard.
+ *
+ * Usage in controllers:
+ *   @PreAuthorize("@companyScope.canAccessCompany(#companyId)")
+ *   @PreAuthorize("@companyScope.canAccessProject(#projectId)")
+ *   @PreAuthorize("@companyScope.canAccessEvaluation(#evaluationId)")
+ *   @PreAuthorize("@companyScope.canAccessImportJob(#importJobId)")
+ *   @PreAuthorize("@companyScope.canAccessProposal(#proposalId)")
+ *   @PreAuthorize("@companyScope.canAccessExtraction(#extractionId)")
+ */
+@Component("companyScope")
+@RequiredArgsConstructor
+public class StaffCompanyScopeEvaluator {
+
+    private static final List<ProjectStatus> ALL_PROJECT_STATUSES = Arrays.asList(ProjectStatus.values());
+
+    private final OwnerOrganizationService ownerOrganizationService;
+    private final CompanyProfileRepository companyProfileRepository;
+    private final ProjectRepository projectRepository;
+    private final RoleEvaluationDraftRepository roleEvaluationDraftRepository;
+    private final ImportJobRepository importJobRepository;
+    private final CompanyProfileUpdateProposalRepository proposalRepository;
+    private final AiExtractionCacheRepository extractionCacheRepository;
+
+    // ─────────────────────────────────────────────
+    // Company-level guards
+    // ─────────────────────────────────────────────
+
+    /**
+     * Returns true if the current user may read the given company resource.
+     * Non-Staff roles pass. Staff must be able to access the owner company
+     * OR a company that is the target of an assigned project.
+     *
+     * @param companyIdOrProfileId Mongo companyId OR CompanyProfile _id
+     */
+    public boolean canAccessCompany(String companyIdOrProfileId) {
+        UserDetailsImpl user = currentUser();
+        if (user == null) return false;
+        if (!isStaff(user)) return true;
+        if (!StringUtils.hasText(companyIdOrProfileId)) return false;
+
+        if (ownerOrganizationService.isOwnerCompany(companyIdOrProfileId)) return true;
+
+        CompanyProfile profile = resolveProfile(companyIdOrProfileId);
+        if (profile == null) return false;
+
+        return isCompanyInScope(profile.getCompanyId(), user.getId());
+    }
+
+    /**
+     * Company-scope rule applied to an already-resolved companyId.
+     */
+    public boolean canAccessCompanyId(String companyId, UserDetailsImpl user) {
+        if (user == null) return false;
+        if (!isStaff(user)) return true;
+        if (!StringUtils.hasText(companyId)) return false;
+        if (ownerOrganizationService.isOwnerCompany(companyId)) return true;
+        return isCompanyInScope(companyId, user.getId());
+    }
+
+    // ─────────────────────────────────────────────
+    // Project-level guards
+    // ─────────────────────────────────────────────
+
+    /**
+     * Staff may only access a Project they are assigned to.
+     * All other roles keep their current access.
+     */
+    public boolean canAccessProject(Long projectId) {
+        UserDetailsImpl user = currentUser();
+        if (user == null || projectId == null) return false;
+        if (!isStaff(user)) return true;
+        return projectRepository.existsByIdAndMembersAccountId(projectId, user.getId());
+    }
+
+    // ─────────────────────────────────────────────
+    // Derived-project guards (evaluation / import job / proposal / extraction)
+    // ─────────────────────────────────────────────
+
+    public boolean canAccessEvaluation(String evaluationId) {
+        UserDetailsImpl user = currentUser();
+        if (user == null) return false;
+        if (!isStaff(user)) return true;
+        if (!StringUtils.hasText(evaluationId)) return false;
+        return roleEvaluationDraftRepository.findById(evaluationId)
+                .map(RoleEvaluationDraft::getProjectId)
+                .map(projectId -> projectRepository.existsByIdAndMembersAccountId(projectId, user.getId()))
+                .orElse(false);
+    }
+
+    public boolean canAccessImportJob(Long importJobId) {
+        UserDetailsImpl user = currentUser();
+        if (user == null) return false;
+        if (!isStaff(user)) return true;
+        if (importJobId == null) return false;
+        return importJobRepository.findById(importJobId)
+                .map(ImportJob::getProjectId)
+                .map(projectId -> projectRepository.existsByIdAndMembersAccountId(projectId, user.getId()))
+                .orElse(false);
+    }
+
+    public boolean canAccessProposal(String proposalId) {
+        UserDetailsImpl user = currentUser();
+        if (user == null) return false;
+        if (!isStaff(user)) return true;
+        if (!StringUtils.hasText(proposalId)) return false;
+        return proposalRepository.findById(proposalId)
+                .map(CompanyProfileUpdateProposal::getProjectId)
+                .map(projectId -> projectRepository.existsByIdAndMembersAccountId(projectId, user.getId()))
+                .orElse(false);
+    }
+
+    public boolean canAccessExtraction(String extractionId) {
+        UserDetailsImpl user = currentUser();
+        if (user == null) return false;
+        if (!isStaff(user)) return true;
+        if (!StringUtils.hasText(extractionId)) return false;
+        return extractionCacheRepository.findById(extractionId)
+                .map(AiExtractionCache::getImportJobId)
+                .map(this::canAccessImportJobInternal)
+                .orElse(false);
+    }
+
+    private boolean canAccessImportJobInternal(Long importJobId) {
+        if (importJobId == null) return false;
+        UserDetailsImpl user = currentUser();
+        if (user == null) return false;
+        return importJobRepository.findById(importJobId)
+                .map(ImportJob::getProjectId)
+                .map(projectId -> projectRepository.existsByIdAndMembersAccountId(projectId, user.getId()))
+                .orElse(false);
+    }
+
+    // ─────────────────────────────────────────────
+    // List-filtering support
+    // ─────────────────────────────────────────────
+
+    /**
+     * Returns the set of companyIds the current user may access, or
+     * {@code null} for non-Staff roles (meaning "no restriction").
+     * For Staff: the Owner Company + every target company of assigned projects.
+     */
+    public Set<String> allowedCompanyIds() {
+        UserDetailsImpl user = currentUser();
+        if (user == null) return java.util.Collections.emptySet();
+        if (!isStaff(user)) return null;
+
+        Set<String> ids = new LinkedHashSet<>();
+        ids.add(ownerOrganizationService.getOwnerCompanyProfileId());
+        List<String> projectTargets = projectRepository.findTargetCompanyProfileIdsByMemberAccountId(user.getId());
+        if (projectTargets != null) {
+            ids.addAll(projectTargets);
+        }
+        return ids;
+    }
+
+    public boolean isCurrentUserStaff() {
+        UserDetailsImpl user = currentUser();
+        return user != null && isStaff(user);
+    }
+
+    // ─────────────────────────────────────────────
+    // Helpers
+    // ─────────────────────────────────────────────
+
+    private CompanyProfile resolveProfile(String companyIdOrProfileId) {
+        return companyProfileRepository.findByCompanyId(companyIdOrProfileId)
+                .or(() -> companyProfileRepository.findById(companyIdOrProfileId))
+                .orElse(null);
+    }
+
+    private boolean isCompanyInScope(String companyId, Long accountId) {
+        return projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(
+                companyId, accountId, ALL_PROJECT_STATUSES);
+    }
+
+    private boolean isStaff(UserDetailsImpl user) {
+        return hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+    }
+
+    private boolean hasRole(UserDetailsImpl user, SystemRole role) {
+        String roleName = "ROLE_" + role.name();
+        return user.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals(roleName));
+    }
+
+    private UserDetailsImpl currentUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !(auth.getPrincipal() instanceof UserDetailsImpl)) return null;
+        return (UserDetailsImpl) auth.getPrincipal();
+    }
+}
