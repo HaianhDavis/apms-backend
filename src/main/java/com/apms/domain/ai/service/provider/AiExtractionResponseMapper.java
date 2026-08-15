@@ -65,6 +65,7 @@ public class AiExtractionResponseMapper {
                         .value(normalizedValue)
                         .confidence(confidence)
                         .evidenceText(textValue(fieldNode, "evidenceText"))
+                        .pageNumber(integerValue(fieldNode, "pageNumber"))
                         .sourceDocumentIds(stringListValue(fieldNode, "sourceDocumentIds"))
                         .build());
             });

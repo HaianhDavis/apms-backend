@@ -53,10 +53,20 @@ public class AiExtractionQualityService {
         }
 
         // 2. Format Checks
-        if (fieldName.equals("email") && !EMAIL_PATTERN.matcher(valueStr).find()) {
-            result.setValidationStatus(ExtractionValidationStatus.FAIL);
-            result.setValidationMessages("Invalid email format.");
-            return;
+        if (fieldName.equals("email")) {
+            boolean invalid = false;
+            if (result.getValue() instanceof java.util.List<?> list) {
+                for (Object item : list) {
+                    if (item != null && !EMAIL_PATTERN.matcher(item.toString()).find()) invalid = true;
+                }
+            } else {
+                if (!EMAIL_PATTERN.matcher(valueStr).find()) invalid = true;
+            }
+            if (invalid) {
+                result.setValidationStatus(ExtractionValidationStatus.FAIL);
+                result.setValidationMessages("Invalid email format.");
+                return;
+            }
         }
 
         if (fieldName.equals("website") && !URL_PATTERN.matcher(valueStr).find()) {

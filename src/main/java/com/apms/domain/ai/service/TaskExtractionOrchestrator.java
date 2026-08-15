@@ -52,6 +52,8 @@ public class TaskExtractionOrchestrator {
     private final AiExtractionJobRepository jobRepository;
     private final AiExtractionQualityService qualityService;
     private final com.apms.domain.project.repository.sql.ProjectTaskRepository projectTaskRepository;
+    private final DocumentCompanyConsistencyValidator companyConsistencyValidator;
+    private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
 
     @Value("${app.storage.upload-dir:uploads/}")
     private String uploadDir;
@@ -99,6 +101,57 @@ public class TaskExtractionOrchestrator {
             if (Boolean.TRUE.equals(doc.getIsHidden())) {
                 throw new com.apms.common.exception.BusinessValidationException("Hidden documents cannot be used for AI extraction: " + rawDocId);
             }
+        }
+
+        // ─── Company consistency validation ───
+        if (rawDocumentIds.size() > 1) {
+            List<RawDocument> documentsForValidation = new ArrayList<>();
+            for (String rawDocId : rawDocumentIds) {
+                rawDocumentRepository.findById(rawDocId).ifPresent(documentsForValidation::add);
+            }
+
+            // Get target company context from project/task
+            String targetCompanyName = null;
+            String targetTaxCode = null;
+            if (org.springframework.util.StringUtils.hasText(task.getTargetCompanyProfileId())) {
+                // Try to resolve target company name from CompanyProfile
+                var profileOpt = companyProfileRepository.findByCompanyId(task.getTargetCompanyProfileId())
+                        .or(() -> companyProfileRepository.findById(task.getTargetCompanyProfileId()));
+                if (profileOpt.isPresent()) {
+                    var profile = profileOpt.get();
+                    if (profile.getIdentity() != null) {
+                        targetCompanyName = profile.getIdentity().getLegalName();
+                        targetTaxCode = profile.getIdentity().getTaxCode();
+                    }
+                }
+            }
+            if (targetCompanyName == null && task.getProject() != null) {
+                targetCompanyName = task.getProject().getTargetCompanyName();
+            }
+
+            com.apms.domain.ai.dto.DocumentCompanyValidationResult validationResult =
+                    companyConsistencyValidator.validate(documentsForValidation, targetCompanyName, targetTaxCode);
+
+            if (!validationResult.isValid()) {
+                log.warn("Document company validation failed for task {}: {}", taskId, validationResult.getMessage());
+
+                Map<String, Object> details = new java.util.LinkedHashMap<>();
+                if (validationResult.getDocuments() != null) {
+                    details.put("documents", validationResult.getDocuments());
+                }
+                if (validationResult.getConflicts() != null) {
+                    details.put("conflicts", validationResult.getConflicts());
+                }
+                if (validationResult.getAmbiguousDocuments() != null && !validationResult.getAmbiguousDocuments().isEmpty()) {
+                    details.put("ambiguousDocuments", validationResult.getAmbiguousDocuments());
+                }
+
+                throw new com.apms.common.exception.BusinessValidationException(
+                        validationResult.getErrorCode(),
+                        validationResult.getMessage(),
+                        details);
+            }
+            log.info("Document company validation passed for task {}. Resolved: {}", taskId, validationResult.getResolvedCompanyName());
         }
     }
 

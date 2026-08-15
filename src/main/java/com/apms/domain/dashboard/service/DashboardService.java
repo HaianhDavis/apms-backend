@@ -71,8 +71,24 @@ public class DashboardService {
 
         List<RecentActivityDto> recentActivities = buildRecentActivities(ecosystemBusinessIds, targetProfiles);
 
+        List<CompanyProfile> allExceptOwner = profileRepository.findAll().stream()
+            .filter(p -> !ownerCompanyId.equals(p.getCompanyId()))
+            .collect(Collectors.toList());
+
+        long verifiedCompanyCount = allExceptOwner.stream()
+            .filter(p -> "APPROVED".equals(p.getReviewStatus()) || "VERIFIED".equals(p.getReviewStatus()))
+            .count();
+
+        long totalIndustries = allExceptOwner.stream()
+            .flatMap(p -> p.getBusiness() != null && p.getBusiness().getIndustries() != null ? p.getBusiness().getIndustries().stream() : java.util.stream.Stream.empty())
+            .filter(Objects::nonNull)
+            .distinct()
+            .count();
+
         return DashboardSummaryDto.builder()
-                .totalCompanyProfiles(profileRepository.count())
+                .totalCompanyProfiles(allExceptOwner.size())
+                .verifiedCompanyCount(verifiedCompanyCount)
+                .totalIndustries(totalIndustries)
                 .totalProjects(projectRepository.count())
                 .totalCandidates(candidateRepository.count())
                 .approvedCandidates(candidateRepository.countByStatus(CandidateStatus.APPROVED))

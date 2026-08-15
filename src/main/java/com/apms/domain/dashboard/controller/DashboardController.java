@@ -22,7 +22,7 @@ public class DashboardController {
     private final DashboardService dashboardService;
 
     @GetMapping("/summary")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<DashboardSummaryDto>> getSummary() {
         return ResponseEntity.ok(ApiResponse.success(dashboardService.getSummary()));
     }
@@ -49,6 +49,13 @@ public class DashboardController {
     @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<List<GraphCompanyDto>>> getPotentialPartners() {
         return ResponseEntity.ok(ApiResponse.success(dashboardService.getPotentialPartners()));
+    }
+
+    @GetMapping("/recent-scores")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<List<Object>>> getRecentScores() {
+        // Mock empty response to prevent 500 errors on frontend
+        return ResponseEntity.ok(ApiResponse.success(List.of()));
     }
 
 

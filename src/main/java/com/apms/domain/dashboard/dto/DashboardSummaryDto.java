@@ -11,6 +11,8 @@ public class DashboardSummaryDto {
     private long totalCandidates;
     private long approvedCandidates;
     private long pendingReviewCandidates;
+    private long verifiedCompanyCount;
+    private long totalIndustries;
 
     private long partnerCount;
     private long competitorCount;

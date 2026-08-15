@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface PartnerContractExtractionDraftRepository extends MongoRepository<PartnerContractExtractionDraft, String> {
+public interface  PartnerContractExtractionDraftRepository extends MongoRepository<PartnerContractExtractionDraft, String> {
     List<PartnerContractExtractionDraft> findByPartnerContractId(Long partnerContractId);
     List<PartnerContractExtractionDraft> findByPartnerContractIdOrderByGeneratedAtDesc(Long partnerContractId);
     Optional<PartnerContractExtractionDraft> findByIdAndPartnerContractId(String id, Long partnerContractId);

@@ -287,9 +287,7 @@ public class ProfileService {
         Pageable effectivePageable = newestFirst(pageable);
         Criteria criteria = Criteria.where("isDeleted").ne(true);
 
-        if (excludeOwner) {
-            criteria.and("companyId").ne(ownerOrganizationService.getOwnerCompanyId());
-        }
+
 
         if (StringUtils.hasText(keyword)) {
             criteria.orOperator(
@@ -315,11 +313,15 @@ public class ProfileService {
             }
 
             // 2. Query Neo4j
-            String cypher = String.format("MATCH (c:CompanyNode)-[:%s]-(:CompanyNode) RETURN DISTINCT c.companyId AS companyId", relationshipType);
+            String cypher = String.format("MATCH (c:Company)-[:%s]-(:Company) RETURN DISTINCT c.companyId AS companyId", relationshipType);
             java.util.List<String> neo4jCompanyIds = new java.util.ArrayList<>(neo4jClient.query(cypher)
                     .fetchAs(String.class)
                     .mappedBy((typeSystem, record) -> record.get("companyId").asString())
                     .all());
+
+            if (excludeOwner) {
+                neo4jCompanyIds.remove(ownerOrganizationService.getOwnerCompanyId());
+            }
 
             if (neo4jCompanyIds.isEmpty()) {
                 return Page.empty(pageable);
@@ -327,6 +329,8 @@ public class ProfileService {
 
             // 3. Add to Mongo criteria
             criteria.and("companyId").in(neo4jCompanyIds);
+        } else if (excludeOwner) {
+            criteria.and("companyId").ne(ownerOrganizationService.getOwnerCompanyId());
         }
 
         Query query = new Query(criteria);
@@ -489,7 +493,7 @@ public class ProfileService {
     }
 
     private String resolveRelationshipType(String companyId) {
-        if (!StringUtils.hasText(companyId)) return "PARTNER_WITH";
+        if (!StringUtils.hasText(companyId)) return null;
         try {
             String cypher = "MATCH (c:Company {companyId: $companyId})-[r]-(:Company) RETURN type(r) LIMIT 1";
             java.util.List<String> types = new java.util.ArrayList<>(neo4jClient.query(cypher)
@@ -502,7 +506,7 @@ public class ProfileService {
         } catch (Exception e) {
             log.debug("Failed to resolve Neo4j relationship for companyId {}: {}", companyId, e.getMessage());
         }
-        return "PARTNER_WITH";
+        return null;
     }
 
     private CompanyProfile.Identity mapIdentity(CompanyCandidate.Identity i) {

@@ -24,9 +24,27 @@ public class GlobalExceptionHandler {
     }
 
     @ExceptionHandler(BusinessValidationException.class)
-    public ResponseEntity<ApiResponse<Void>> handleBusinessValidation(BusinessValidationException ex) {
-        log.warn("Business validation error: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error(ex.getMessage()));
+    public ResponseEntity<java.util.Map<String, Object>> handleBusinessValidation(BusinessValidationException ex) {
+        log.warn("Business validation error: [{}] {}", ex.getErrorCode(), ex.getMessage());
+
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("success", false);
+        body.put("message", ex.getMessage());
+        body.put("timestamp", java.time.LocalDateTime.now());
+
+        if (ex.getErrorCode() != null) {
+            body.put("errorCode", ex.getErrorCode());
+        }
+        if (ex.getDetails() != null && !ex.getDetails().isEmpty()) {
+            body.put("details", ex.getDetails());
+        }
+
+        // Use 422 for document company validation errors, 400 for others
+        HttpStatus status = ex.getErrorCode() != null && ex.getErrorCode().startsWith("DOCUMENT_COMPANY")
+                ? HttpStatus.UNPROCESSABLE_ENTITY
+                : HttpStatus.BAD_REQUEST;
+
+        return ResponseEntity.status(status).body(body);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

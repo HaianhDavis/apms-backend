@@ -30,6 +30,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.util.StringUtils;
+
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -47,6 +48,7 @@ public class ConfidentialNewsController {
     private final StepUpAuthenticationService stepUpAuthenticationService;
     private final StorageService storageService;
     private final AuditLogService auditLogService;
+    private final com.apms.domain.user.repository.sql.UserProfileRepository userProfileRepository;
 
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<CompanyIntelligenceArticleResponse>>> listArticles(
@@ -64,7 +66,27 @@ public class ConfidentialNewsController {
 
         Page<CompanyIntelligenceArticle> articlesPage = articleRepository.findByCompanyProfileIdAndIsDeletedFalseAndApprovedAtIsNotNull(companyProfileId, pageable);
         
-        PageResponse<CompanyIntelligenceArticleResponse> pageResponse = PageResponse.of(articlesPage.map(this::toResponse));
+        java.util.List<Long> approverIds = articlesPage.getContent().stream()
+                .map(CompanyIntelligenceArticle::getApprovedByAccountId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .collect(java.util.stream.Collectors.toList());
+        
+        java.util.Map<Long, String> approverMap = approverIds.isEmpty() ? java.util.Collections.emptyMap() :
+                userProfileRepository.findAllByAccountIdIn(approverIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(
+                                p -> p.getAccount().getId(), 
+                                p -> ((p.getFirstName() != null ? p.getFirstName() : "") + " " + (p.getLastName() != null ? p.getLastName() : "")).trim(), 
+                                (a, b) -> a));
+
+        PageResponse<CompanyIntelligenceArticleResponse> pageResponse = new PageResponse<>(
+                articlesPage.getContent().stream().map(article -> toResponse(article, approverMap)).toList(),
+                articlesPage.getNumber(),
+                articlesPage.getSize(),
+                articlesPage.getTotalElements(),
+                articlesPage.getTotalPages(),
+                articlesPage.isLast()
+        );
         
         return ResponseEntity.ok(ApiResponse.success(pageResponse));
     }
@@ -85,7 +107,13 @@ public class ConfidentialNewsController {
         UserDetailsImpl currentUser = getCurrentUser();
         auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_ARTICLE_VIEWED, "CompanyIntelligenceArticle", article.getId(), "Article viewed");
 
-        return ResponseEntity.ok(ApiResponse.success(toResponse(article)));
+        java.util.Map<Long, String> approverMap = new java.util.HashMap<>();
+        if (article.getApprovedByAccountId() != null) {
+            userProfileRepository.findByAccountId(article.getApprovedByAccountId())
+                    .ifPresent(p -> approverMap.put(p.getAccount().getId(), ((p.getFirstName() != null ? p.getFirstName() : "") + " " + (p.getLastName() != null ? p.getLastName() : "")).trim()));
+        }
+
+        return ResponseEntity.ok(ApiResponse.success(toResponse(article, approverMap)));
     }
 
     @GetMapping("/{articleId}/image")
@@ -143,13 +171,12 @@ public class ConfidentialNewsController {
             throw new AccessDeniedException("TOTP_STEP_UP_REQUIRED");
         }
     }
-
-    private void setNoCacheHeaders(HttpServletResponse response) {
+    private void setNoCacheHeaders(HttpServletResponse response) {
         response.setHeader(HttpHeaders.CACHE_CONTROL, "private, no-store, no-cache, must-revalidate");
         response.setHeader(HttpHeaders.PRAGMA, "no-cache");
     }
 
-    private CompanyIntelligenceArticleResponse toResponse(CompanyIntelligenceArticle article) {
+    private CompanyIntelligenceArticleResponse toResponse(CompanyIntelligenceArticle article, java.util.Map<Long, String> approverMap) {
         return CompanyIntelligenceArticleResponse.builder()
                 .id(article.getId())
                 .companyProfileId(article.getCompanyProfileId())
@@ -165,6 +192,7 @@ public class ConfidentialNewsController {
                 .capturedAt(article.getCapturedAt())
                 .tags(article.getTags())
                 .approvedAt(article.getApprovedAt())
+                .approvedBy(article.getApprovedByAccountId() != null ? approverMap.getOrDefault(article.getApprovedByAccountId(), "Unknown Approver") : null)
                 .createdAt(article.getCreatedAt())
                 .updatedAt(article.getUpdatedAt())
                 .build();
