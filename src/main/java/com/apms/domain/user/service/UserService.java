@@ -33,6 +33,12 @@ public class UserService {
 
     @Transactional
     public UserProfileResponse createUser(CreateUserRequest request, Long adminId) {
+        if (!request.getPassword().equals(request.getConfirmPassword())) {
+            throw new IllegalArgumentException("Password confirmation does not match");
+        }
+        if (request.getRoles().contains(SystemRole.RESEARCH_STAFF)) {
+            throw new IllegalArgumentException("Deprecated role is not allowed");
+        }
         if (accountRepository.existsByEmail(request.getEmail())) {
             throw new IllegalArgumentException("Email already exists: " + request.getEmail());
         }
@@ -41,6 +47,7 @@ public class UserService {
                 .email(request.getEmail())
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .isActive(request.getEnabled() != null ? request.getEnabled() : true)
+                .emailVerified(false)
                 .roles(request.getRoles())
                 .build();
         account = accountRepository.save(account);
@@ -61,7 +68,6 @@ public class UserService {
     public UserProfileResponse updateUser(Long targetUserId, UpdateUserRequest request, Long adminId) {
         Account account = accountRepository.findById(targetUserId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
-
         if (!account.getEmail().equals(request.getEmail()) && accountRepository.existsByEmail(request.getEmail())) {
             throw new IllegalArgumentException("Email already exists: " + request.getEmail());
         }
@@ -81,6 +87,25 @@ public class UserService {
         return mapToResponse(account, profile);
     }
 
+    @Transactional(readOnly = true)
+    public List<UserProfileResponse> listUsers() {
+        return accountRepository.findAll().stream()
+                .map(this::mapAccountToResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public void resetPassword(Long targetUserId, ResetPasswordRequest request, Long adminId) {
+        Account account = accountRepository.findById(targetUserId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        account.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        accountRepository.save(account);
+
+        auditLogService.log(adminId, AuditAction.USER_PASSWORD_RESET, "Account", account.getId().toString(),
+                "Reset password for: " + account.getEmail());
+    }
+
     @Transactional
     public void updateUserStatus(Long targetUserId, UpdateUserStatusRequest request, Long adminId) {
         if (targetUserId.equals(adminId) && !request.getEnabled()) {
@@ -90,10 +115,13 @@ public class UserService {
         Account account = accountRepository.findById(targetUserId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
-        account.setIsActive(request.getEnabled());
+        boolean activate = Boolean.TRUE.equals(request.getEnabled());
+        account.setIsActive(activate);
         accountRepository.save(account);
 
-        auditLogService.log(adminId, AuditAction.USER_STATUS_CHANGED, "Account", account.getId().toString(), "Changed status to: " + request.getEnabled());
+        AuditAction action = activate ? AuditAction.ACTIVATE_USER : AuditAction.DEACTIVATE_USER;
+        auditLogService.log(adminId, action, "Account", account.getId().toString(),
+                (activate ? "Activated user: " : "Deactivated user: ") + account.getEmail());
     }
 
     @Transactional
@@ -137,6 +165,7 @@ public class UserService {
                 .fullName((profile.getFirstName() + " " + profile.getLastName()).trim())
                 .roles(account.getRoles())
                 .enabled(account.getIsActive())
+                .emailVerified(account.getEmailVerified())
                 .createdAt(account.getCreatedAt())
                 .build();
     }
@@ -153,6 +182,7 @@ public class UserService {
                 .fullName(fullName)
                 .roles(account.getRoles())
                 .enabled(account.getIsActive())
+                .emailVerified(account.getEmailVerified())
                 .createdAt(account.getCreatedAt())
                 .build();
     }

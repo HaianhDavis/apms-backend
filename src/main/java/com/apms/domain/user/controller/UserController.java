@@ -49,6 +49,12 @@ public class UserController {
                 .body(ApiResponse.success(response, "User created successfully"));
     }
 
+    @GetMapping("/users")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<List<UserProfileResponse>>> listUsers() {
+        return ResponseEntity.ok(ApiResponse.success(userService.listUsers()));
+    }
+
     @PatchMapping("/users/{userId}")
     @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateUser(
@@ -69,6 +75,17 @@ public class UserController {
 
         userService.updateUserStatus(userId, request, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(null, "User status updated"));
+    }
+
+    @PatchMapping("/users/{userId}/password")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> resetPassword(
+            @PathVariable Long userId,
+            @Valid @RequestBody ResetPasswordRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        userService.resetPassword(userId, request, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(null, "Password reset"));
     }
 
     @GetMapping("/roles")

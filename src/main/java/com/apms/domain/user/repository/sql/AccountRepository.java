@@ -11,4 +11,6 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
     Optional<Account> findByEmailIgnoreCase(String email);
     List<Account> findTop10ByEmailContainingIgnoreCaseAndIsActiveTrue(String email);
     boolean existsByEmail(String email);
+
+    List<Account> findByEmailVerifiedFalse();
 }

@@ -24,6 +24,14 @@ public class UserDetailsImpl implements UserDetails {
 
     private Collection<? extends GrantedAuthority> authorities;
     private boolean isActive;
+    private boolean emailVerified;
+
+    /** Backward-compatible constructor for existing security unit tests/callers. */
+    public UserDetailsImpl(Long id, String email, String password,
+                           Collection<? extends GrantedAuthority> authorities,
+                           boolean isActive) {
+        this(id, email, password, authorities, isActive, true);
+    }
 
     public static UserDetailsImpl build(Account account) {
         List<GrantedAuthority> authorities = account.getRoles().stream()
@@ -35,7 +43,8 @@ public class UserDetailsImpl implements UserDetails {
                 account.getEmail(),
                 account.getPasswordHash(),
                 authorities,
-                account.getIsActive()
+                account.getIsActive(),
+                account.getEmailVerified()
         );
     }
 
@@ -73,4 +82,6 @@ public class UserDetailsImpl implements UserDetails {
     public boolean isEnabled() {
         return isActive;
     }
+
+    public boolean isEmailVerified() { return emailVerified; }
 }

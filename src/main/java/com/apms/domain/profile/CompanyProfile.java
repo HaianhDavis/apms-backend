@@ -83,6 +83,15 @@ public class CompanyProfile {
     @Builder.Default
     private List<CompanyMember> companyMembers = new ArrayList<>();
 
+    /**
+     * Per-year financial statements of the Owner Organization, embedded so the
+     * Owner and SYSTEM_ADMIN share the same data source.
+     * Each entry stores one report type (e.g. SUMMARY, BALANCE_SHEET) for one
+     * financial year; the same (reportType, reportYear) is unique per profile.
+     */
+    @Builder.Default
+    private List<FinancialReport> financialReports = new ArrayList<>();
+
     // ─────────────────────────────────────────────────────────────
     // Profile Metadata
     // ─────────────────────────────────────────────────────────────
@@ -120,6 +129,8 @@ public class CompanyProfile {
         private String tradeName;
         private String taxCode;
         private String registrationNumber;
+        private String stockTicker;
+        private String stockExchange;
     }
 
     @Data
@@ -237,5 +248,23 @@ public class CompanyProfile {
         private LocalDateTime researchedAt;
         private Long researchedBy;
         private Long taskId;
+    }
+
+    /**
+     * One financial statement (reportType + reportYear) embedded in the profile.
+     * {@code itemsJson} is a JSON {@code FinancialDocument} describing a single
+     * period: { unit, templace:[{code,name}], data:[{data:[{time, data:[{code,value}]}]}] }.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class FinancialReport {
+        private String reportType;
+        private String periodType;
+        private Integer reportYear;
+        private String reportPeriod;
+        private String itemsJson;
+        private String sourceUrl;
     }
 }

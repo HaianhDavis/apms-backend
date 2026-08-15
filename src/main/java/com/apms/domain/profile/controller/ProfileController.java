@@ -5,11 +5,15 @@ import com.apms.common.response.PageResponse;
 import com.apms.domain.profile.dto.ProfileResponse;
 import com.apms.domain.profile.dto.ProfileSourcesResponse;
 import com.apms.domain.profile.service.ProfileService;
+import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Set;
 
 @RestController
 @RequestMapping(path = {"/api/v1/profiles", "/api/v1/company-profiles"})
@@ -17,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 public class ProfileController {
 
     private final ProfileService profileService;
+    private final com.apms.common.security.StaffCompanyScopeEvaluator companyScope;
 
     // ─────────────────────────────────────────────
     // GET /api/v1/company-profiles (or /profiles)
@@ -32,8 +37,10 @@ public class ProfileController {
             @RequestParam(required = false) String relationshipType,
             @RequestParam(defaultValue = "false") boolean excludeOwner,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
+        Set<String> allowedCompanyIds = companyScope.allowedCompanyIds();
         PageResponse<ProfileResponse> response = PageResponse.of(
                 profileService.searchCompanyProfiles(keyword, industry, market, reviewStatus, relationshipType, excludeOwner, PageRequest.of(page, size)));
         return ResponseEntity.ok(ApiResponse.success(response));
@@ -44,7 +51,7 @@ public class ProfileController {
     // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/{companyId}")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyId)")
     public ResponseEntity<ApiResponse<ProfileResponse>> getProfile(
             @PathVariable String companyId) {
 
@@ -61,7 +68,8 @@ public class ProfileController {
             @RequestParam String name,
             @RequestParam(defaultValue = "false") boolean excludeOwner,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         PageResponse<ProfileResponse> response = PageResponse.of(
                 profileService.searchProfilesByName(name, excludeOwner, PageRequest.of(page, size)));
@@ -73,7 +81,7 @@ public class ProfileController {
     // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/{companyId}/sources")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyId)")
     public ResponseEntity<ApiResponse<ProfileSourcesResponse>> getProfileSources(
             @PathVariable String companyId) {
 

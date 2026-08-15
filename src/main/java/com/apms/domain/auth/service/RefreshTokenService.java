@@ -33,6 +33,10 @@ public class RefreshTokenService {
         Account account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
 
+        if (!Boolean.TRUE.equals(account.getIsActive()) || !Boolean.TRUE.equals(account.getEmailVerified())) {
+            throw new BusinessValidationException("Account is not eligible for token refresh");
+        }
+
         RefreshToken refreshToken = refreshTokenRepository.findByAccount(account)
                 .orElse(RefreshToken.builder()
                         .account(account)
@@ -61,6 +65,10 @@ public class RefreshTokenService {
 
         Account account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new BusinessValidationException("Account not found for token"));
+
+        if (!Boolean.TRUE.equals(account.getIsActive()) || !Boolean.TRUE.equals(account.getEmailVerified())) {
+            throw new BusinessValidationException("Account is not eligible for token refresh");
+        }
 
         RefreshToken token = refreshTokenRepository.findByAccount(account)
                 .orElseThrow(() -> new BusinessValidationException("Refresh token not found"));

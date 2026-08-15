@@ -19,7 +19,7 @@ public class CompanyProfileVersionController {
     private final CompanyProfileVersionService versionService;
 
     @GetMapping
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyProfileId))")
     public ResponseEntity<PageResponse<CompanyProfileVersionResponse>> getVersions(
             @PathVariable String companyProfileId,
             @RequestParam(defaultValue = "0") int page,
@@ -39,7 +39,7 @@ public class CompanyProfileVersionController {
     }
 
     @GetMapping("/{version}")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyProfileId))")
     public ResponseEntity<CompanyProfileVersionResponse> getVersion(
             @PathVariable String companyProfileId,
             @PathVariable Integer version) {

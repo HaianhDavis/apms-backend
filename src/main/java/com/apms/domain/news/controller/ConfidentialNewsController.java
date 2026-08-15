@@ -171,7 +171,8 @@ public class ConfidentialNewsController {
             throw new AccessDeniedException("TOTP_STEP_UP_REQUIRED");
         }
     }
-    private void setNoCacheHeaders(HttpServletResponse response) {
+
+    private void setNoCacheHeaders(HttpServletResponse response) {
         response.setHeader(HttpHeaders.CACHE_CONTROL, "private, no-store, no-cache, must-revalidate");
         response.setHeader(HttpHeaders.PRAGMA, "no-cache");
     }

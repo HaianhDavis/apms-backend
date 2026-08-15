@@ -136,13 +136,13 @@ public class AuditLogQueryService {
 
         return AuditLogResponse.builder()
                 .id(log.getId())
-                .actorUserId(log.getActorAccountId())
+                .actorAccountId(log.getActorAccountId())
                 .actorEmail(email)
                 .action(log.getAction().name())
                 .entityType(log.getEntityType())
                 .entityId(log.getEntityId())
-                .details(log.getDetail())
-                .createdAt(log.getTimestamp())
+                .detail(log.getDetail())
+                .timestamp(log.getTimestamp())
                 .build();
     }
 }
