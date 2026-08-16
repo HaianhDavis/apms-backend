@@ -10,9 +10,12 @@ import com.apms.domain.profile.dto.ProfileResponse;
 import com.apms.domain.profile.dto.ProfileSourcesResponse;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.profile.dto.UpdateCompanyProfileRequest;
+import com.apms.domain.profile.dto.UpdateAdminOwnerProfileRequest;
+import com.apms.domain.profile.CompanyProfileFinancialReport;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.common.enums.AuditAction;
+import com.apms.common.enums.SystemRole;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.security.UserDetailsImpl;
 import com.apms.domain.crawler.repository.TrackedCompanyRepository;
@@ -263,6 +266,10 @@ public class ProfileService {
             throw new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId);
         }
 
+        if (Boolean.TRUE.equals(profile.getIsHidden()) && !isCurrentUserSystemAdmin()) {
+            throw new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId);
+        }
+
         return toResponse(profile);
     }
 
@@ -285,7 +292,7 @@ public class ProfileService {
     @Transactional(readOnly = true)
     public Page<ProfileResponse> searchCompanyProfiles(String keyword, String industry, String market, String reviewStatus, String relationshipType, boolean excludeOwner, Pageable pageable) {
         Pageable effectivePageable = newestFirst(pageable);
-        Criteria criteria = Criteria.where("isDeleted").ne(true);
+        Criteria criteria = Criteria.where("isDeleted").ne(true).and("isHidden").ne(true);
 
 
 
@@ -344,7 +351,7 @@ public class ProfileService {
     @Transactional(readOnly = true)
     public Page<ProfileResponse> searchProfilesByName(String name, boolean excludeOwner, Pageable pageable) {
         Pageable effectivePageable = newestFirst(pageable);
-        Criteria criteria = Criteria.where("isDeleted").ne(true);
+        Criteria criteria = Criteria.where("isDeleted").ne(true).and("isHidden").ne(true);
 
         if (excludeOwner) {
             criteria.and("companyId").ne(ownerOrganizationService.getOwnerCompanyId());
@@ -404,22 +411,40 @@ public class ProfileService {
         }
 
         if (profile.getIdentity() == null) profile.setIdentity(new CompanyProfile.Identity());
-        if (StringUtils.hasText(request.getLegalName())) profile.getIdentity().setLegalName(request.getLegalName());
-        if (StringUtils.hasText(request.getTradeName())) profile.getIdentity().setTradeName(request.getTradeName());
+        if (request.getLegalName() != null) profile.getIdentity().setLegalName(request.getLegalName());
+        if (request.getTradeName() != null) profile.getIdentity().setTradeName(request.getTradeName());
+        if (request.getTaxCode() != null) profile.getIdentity().setTaxCode(request.getTaxCode());
+        if (request.getRegistrationNumber() != null) profile.getIdentity().setRegistrationNumber(request.getRegistrationNumber());
 
-        if (profile.getBusiness() == null) profile.setBusiness(new CompanyProfile.Business());
-        if (request.getIndustries() != null) profile.getBusiness().setIndustries(request.getIndustries());
-        if (request.getMarkets() != null) profile.getBusiness().setMarkets(request.getMarkets());
+        if (request.getStockTicker() != null) profile.setStockTicker(request.getStockTicker());
+        if (request.getStockExchange() != null) profile.setStockExchange(request.getStockExchange());
+
+        if (profile.getContact() == null) profile.setContact(new CompanyProfile.Contact());
+        if (request.getWebsite() != null) profile.getContact().setWebsite(request.getWebsite());
+        if (request.getEmails() != null) profile.getContact().setEmails(request.getEmails());
+        if (request.getPhones() != null) profile.getContact().setPhones(request.getPhones());
+        if (request.getAddress() != null) {
+            CompanyProfile.Address addr = CompanyProfile.Address.builder()
+                    .type("HEADQUARTERS")
+                    .fullAddress(request.getAddress())
+                    .build();
+            profile.getContact().setAddresses(java.util.List.of(addr));
+        }
 
         if (profile.getCompanySize() == null) profile.setCompanySize(new CompanyProfile.CompanySize());
         if (request.getEmployeeTier() != null) profile.getCompanySize().setEmployeeTier(request.getEmployeeTier());
         if (request.getEmployeeCount() != null) profile.getCompanySize().setEmployeeCount(request.getEmployeeCount());
         if (request.getRevenueTier() != null) profile.getCompanySize().setRevenueTier(request.getRevenueTier());
 
-        if (profile.getContact() == null) profile.setContact(new CompanyProfile.Contact());
-        if (StringUtils.hasText(request.getWebsite())) profile.getContact().setWebsite(request.getWebsite());
-        if (request.getEmails() != null) profile.getContact().setEmails(request.getEmails());
-        if (request.getPhones() != null) profile.getContact().setPhones(request.getPhones());
+        if (profile.getBusiness() == null) profile.setBusiness(new CompanyProfile.Business());
+        if (request.getBusinessModel() != null) profile.getBusiness().setBusinessModel(request.getBusinessModel());
+        if (request.getIndustries() != null) profile.getBusiness().setIndustries(request.getIndustries());
+        if (request.getProducts() != null) profile.getBusiness().setProducts(request.getProducts());
+        if (request.getMarkets() != null) profile.getBusiness().setMarkets(request.getMarkets());
+        if (request.getTargetCustomers() != null) profile.getBusiness().setTargetCustomers(request.getTargetCustomers());
+
+        if (request.getInsights() != null) profile.setInsights(request.getInsights());
+        if (request.getCompanyMembers() != null) profile.setCompanyMembers(request.getCompanyMembers());
 
         if (request.getTags() != null) profile.setTags(request.getTags());
 
@@ -465,6 +490,18 @@ public class ProfileService {
         return null;
     }
 
+    private boolean isCurrentUserSystemAdmin() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getPrincipal() instanceof UserDetailsImpl) {
+                UserDetailsImpl user = (UserDetailsImpl) auth.getPrincipal();
+                return user.getAuthorities().stream()
+                        .anyMatch(a -> a.getAuthority().equals("ROLE_" + SystemRole.SYSTEM_ADMIN.name()));
+            }
+        } catch (Exception ignored) {}
+        return false;
+    }
+
     // ─────────────────────────────────────────────
     // MAPPERS
     // ─────────────────────────────────────────────
@@ -484,6 +521,9 @@ public class ProfileService {
                 .risk(p.getRisk())
                 .compliance(p.getCompliance())
                 .companyMembers(p.getCompanyMembers())
+                .financialReports(p.getFinancialReports())
+                .stockTicker(p.getStockTicker())
+                .stockExchange(p.getStockExchange())
                 .reviewStatus(p.getReviewStatus())
                 .relationshipType(resolveRelationshipType(p.getCompanyId()))
                 .tags(p.getTags())
@@ -570,5 +610,223 @@ public class ProfileService {
                 .opportunities(i.getOpportunities())
                 .threats(i.getThreats())
                 .build();
+    }
+
+    private CompanyProfile findProfileByIdOrCompanyId(String identifier) {
+        if (identifier != null && identifier.length() == 24 && identifier.matches("^[0-9a-fA-F]{24}$")) {
+            return profileRepository.findById(identifier)
+                    .or(() -> profileRepository.findByCompanyId(identifier))
+                    .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found"));
+        }
+        return profileRepository.findByCompanyId(identifier)
+                .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found"));
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ProfileResponse> getCompanyProfilesForAdmin(String status, String keyword, int page, int size) {
+        Pageable pageable = PageRequest.of(page, size);
+        Page<CompanyProfile> profilesPage;
+        if (StringUtils.hasText(keyword)) {
+            if ("HIDDEN".equalsIgnoreCase(status)) {
+                profilesPage = profileRepository.searchHiddenProfiles(keyword.trim(), pageable);
+            } else {
+                profilesPage = profileRepository.searchActiveProfiles(keyword.trim(), pageable);
+            }
+        } else if ("HIDDEN".equalsIgnoreCase(status)) {
+            profilesPage = profileRepository.findHiddenProfiles(pageable);
+        } else {
+            profilesPage = profileRepository.findActiveProfiles(pageable);
+        }
+        return profilesPage.map(this::toResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public ProfileResponse getCompanyProfileForAdmin(String id) {
+        CompanyProfile p = findProfileByIdOrCompanyId(id);
+        return toResponse(p);
+    }
+
+    @Transactional
+    public ProfileResponse hideCompanyProfile(String id) {
+        CompanyProfile p = findProfileByIdOrCompanyId(id);
+        p.setIsHidden(true);
+        p.setVersion(p.getVersion() + 1);
+        if (p.getMetadata() == null) p.setMetadata(new CompanyProfile.Metadata());
+        p.getMetadata().setUpdatedAt(LocalDateTime.now());
+        Long userId = getCurrentUserId();
+        p.getMetadata().setLastModifiedBy(userId != null ? String.valueOf(userId) : "SYSTEM");
+        profileRepository.save(p);
+        if (userId != null) {
+            auditLogService.log(userId, AuditAction.COMPANY_PROFILE_HIDDEN, "CompanyProfile", p.getCompanyId(), "Profile hidden by admin");
+        }
+        return toResponse(p);
+    }
+
+    @Transactional
+    public ProfileResponse restoreCompanyProfile(String id) {
+        CompanyProfile p = findProfileByIdOrCompanyId(id);
+        p.setIsHidden(false);
+        p.setVersion(p.getVersion() + 1);
+        if (p.getMetadata() == null) p.setMetadata(new CompanyProfile.Metadata());
+        p.getMetadata().setUpdatedAt(LocalDateTime.now());
+        Long userId = getCurrentUserId();
+        p.getMetadata().setLastModifiedBy(userId != null ? String.valueOf(userId) : "SYSTEM");
+        profileRepository.save(p);
+        if (userId != null) {
+            auditLogService.log(userId, AuditAction.COMPANY_PROFILE_RESTORED, "CompanyProfile", p.getCompanyId(), "Profile restored by admin");
+        }
+        return toResponse(p);
+    }
+
+    @Transactional
+    public void deleteProfilePermanently(String id) {
+        CompanyProfile p = findProfileByIdOrCompanyId(id);
+        profileRepository.delete(p);
+        Long userId = getCurrentUserId();
+        if (userId != null) {
+            auditLogService.log(userId, AuditAction.COMPANY_PROFILE_PERMANENTLY_DELETED, "CompanyProfile", p.getCompanyId(), "Profile permanently deleted by admin");
+        }
+    }
+
+    @Transactional
+    public ProfileResponse updateOwnerProfile(String ownerId, UpdateAdminOwnerProfileRequest req) {
+        CompanyProfile p = profileRepository.findByCompanyId(ownerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Owner CompanyProfile not found"));
+
+        if (Boolean.TRUE.equals(p.getIsDeleted())) {
+            throw new ResourceNotFoundException("Owner CompanyProfile not found");
+        }
+
+        if (p.getIdentity() == null) p.setIdentity(new CompanyProfile.Identity());
+        if (req.getLegalName() != null) p.getIdentity().setLegalName(req.getLegalName());
+        if (req.getTradeName() != null) p.getIdentity().setTradeName(req.getTradeName());
+        if (req.getTaxCode() != null) p.getIdentity().setTaxCode(req.getTaxCode());
+        if (req.getRegistrationNumber() != null) p.getIdentity().setRegistrationNumber(req.getRegistrationNumber());
+
+        if (req.getStockTicker() != null) p.setStockTicker(req.getStockTicker());
+        if (req.getStockExchange() != null) p.setStockExchange(req.getStockExchange());
+
+        if (p.getContact() == null) p.setContact(new CompanyProfile.Contact());
+        if (req.getWebsite() != null) p.getContact().setWebsite(req.getWebsite());
+        if (req.getEmails() != null) p.getContact().setEmails(req.getEmails());
+        if (req.getPhones() != null) p.getContact().setPhones(req.getPhones());
+        if (req.getAddress() != null) {
+            CompanyProfile.Address addr = CompanyProfile.Address.builder()
+                    .type("HEADQUARTERS")
+                    .fullAddress(req.getAddress())
+                    .build();
+            p.getContact().setAddresses(java.util.List.of(addr));
+        }
+
+        if (p.getCompanySize() == null) p.setCompanySize(new CompanyProfile.CompanySize());
+        if (req.getEmployeeTier() != null) p.getCompanySize().setEmployeeTier(req.getEmployeeTier());
+        if (req.getEmployeeCount() != null) p.getCompanySize().setEmployeeCount(req.getEmployeeCount());
+        if (req.getRevenueTier() != null) p.getCompanySize().setRevenueTier(req.getRevenueTier());
+
+        if (p.getBusiness() == null) p.setBusiness(new CompanyProfile.Business());
+        if (req.getBusinessModel() != null) p.getBusiness().setBusinessModel(req.getBusinessModel());
+        if (req.getIndustries() != null) p.getBusiness().setIndustries(req.getIndustries());
+        if (req.getProducts() != null) p.getBusiness().setProducts(req.getProducts());
+        if (req.getMarkets() != null) p.getBusiness().setMarkets(req.getMarkets());
+        if (req.getTargetCustomers() != null) p.getBusiness().setTargetCustomers(req.getTargetCustomers());
+
+        if (req.getInsights() != null) p.setInsights(req.getInsights());
+        if (req.getCompanyMembers() != null) p.setCompanyMembers(req.getCompanyMembers());
+
+        p.setVersion(p.getVersion() + 1);
+        if (p.getMetadata() == null) {
+            p.setMetadata(new CompanyProfile.Metadata());
+        }
+        p.getMetadata().setUpdatedAt(LocalDateTime.now());
+        Long currentUserId = getCurrentUserId();
+        p.getMetadata().setLastModifiedBy(currentUserId != null ? String.valueOf(currentUserId) : "SYSTEM");
+
+        profileRepository.save(p);
+
+        if (currentUserId != null) {
+            auditLogService.log(currentUserId, AuditAction.COMPANY_PROFILE_UPDATED, "CompanyProfile", ownerId, "Owner profile updated manually by admin");
+        }
+
+        return toResponse(p);
+    }
+
+    @Transactional
+    public ProfileResponse upsertOwnerFinancialReport(String ownerId, CompanyProfileFinancialReport report) {
+        CompanyProfile p = profileRepository.findByCompanyId(ownerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Owner CompanyProfile not found"));
+
+        if (Boolean.TRUE.equals(p.getIsDeleted())) {
+            throw new ResourceNotFoundException("Owner CompanyProfile not found");
+        }
+
+        if (p.getFinancialReports() == null) {
+            p.setFinancialReports(new java.util.ArrayList<>());
+        }
+
+        boolean found = false;
+        for (int i = 0; i < p.getFinancialReports().size(); i++) {
+            CompanyProfileFinancialReport existing = p.getFinancialReports().get(i);
+            if (existing.getReportType().equalsIgnoreCase(report.getReportType())
+                    && existing.getReportYear().equals(report.getReportYear())) {
+                p.getFinancialReports().set(i, report);
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            p.getFinancialReports().add(report);
+        }
+
+        p.setVersion(p.getVersion() + 1);
+        if (p.getMetadata() == null) {
+            p.setMetadata(new CompanyProfile.Metadata());
+        }
+        p.getMetadata().setUpdatedAt(LocalDateTime.now());
+        Long currentUserId = getCurrentUserId();
+        p.getMetadata().setLastModifiedBy(currentUserId != null ? String.valueOf(currentUserId) : "SYSTEM");
+
+        profileRepository.save(p);
+
+        if (currentUserId != null) {
+            auditLogService.log(currentUserId, AuditAction.COMPANY_PROFILE_UPDATED, "CompanyProfile", ownerId, 
+                "Owner profile financial report upserted: " + report.getReportType() + " " + report.getReportYear());
+        }
+
+        return toResponse(p);
+    }
+
+    @Transactional
+    public ProfileResponse deleteOwnerFinancialReport(String ownerId, String reportType, Integer reportYear) {
+        CompanyProfile p = profileRepository.findByCompanyId(ownerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Owner CompanyProfile not found"));
+
+        if (Boolean.TRUE.equals(p.getIsDeleted())) {
+            throw new ResourceNotFoundException("Owner CompanyProfile not found");
+        }
+
+        if (p.getFinancialReports() != null) {
+            boolean removed = p.getFinancialReports().removeIf(r -> 
+                r.getReportType().equalsIgnoreCase(reportType) && r.getReportYear().equals(reportYear)
+            );
+            if (removed) {
+                p.setVersion(p.getVersion() + 1);
+                if (p.getMetadata() == null) {
+                    p.setMetadata(new CompanyProfile.Metadata());
+                }
+                p.getMetadata().setUpdatedAt(LocalDateTime.now());
+                Long currentUserId = getCurrentUserId();
+                p.getMetadata().setLastModifiedBy(currentUserId != null ? String.valueOf(currentUserId) : "SYSTEM");
+
+                profileRepository.save(p);
+
+                if (currentUserId != null) {
+                    auditLogService.log(currentUserId, AuditAction.COMPANY_PROFILE_UPDATED, "CompanyProfile", ownerId, 
+                        "Owner profile financial report deleted: " + reportType + " " + reportYear);
+                }
+            }
+        }
+
+        return toResponse(p);
     }
 }

@@ -1,6 +1,7 @@
 package com.apms.domain.profile.dto;
 
 import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.profile.CompanyProfileFinancialReport;
 import lombok.Builder;
 import lombok.Data;
 
@@ -24,6 +25,10 @@ public class ProfileResponse {
     private com.apms.domain.company.model.RiskInfo risk;
     private com.apms.domain.company.model.ComplianceInfo compliance;
     private List<CompanyProfile.CompanyMember> companyMembers;
+    private List<CompanyProfileFinancialReport> financialReports;
+
+    private String stockTicker;
+    private String stockExchange;
 
     private String reviewStatus;
     private String relationshipType;

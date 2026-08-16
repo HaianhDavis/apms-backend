@@ -22,4 +22,16 @@ public interface CompanyProfileRepository extends MongoRepository<CompanyProfile
 
     @Query("{ 'sourceRefs.projectIds': ?0 }")
     java.util.List<CompanyProfile> findByProjectId(String projectId);
+
+    @Query("{ 'isDeleted': { $ne: true }, $or: [ { 'isHidden': false }, { 'isHidden': { $exists: false } } ] }")
+    Page<CompanyProfile> findActiveProfiles(Pageable pageable);
+
+    @Query("{ 'isDeleted': { $ne: true }, 'isHidden': true }")
+    Page<CompanyProfile> findHiddenProfiles(Pageable pageable);
+
+    @Query("{ '$and': [ { 'isDeleted': { $ne: true } }, { '$or': [ { 'isHidden': false }, { 'isHidden': { $exists: false } } ] }, { '$or': [ { 'identity.legalName': { $regex: ?0, $options: 'i' } }, { 'identity.tradeName': { $regex: ?0, $options: 'i' } }, { 'companyId': { $regex: ?0, $options: 'i' } } ] } ] }")
+    Page<CompanyProfile> searchActiveProfiles(String keyword, Pageable pageable);
+
+    @Query("{ '$and': [ { 'isDeleted': { $ne: true } }, { 'isHidden': true }, { '$or': [ { 'identity.legalName': { $regex: ?0, $options: 'i' } }, { 'identity.tradeName': { $regex: ?0, $options: 'i' } }, { 'companyId': { $regex: ?0, $options: 'i' } } ] } ] }")
+    Page<CompanyProfile> searchHiddenProfiles(String keyword, Pageable pageable);
 }

@@ -121,6 +121,13 @@ public class UserService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
+    public List<UserProfileResponse> getAllUsers() {
+        return accountRepository.findAll().stream()
+                .map(this::mapAccountToResponse)
+                .collect(Collectors.toList());
+    }
+
     private UserProfileResponse getProfileResponse(Long userId) {
         Account account = accountRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));

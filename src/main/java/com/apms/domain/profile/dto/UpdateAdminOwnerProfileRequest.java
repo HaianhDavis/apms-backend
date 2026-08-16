@@ -6,7 +6,7 @@ import lombok.Data;
 import java.util.List;
 
 @Data
-public class UpdateCompanyProfileRequest {
+public class UpdateAdminOwnerProfileRequest {
     private String legalName;
     private String tradeName;
     private String taxCode;
@@ -27,5 +27,4 @@ public class UpdateCompanyProfileRequest {
     private List<String> markets;
     private List<String> targetCustomers;
     private List<CompanyProfile.CompanyMember> companyMembers;
-    private List<String> tags;
 }
