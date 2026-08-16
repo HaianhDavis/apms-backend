@@ -3,21 +3,22 @@ package com.apms.domain.admin.dto;
 import lombok.Builder;
 import lombok.Data;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
 @Builder
 public class SystemHealthResponse {
-    private List<ServiceHealthDto> services;
+
+    private List<ServiceHealth> services;
 
     @Data
     @Builder
-    public static class ServiceHealthDto {
+    public static class ServiceHealth {
         private String name;
+        /** UP, DOWN, DEGRADED, NOT_CONFIGURED */
         private String status;
         private Long latencyMs;
-        private LocalDateTime lastChecked;
+        private String lastChecked;
         private String errorReason;
     }
 }

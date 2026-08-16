@@ -80,6 +80,9 @@ public class CompanyProfile {
     private com.apms.domain.company.model.RiskInfo risk;
     private com.apms.domain.company.model.ComplianceInfo compliance;
 
+    private String stockTicker;
+    private String stockExchange;
+
     @Builder.Default
     private List<CompanyMember> companyMembers = new ArrayList<>();
 

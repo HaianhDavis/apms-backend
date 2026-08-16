@@ -51,7 +51,7 @@ public class ProfileController {
     // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/{companyId}")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyId)")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyId)")
     public ResponseEntity<ApiResponse<ProfileResponse>> getProfile(
             @PathVariable String companyId) {
 
@@ -81,7 +81,7 @@ public class ProfileController {
     // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/{companyId}/sources")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyId)")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyId)")
     public ResponseEntity<ApiResponse<ProfileSourcesResponse>> getProfileSources(
             @PathVariable String companyId) {
 

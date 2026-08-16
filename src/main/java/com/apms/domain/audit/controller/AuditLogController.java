@@ -1,5 +1,6 @@
 package com.apms.domain.audit.controller;
 
+import com.apms.common.enums.AuditAction;
 import com.apms.common.response.ApiResponse;
 import com.apms.common.response.PageResponse;
 import com.apms.domain.audit.dto.AuditLogResponse;
@@ -40,6 +41,12 @@ public class AuditLogController {
                 auditLogQueryService.searchAuditLogs(actorUserId, action, entityType, entityId, fromDate, toDate, pageable));
 
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @GetMapping("/actions")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<AuditAction[]>> getAuditLogActions() {
+        return ResponseEntity.ok(ApiResponse.success(AuditAction.values()));
     }
 
     @GetMapping("/export")

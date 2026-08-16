@@ -25,6 +25,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -42,6 +43,7 @@ public class GraphService {
     private final CompanyProfileRepository profileRepository;
     private final ProjectRepository projectRepository;
     private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
+    private final com.apms.domain.profile.service.CompanyVisibilityGuard companyVisibilityGuard;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // ─────────────────────────────────────────────
@@ -227,6 +229,7 @@ public class GraphService {
         CompanyNode node = companyNodeRepository.findByCompanyId(companyId)
                 .orElse(null);
         if (node == null) return null;
+        if (!companyVisibilityGuard.isVisibleToNonAdmin(companyId)) return null;
 
         List<CompanyRelationshipDto> relationships = getOutgoingRelationships(companyId);
 
@@ -241,7 +244,11 @@ public class GraphService {
     }
 
     public List<GraphCompanyDto> getNetwork() {
+        Set<String> existing = companyVisibilityGuard.existingCompanyIds();
+        Set<String> nonVisible = companyVisibilityGuard.nonVisibleCompanyIds();
         return companyNodeRepository.findAllNodes().stream()
+                .filter(node -> existing.contains(node.getCompanyId()))
+                .filter(node -> !nonVisible.contains(node.getCompanyId()))
                 .map(node -> GraphCompanyDto.builder()
                         .companyId(node.getCompanyId())
                         .name(node.getName())
@@ -304,6 +311,8 @@ public class GraphService {
 
         String cypher = String.format("MATCH (c:Company)-[:%s]->() RETURN DISTINCT c", relType);
 
+        Set<String> existing = companyVisibilityGuard.existingCompanyIds();
+        Set<String> nonVisible = companyVisibilityGuard.nonVisibleCompanyIds();
         return neo4jClient.query(cypher)
                 .fetchAs(CompanyNode.class)
                 .mappedBy((typeSystem, record) -> {
@@ -315,6 +324,8 @@ public class GraphService {
                     return c;
                 })
                 .all().stream()
+                .filter(node -> existing.contains(node.getCompanyId()))
+                .filter(node -> !nonVisible.contains(node.getCompanyId()))
                 .map(node -> GraphCompanyDto.builder()
                         .companyId(node.getCompanyId())
                         .name(node.getName())
@@ -332,11 +343,16 @@ public class GraphService {
                    r.startDate as startDate, r.endDate as endDate, r.status as status, r.metadata as metadata
             """;
 
+        Set<String> existing = companyVisibilityGuard.existingCompanyIds();
+        Set<String> nonVisible = companyVisibilityGuard.nonVisibleCompanyIds();
+
         return (List<CompanyRelationshipDto>) neo4jClient.query(cypher)
                 .bindAll(Map.of("companyId", companyId))
                 .fetch()
                 .all()
                 .stream()
+                .filter(record -> existing.contains(record.get("targetCompanyId")))
+                .filter(record -> !nonVisible.contains(record.get("targetCompanyId")))
                 .map(record -> {
                     Map<String, Object> parsedMetadata = null;
                     String metadataStr = (String) record.get("metadata");

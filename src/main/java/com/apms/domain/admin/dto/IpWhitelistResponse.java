@@ -3,11 +3,16 @@ package com.apms.domain.admin.dto;
 import lombok.Builder;
 import lombok.Data;
 
-import java.util.List;
+import java.time.LocalDateTime;
 
 @Data
 @Builder
 public class IpWhitelistResponse {
-    private List<IpWhitelistEntryDto> entries;
+    private Long id;
+    private String ipAddress;
+    private String description;
     private Boolean enabled;
+    private Long createdById;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 }
