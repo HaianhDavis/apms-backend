@@ -8,6 +8,7 @@ import com.apms.domain.assistant.dto.OwnerContextResult;
 import com.apms.domain.assistant.dto.OwnerAiChatRequest;
 import com.apms.domain.assistant.dto.OwnerIntent;
 import com.apms.domain.assistant.repository.mongo.AiChatMessageRepository;
+import com.apms.domain.profile.CompanyProfile;
 import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -68,7 +69,7 @@ public class OwnerAiAssistantService {
 
         String companyProfileId = result.getContext().getCompanyProfile() != null
                 ? result.getContext().getCompanyProfile().getId()
-                : request.getCompanyProfileId();
+                : null;
 
         List<AiNavigationAction> navigationActions = result.getNavigationActions() != null ? result.getNavigationActions() : List.of();
 
@@ -106,7 +107,7 @@ public class OwnerAiAssistantService {
     private List<String> buildSuggestedActions(OwnerIntent intent, OwnerContextResult result) {
         String companyName = "this company";
         if (result.getContext() != null && result.getContext().getCompanyProfile() != null) {
-            com.apms.domain.profile.CompanyProfile p = result.getContext().getCompanyProfile();
+            CompanyProfile p = result.getContext().getCompanyProfile();
             if (p.getIdentity() != null) {
                 if (StringUtils.hasText(p.getIdentity().getLegalName())) {
                     companyName = p.getIdentity().getLegalName();
@@ -117,9 +118,16 @@ public class OwnerAiAssistantService {
         }
 
         return switch (intent) {
-            case COMPANY_PROFILE -> List.of(
+            case GREETING -> List.of(
+                    "Who are our current partners?",
+                    "Who are our current competitors?",
+                    "What risks should I pay attention to?",
+                    "What should I focus on strategically?"
+            );
+case COMPANY_PROFILE -> List.of(
                     "What is our relationship with " + companyName + "?",
                     "How close is our relationship with " + companyName + "?",
+                    "Should we strengthen our relationship with " + companyName + "?",
                     "Show recent public updates about " + companyName + "."
             );
             case COMPANY_RELATIONSHIP -> List.of(
@@ -132,9 +140,27 @@ public class OwnerAiAssistantService {
                     "What is our relationship with " + companyName + "?",
                     "What risks should I know about " + companyName + "?"
             );
+            case RELATIONSHIP_CLOSENESS -> List.of(
+                    "What is our relationship with " + companyName + "?",
+                    "Should we strengthen our relationship with " + companyName + "?",
+                    "What risks should I know about " + companyName + "?"
+            );
+            case RELATIONSHIP_STRENGTHEN -> List.of(
+                    "How close is our relationship with " + companyName + "?",
+                    "What risks should I know about " + companyName + "?",
+                    "What opportunities do we have with " + companyName + "?"
+            );
             case PARTNERS -> List.of(
-                    "Which partner relationships need attention?",
-                    "Which partners have recent risk signals?",
+                    "Which partners should I prioritize?",
+                    "Are there any partner relationships that need attention?",
+                    "What should I focus on strategically?"
+            );
+            case PARTNER_PRIORITY -> List.of(
+                    "Which relationships need my attention?",
+                    "What should I focus on strategically?"
+            );
+            case RELATIONSHIP_ATTENTION -> List.of(
+                    "Which partners should I prioritize?",
                     "What should I focus on strategically?"
             );
             case POTENTIAL_PARTNERS -> List.of(
@@ -147,16 +173,41 @@ public class OwnerAiAssistantService {
                     "Compare two competitors.",
                     "What should I focus on strategically?"
             );
-            case RISKS -> List.of(
-                    "What opportunities have been detected?",
-                    "Which relationships need attention?",
+            case COMPANY_COMPARE -> List.of(
+                    "What are the biggest risks in our ecosystem?",
+                    "What opportunities should we pursue?",
                     "What should I focus on strategically?"
             );
-            case OPPORTUNITIES -> List.of(
-                    "Which potential partners should I review?",
-                    "What risks should I pay attention to?",
-                    "What should I focus on strategically?"
-            );
+            case RISKS -> {
+                if (result.getContext() != null && result.getContext().getCompanyProfile() != null) {
+                    yield List.of(
+                            "What opportunities do we have with " + companyName + "?",
+                            "What is our relationship with " + companyName + "?",
+                            "How close is our relationship with " + companyName + "?",
+                            "Show recent public updates about " + companyName + "."
+                    );
+                }
+                yield List.of(
+                        "What opportunities should we pursue?",
+                        "Which relationships need my attention?",
+                        "What should I focus on strategically?"
+                );
+            }
+            case OPPORTUNITIES -> {
+                if (result.getContext() != null && result.getContext().getCompanyProfile() != null) {
+                    yield List.of(
+                            "What risks should I know about " + companyName + "?",
+                            "What is our relationship with " + companyName + "?",
+                            "How close is our relationship with " + companyName + "?",
+                            "Show recent public updates about " + companyName + "."
+                    );
+                }
+                yield List.of(
+                        "What are the biggest risks in our ecosystem?",
+                        "Which partners should I prioritize?",
+                        "What should I focus on strategically?"
+                );
+            }
             case STRATEGIC_RECOMMENDATION -> List.of(
                     "What risks should I review?",
                     "What opportunities have been detected?",

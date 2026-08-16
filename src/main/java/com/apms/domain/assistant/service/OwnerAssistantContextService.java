@@ -75,16 +75,16 @@ public class OwnerAssistantContextService {
         CompanyProfile targetProfile = null;
         List<CompanyProfile> compareTargets = new ArrayList<>();
         boolean targetRequired = isCompanyTargetRequired(intent);
-        boolean targetOptional = intent == OwnerIntent.RELATIONSHIP_CLOSENESS;
+        boolean targetOptional = intent == OwnerIntent.RELATIONSHIP_CLOSENESS || intent == OwnerIntent.RISKS || intent == OwnerIntent.OPPORTUNITIES;
         
         if (intent == OwnerIntent.COMPANY_COMPARE) {
             compareTargets = resolveCompareTargets(question, pageContextTarget);
             if (compareTargets.size() < 2) {
                 throw new ClarificationRequiredException("Please specify two companies to compare (e.g., 'Compare FPT and CMC').");
             }
-            return buildCompareContext(compareTargets, sources, ctx);
+            return buildCompareContext(compareTargets, sources, ctx, ownerBusinessCompanyId, ownerMongoId);
         } else if (targetRequired || targetOptional) {
-            targetProfile = resolveSingleTarget(question, pageContextTarget);
+            targetProfile = resolveSingleTarget(question, pageContextTarget, targetRequired);
             if (targetProfile == null && targetRequired) {
                 return OwnerContextResult.builder()
                         .intent(intent)
@@ -96,7 +96,7 @@ public class OwnerAssistantContextService {
         }
 
         // Handle deterministic intents
-        if (isDeterministic(intent)) {
+        if (isDeterministic(intent, targetProfile)) {
             return handleDeterministic(intent, ownerBusinessCompanyId, ownerMongoId, targetProfile, sources, ctx);
         }
 
@@ -128,16 +128,27 @@ public class OwnerAssistantContextService {
                 default -> "";
             };
             
-            List<GraphCompanyDto> rels = graphService.getCompaniesByRelationshipType(relType);
-            if (rels.isEmpty()) {
+            List<String> targetCompanyIds = neo4jClient.query("MATCH (a:Company)-[:" + relType + "]->(b:Company) WHERE a.companyId = $ownerId RETURN b.companyId as targetId")
+                    .bind(ownerBusinessCompanyId).to("ownerId")
+                    .fetchAs(String.class)
+                    .mappedBy((ts, record) -> record.get("targetId").asString())
+                    .all()
+                    .stream()
+                    .filter(id -> !ownerBusinessCompanyId.equals(id)) // Defensive exclusion
+                    .distinct()
+                    .toList();
+                    
+            List<CompanyProfile> targetProfiles = loadRelatedProfiles(targetCompanyIds);
+            
+            if (targetProfiles.isEmpty()) {
                 directAnswer = "There are currently no companies recorded as " + relType.replace("_", " ").toLowerCase() + " in APMS.";
             } else {
                 StringBuilder sb = new StringBuilder(title + "\n\n");
                 int count = 1;
-                for (GraphCompanyDto rel : rels) {
-                    sb.append(count++).append(". ").append(rel.getName()).append("\n");
+                for (CompanyProfile profile : targetProfiles) {
+                    sb.append(count++).append(". ").append(resolveCompanyName(profile)).append("\n");
                 }
-                sb.append("\nTotal: ").append(rels.size());
+                sb.append("\nTotal: ").append(targetProfiles.size());
                 directAnswer = sb.toString();
             }
         } else if (intent == OwnerIntent.COMPANY_RELATIONSHIP && targetProfile != null) {
@@ -243,6 +254,37 @@ public class OwnerAssistantContextService {
             navigationActions.add(buildNavigationAction(targetProfile));
         } else if (intent == OwnerIntent.OUT_OF_SCOPE) {
             directAnswer = "I can help with your APMS business ecosystem, company relationships, risks, opportunities, company intelligence, and strategic insights.\nThis question is outside the available Owner AI scope.";
+        } else if (intent == OwnerIntent.GREETING) {
+            directAnswer = "Hello! I can help you with your business ecosystem, partners, competitors, relationships, risks, opportunities, public company information, and strategic insights.";
+        } else if (intent == OwnerIntent.RISKS && targetProfile != null) {
+            StringBuilder sb = new StringBuilder("Risks for " + resolveCompanyName(targetProfile) + ":\n\n");
+            if (targetProfile.getInsights() != null) {
+                if (targetProfile.getInsights().getWeaknesses() != null && !targetProfile.getInsights().getWeaknesses().isEmpty()) {
+                    sb.append("Weaknesses:\n");
+                    targetProfile.getInsights().getWeaknesses().forEach(w -> sb.append("- ").append(w).append("\n"));
+                    sb.append("\n");
+                }
+                if (targetProfile.getInsights().getThreats() != null && !targetProfile.getInsights().getThreats().isEmpty()) {
+                    sb.append("Threats:\n");
+                    targetProfile.getInsights().getThreats().forEach(t -> sb.append("- ").append(t).append("\n"));
+                    sb.append("\n");
+                }
+            }
+            if (sb.toString().equals("Risks for " + resolveCompanyName(targetProfile) + ":\n\n")) {
+                directAnswer = "No specific risks (weaknesses or threats) are currently documented for " + resolveCompanyName(targetProfile) + " in APMS.";
+            } else {
+                directAnswer = sb.toString().trim();
+            }
+            navigationActions.add(buildNavigationAction(targetProfile));
+        } else if (intent == OwnerIntent.OPPORTUNITIES && targetProfile != null) {
+            StringBuilder sb = new StringBuilder("Opportunities with " + resolveCompanyName(targetProfile) + ":\n\n");
+            if (targetProfile.getInsights() != null && targetProfile.getInsights().getOpportunities() != null && !targetProfile.getInsights().getOpportunities().isEmpty()) {
+                targetProfile.getInsights().getOpportunities().forEach(o -> sb.append("- ").append(o).append("\n"));
+                directAnswer = sb.toString().trim();
+            } else {
+                directAnswer = "No specific opportunities are currently documented for " + resolveCompanyName(targetProfile) + " in APMS.";
+            }
+            navigationActions.add(buildNavigationAction(targetProfile));
         }
 
         if (directAnswer != null) {
@@ -266,33 +308,315 @@ public class OwnerAssistantContextService {
             ctx.append(buildStructuredCompanyProfileText(targetProfile)).append("\n");
             sources.add(AiSourceReference.builder().type("company_profiles").id(targetProfile.getId()).title(resolveCompanyName(targetProfile)).build());
         }
+        // P1 intents
+        if (intent == OwnerIntent.STRATEGIC_RECOMMENDATION) {
+            ctx.append("ANALYSIS TYPE: STRATEGIC_RECOMMENDATION\n\n");
+            var insights = ownerInsightsService.getInsights(null, null, null, null, org.springframework.data.domain.PageRequest.of(0, 10));
+            if (!insights.isEmpty()) {
+                ctx.append("OWNER ECOSYSTEM INSIGHTS\n\n");
+                int count = 1;
+                for (var insight : insights.getContent()) {
+                    ctx.append(count++).append(".\n");
+                    if (insight.getCompanyName() != null) {
+                        ctx.append("Company: ").append(insight.getCompanyName()).append("\n");
+                    }
 
-        if (intent == OwnerIntent.RISKS || intent == OwnerIntent.OPPORTUNITIES || intent == OwnerIntent.RECENT_SIGNALS || intent == OwnerIntent.STRATEGIC_RECOMMENDATION || intent == OwnerIntent.OWNER_INSIGHTS) {
-            List<String> ecosystemCompanyIds = new ArrayList<>(getCanonicalEcosystemCompanyIds(ownerBusinessCompanyId));
-            ecosystemCompanyIds.add(ownerBusinessCompanyId); // Include owner
+                    ctx.append("Issue: ").append(insight.getTitle()).append("\n");
+                    ctx.append("\n");
+                }
+                sources.add(AiSourceReference.builder().type("owner_insights").id("insights").title("Owner Insights").build());
+            } else {
+                return OwnerContextResult.builder().intent(intent).deterministic(true)
+                        .directAnswer("APMS currently does not contain enough approved actionable insights to form a strategic recommendation.")
+                        .navigationActions(navActions)
+                        .context(AssistantContext.builder().contextText("").sources(sources).build()).build();
+            }
+        } else if (intent == OwnerIntent.RELATIONSHIP_ATTENTION) {
+            ctx.append("ANALYSIS TYPE: RELATIONSHIP_ATTENTION\n\n");
+            var gc = graphService.getCompanyNodeWithRelationships(ownerBusinessCompanyId);
+            boolean hasData = false;
+            if (gc != null && gc.getRelationships() != null) {
+                for (var rel : gc.getRelationships()) {
+                    String relType = rel.getRelationshipType();
+                    if (List.of("PARTNER_WITH", "POTENTIAL_PARTNER_OF", "COMPETITOR_OF", "CUSTOMER_OF", "SUPPLIER_OF").contains(relType)) {
+                        String targetId = rel.getTargetCompanyId();
+                        var targetOpt = companyProfileRepository.findByCompanyId(targetId);
+                        if (targetOpt.isEmpty()) continue;
+                        CompanyProfile tp = targetOpt.get();
+                        
+                        ctx.append("Company: ").append(resolveCompanyName(tp)).append("\n");
+                        ctx.append("Relationship: ").append(relType).append("\n");
+                        
+                        closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerMongoId, tp.getId()).ifPresent(cl -> {
+                            Integer stars = cl.getOwnerStars() != null ? cl.getOwnerStars() : cl.getStars();
+                            if (stars != null) {
+                                ctx.append("Closeness: ").append(stars).append("/5 - ").append(getClosenessLabel(stars)).append("\n");
+                            }
+                        });
+                        
+                        var tpInsights = ownerInsightsService.getInsights(null, tp.getId(), null, null, org.springframework.data.domain.PageRequest.of(0, 3));
+                        if (!tpInsights.isEmpty()) {
+                            ctx.append("Owner Insights:\n");
+                            tpInsights.getContent().forEach(i -> ctx.append("- ").append(i.getTitle()).append("\n"));
+                        }
+                        ctx.append("\n");
+                        hasData = true;
+                    }
+                }
+            }
+            if (!hasData) {
+                return OwnerContextResult.builder().intent(intent).deterministic(true)
+                        .directAnswer("APMS currently does not contain enough approved ecosystem relationships to determine which need attention.")
+                        .navigationActions(navActions)
+                        .context(AssistantContext.builder().contextText("").sources(sources).build()).build();
+            }
+        } else if (intent == OwnerIntent.PARTNER_PRIORITY) {
+            ctx.append("ANALYSIS TYPE: PARTNER_PRIORITY\n\n");
+            var gc = graphService.getCompanyNodeWithRelationships(ownerBusinessCompanyId);
+            boolean hasData = false;
+            if (gc != null && gc.getRelationships() != null) {
+                for (var rel : gc.getRelationships()) {
+                    if ("PARTNER_WITH".equals(rel.getRelationshipType())) {
+                        String targetId = rel.getTargetCompanyId();
+                        var targetOpt = companyProfileRepository.findByCompanyId(targetId);
+                        if (targetOpt.isEmpty()) continue;
+                        CompanyProfile tp = targetOpt.get();
+                        
+                        ctx.append("PARTNER: ").append(resolveCompanyName(tp)).append("\n");
+                        ctx.append("Relationship: Partner\n");
+                        
+                        closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerMongoId, tp.getId()).ifPresent(cl -> {
+                            Integer stars = cl.getOwnerStars() != null ? cl.getOwnerStars() : cl.getStars();
+                            if (stars != null) {
+                                ctx.append("Closeness: ").append(stars).append("/5 - ").append(getClosenessLabel(stars)).append("\n");
+                            }
+                        });
+                        
+                        if (tp.getInsights() != null) {
+                            if (tp.getInsights().getStrengths() != null && !tp.getInsights().getStrengths().isEmpty()) {
+                                ctx.append("Strengths:\n");
+                                tp.getInsights().getStrengths().forEach(i -> ctx.append("* ").append(i).append("\n"));
+                            }
+                            if (tp.getInsights().getWeaknesses() != null && !tp.getInsights().getWeaknesses().isEmpty()) {
+                                ctx.append("Weaknesses:\n");
+                                tp.getInsights().getWeaknesses().forEach(i -> ctx.append("* ").append(i).append("\n"));
+                            }
+                            if (tp.getInsights().getOpportunities() != null && !tp.getInsights().getOpportunities().isEmpty()) {
+                                ctx.append("Opportunities:\n");
+                                tp.getInsights().getOpportunities().forEach(i -> ctx.append("* ").append(i).append("\n"));
+                            }
+                            if (tp.getInsights().getThreats() != null && !tp.getInsights().getThreats().isEmpty()) {
+                                ctx.append("Threats:\n");
+                                tp.getInsights().getThreats().forEach(i -> ctx.append("* ").append(i).append("\n"));
+                            }
+                        }
+                        
+                        var signals = externalDataRepository.findTop5ByRelatedCompanyIdInOrderByPublishedAtDesc(List.of(targetId));
+                        if (!signals.isEmpty()) {
+                            ctx.append("Recent Signals:\n");
+                            signals.forEach(s -> ctx.append("- ").append(s.getTitle()).append("\n"));
+                        }
+                        
+                        ctx.append("\n");
+                        hasData = true;
+                    }
+                }
+            }
+            if (!hasData) {
+                return OwnerContextResult.builder().intent(intent).deterministic(true)
+                        .directAnswer("APMS currently does not contain enough approved partners to recommend a priority.")
+                        .navigationActions(navActions)
+                        .context(AssistantContext.builder().contextText("").sources(sources).build()).build();
+            }
+        } else if (intent == OwnerIntent.RELATIONSHIP_STRENGTHEN) {
+            if (targetProfile == null) {
+                return OwnerContextResult.builder().intent(intent).deterministic(true)
+                        .directAnswer("APMS currently does not contain enough approved evidence to determine whether this relationship should be strengthened.")
+                        .navigationActions(navActions)
+                        .context(AssistantContext.builder().contextText("").sources(sources).build()).build();
+            }
             
-            if (intent == OwnerIntent.RISKS || intent == OwnerIntent.STRATEGIC_RECOMMENDATION || intent == OwnerIntent.RECENT_SIGNALS) {
-                var risks = externalDataRepository.findTop5ByCategoryAndRelatedCompanyIdInOrderByPublishedAtDesc(ExternalDataCategory.RISK, ecosystemCompanyIds);
-                if (risks.isEmpty() && intent == OwnerIntent.RISKS) {
-                    return OwnerContextResult.builder().intent(intent).deterministic(true)
-                            .directAnswer("No current risk signals are stored for your business ecosystem in APMS.")
-                            .context(AssistantContext.builder().contextText("").sources(List.of()).build()).build();
-                }
-                ctx.append("=== RECENT RISKS ===\n");
-                risks.forEach(r -> ctx.append("- ").append(r.getTitle()).append(" (").append(r.getRelatedCompanyName()).append(")\n"));
-                if (!risks.isEmpty()) sources.add(AiSourceReference.builder().type("external_data").id("risks").title("Risk Signals").build());
+            ctx.append("ANALYSIS TYPE: RELATIONSHIP_STRENGTHEN\n\n");
+            ctx.append("TARGET COMPANY\nName: ").append(resolveCompanyName(targetProfile)).append("\n\n");
+            
+            String relType = graphService.getCurrentRelationshipType(ownerBusinessCompanyId, targetProfile.getCompanyId());
+            if (relType != null) {
+                ctx.append("CURRENT RELATIONSHIP\nType: ").append(relType).append("\n\n");
             }
-            if (intent == OwnerIntent.OPPORTUNITIES || intent == OwnerIntent.STRATEGIC_RECOMMENDATION || intent == OwnerIntent.RECENT_SIGNALS) {
-                var opps = externalDataRepository.findTop5ByCategoryAndRelatedCompanyIdInOrderByPublishedAtDesc(ExternalDataCategory.OPPORTUNITY, ecosystemCompanyIds);
-                if (opps.isEmpty() && intent == OwnerIntent.OPPORTUNITIES) {
-                    return OwnerContextResult.builder().intent(intent).deterministic(true)
-                            .directAnswer("No current opportunity signals are stored for your business ecosystem in APMS.")
-                            .context(AssistantContext.builder().contextText("").sources(List.of()).build()).build();
+            
+            closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerMongoId, targetProfile.getId()).ifPresent(cl -> {
+                Integer stars = cl.getOwnerStars() != null ? cl.getOwnerStars() : cl.getStars();
+                if (stars != null) {
+                    ctx.append("RELATIONSHIP CLOSENESS\nStars: ").append(stars).append("/5\n");
+                    ctx.append("Level: ").append(getClosenessLabel(stars)).append("\n\n");
                 }
-                ctx.append("=== RECENT OPPORTUNITIES ===\n");
-                opps.forEach(r -> ctx.append("- ").append(r.getTitle()).append(" (").append(r.getRelatedCompanyName()).append(")\n"));
-                if (!opps.isEmpty()) sources.add(AiSourceReference.builder().type("external_data").id("opportunities").title("Opportunity Signals").build());
+            });
+            
+            if (targetProfile.getInsights() != null) {
+                ctx.append("SWOT\n");
+                if (targetProfile.getInsights().getStrengths() != null && !targetProfile.getInsights().getStrengths().isEmpty()) {
+                    ctx.append("Strengths:\n");
+                    targetProfile.getInsights().getStrengths().forEach(i -> ctx.append("* ").append(i).append("\n"));
+                }
+                if (targetProfile.getInsights().getWeaknesses() != null && !targetProfile.getInsights().getWeaknesses().isEmpty()) {
+                    ctx.append("Weaknesses:\n");
+                    targetProfile.getInsights().getWeaknesses().forEach(i -> ctx.append("* ").append(i).append("\n"));
+                }
+                if (targetProfile.getInsights().getOpportunities() != null && !targetProfile.getInsights().getOpportunities().isEmpty()) {
+                    ctx.append("Opportunities:\n");
+                    targetProfile.getInsights().getOpportunities().forEach(i -> ctx.append("* ").append(i).append("\n"));
+                }
+                if (targetProfile.getInsights().getThreats() != null && !targetProfile.getInsights().getThreats().isEmpty()) {
+                    ctx.append("Threats:\n");
+                    targetProfile.getInsights().getThreats().forEach(i -> ctx.append("* ").append(i).append("\n"));
+                }
+                ctx.append("\n");
             }
+            
+            var signals = externalDataRepository.findTop5ByRelatedCompanyIdInOrderByPublishedAtDesc(List.of(targetProfile.getCompanyId()));
+            if (!signals.isEmpty()) {
+                ctx.append("RECENT PUBLIC / EXTERNAL SIGNALS\n");
+                signals.forEach(s -> ctx.append("- ").append(s.getTitle()).append(" [").append(s.getCategory()).append("]\n"));
+                ctx.append("\n");
+            }
+        }
+
+        if (intent == OwnerIntent.RISKS) {
+            ctx.append("ANALYSIS TYPE: ECOSYSTEM_RISK_ANALYSIS\n\n");
+            var gc = graphService.getCompanyNodeWithRelationships(ownerBusinessCompanyId);
+            boolean hasData = false;
+            if (gc != null && gc.getRelationships() != null) {
+                ctx.append("RISK EVIDENCE\n\n");
+                for (var rel : gc.getRelationships()) {
+                    String relType = rel.getRelationshipType();
+                    if (List.of("PARTNER_WITH", "POTENTIAL_PARTNER_OF", "COMPETITOR_OF", "CUSTOMER_OF", "SUPPLIER_OF").contains(relType)) {
+                        String targetId = rel.getTargetCompanyId();
+                        var targetOpt = companyProfileRepository.findByCompanyId(targetId);
+                        if (targetOpt.isEmpty()) continue;
+                        CompanyProfile tp = targetOpt.get();
+                        
+                        boolean compHasData = false;
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("COMPANY: ").append(resolveCompanyName(tp)).append("\n");
+                        sb.append("Relationship: ").append(relType).append("\n");
+                        
+                        var closenessOpt = closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerMongoId, tp.getId());
+                        if (closenessOpt.isPresent()) {
+                            Integer stars = closenessOpt.get().getOwnerStars() != null ? closenessOpt.get().getOwnerStars() : closenessOpt.get().getStars();
+                            if (stars != null) {
+                                sb.append("Closeness: ").append(stars).append("/5 - ").append(getClosenessLabel(stars)).append("\n");
+                            }
+                        } else {
+                            sb.append("Closeness: Unrated\n");
+                        }
+                        
+                        if (tp.getInsights() != null) {
+                            if (tp.getInsights().getWeaknesses() != null && !tp.getInsights().getWeaknesses().isEmpty()) {
+                                sb.append("\nSWOT Weaknesses:\n");
+                                tp.getInsights().getWeaknesses().forEach(i -> sb.append("* ").append(i).append("\n"));
+                                compHasData = true;
+                            }
+                            if (tp.getInsights().getThreats() != null && !tp.getInsights().getThreats().isEmpty()) {
+                                sb.append("\nSWOT Threats:\n");
+                                tp.getInsights().getThreats().forEach(i -> sb.append("* ").append(i).append("\n"));
+                                compHasData = true;
+                            }
+                        }
+                        
+                        var risks = externalDataRepository.findTop5ByCategoryAndRelatedCompanyIdInOrderByPublishedAtDesc(ExternalDataCategory.RISK, List.of(targetId));
+                        if (!risks.isEmpty()) {
+                            sb.append("\nExternal Risk Signals:\n");
+                            risks.forEach(r -> sb.append("* ").append(r.getTitle()).append("\n"));
+                            compHasData = true;
+                        }
+                        
+                        var tpInsights = ownerInsightsService.getInsights(null, tp.getId(), null, null, org.springframework.data.domain.PageRequest.of(0, 3));
+                        if (!tpInsights.isEmpty()) {
+                            sb.append("\nOwner Insights:\n");
+                            tpInsights.getContent().forEach(i -> sb.append("* ").append(i.getTitle()).append("\n"));
+                            compHasData = true;
+                        }
+                        
+                        if (compHasData) {
+                            ctx.append(sb.toString()).append("\n\n");
+                            hasData = true;
+                        }
+                    }
+                }
+            }
+            if (!hasData) {
+                return OwnerContextResult.builder().intent(intent).deterministic(true)
+                        .directAnswer("APMS currently does not contain enough approved risk evidence to identify major ecosystem risks.")
+                        .navigationActions(navActions)
+                        .context(AssistantContext.builder().contextText("").sources(sources).build()).build();
+            }
+        } else if (intent == OwnerIntent.OPPORTUNITIES) {
+            ctx.append("ANALYSIS TYPE: ECOSYSTEM_OPPORTUNITY_ANALYSIS\n\n");
+            var gc = graphService.getCompanyNodeWithRelationships(ownerBusinessCompanyId);
+            boolean hasData = false;
+            if (gc != null && gc.getRelationships() != null) {
+                ctx.append("OPPORTUNITY CANDIDATES\n\n");
+                for (var rel : gc.getRelationships()) {
+                    String relType = rel.getRelationshipType();
+                    if (List.of("PARTNER_WITH", "POTENTIAL_PARTNER_OF").contains(relType)) {
+                        String targetId = rel.getTargetCompanyId();
+                        var targetOpt = companyProfileRepository.findByCompanyId(targetId);
+                        if (targetOpt.isEmpty()) continue;
+                        CompanyProfile tp = targetOpt.get();
+                        
+                        boolean compHasData = false;
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("COMPANY: ").append(resolveCompanyName(tp)).append("\n");
+                        sb.append("Relationship: ").append(relType).append("\n");
+                        
+                        var closenessOpt = closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerMongoId, tp.getId());
+                        if (closenessOpt.isPresent()) {
+                            Integer stars = closenessOpt.get().getOwnerStars() != null ? closenessOpt.get().getOwnerStars() : closenessOpt.get().getStars();
+                            if (stars != null) {
+                                sb.append("Closeness: ").append(stars).append("/5 - ").append(getClosenessLabel(stars)).append("\n");
+                            }
+                        } else {
+                            sb.append("Closeness: Unrated\n");
+                        }
+                        
+                        if (tp.getInsights() != null) {
+                            if (tp.getInsights().getOpportunities() != null && !tp.getInsights().getOpportunities().isEmpty()) {
+                                sb.append("\nSWOT Opportunities:\n");
+                                tp.getInsights().getOpportunities().forEach(i -> sb.append("* ").append(i).append("\n"));
+                                compHasData = true;
+                            }
+                        }
+                        
+                        var opps = externalDataRepository.findTop5ByCategoryAndRelatedCompanyIdInOrderByPublishedAtDesc(ExternalDataCategory.OPPORTUNITY, List.of(targetId));
+                        if (!opps.isEmpty()) {
+                            sb.append("\nExternal Opportunity Signals:\n");
+                            opps.forEach(r -> sb.append("* ").append(r.getTitle()).append("\n"));
+                            compHasData = true;
+                        }
+                        
+                        var tpInsights = ownerInsightsService.getInsights(null, tp.getId(), null, null, org.springframework.data.domain.PageRequest.of(0, 3));
+                        if (!tpInsights.isEmpty()) {
+                            sb.append("\nOwner Insights:\n");
+                            tpInsights.getContent().forEach(i -> sb.append("* ").append(i.getTitle()).append("\n"));
+                            compHasData = true;
+                        }
+                        
+                        if (compHasData) {
+                            ctx.append(sb.toString()).append("\n\n");
+                            hasData = true;
+                        }
+                    }
+                }
+            }
+            if (!hasData) {
+                return OwnerContextResult.builder().intent(intent).deterministic(true)
+                        .directAnswer("APMS currently does not contain enough approved opportunity evidence to recommend strategic opportunities.")
+                        .navigationActions(navActions)
+                        .context(AssistantContext.builder().contextText("").sources(sources).build()).build();
+            }
+        } else if (intent == OwnerIntent.RECENT_SIGNALS || intent == OwnerIntent.OWNER_INSIGHTS) {
+            List<String> ecosystemCompanyIds = new ArrayList<>(getCanonicalEcosystemCompanyIds(ownerBusinessCompanyId));
+            ecosystemCompanyIds.add(ownerBusinessCompanyId);
             if (intent == OwnerIntent.RECENT_SIGNALS) {
                 var allRecent = externalDataRepository.findTop5ByRelatedCompanyIdInOrderByPublishedAtDesc(ecosystemCompanyIds);
                 if (allRecent.isEmpty()) {
@@ -303,16 +627,16 @@ public class OwnerAssistantContextService {
                 ctx.append("=== RECENT SIGNALS ===\n");
                 allRecent.forEach(r -> ctx.append("- ").append(r.getTitle()).append(" [").append(r.getCategory()).append("] (").append(r.getRelatedCompanyName()).append(")\n"));
             }
-            if (intent == OwnerIntent.OWNER_INSIGHTS || intent == OwnerIntent.STRATEGIC_RECOMMENDATION) {
-                var insights = ownerInsightsService.getInsights(null, null, null, null, PageRequest.of(0, 10));
-                if (insights.isEmpty() && intent == OwnerIntent.OWNER_INSIGHTS) {
+            if (intent == OwnerIntent.OWNER_INSIGHTS) {
+                var insights = ownerInsightsService.getInsights(null, null, null, null, org.springframework.data.domain.PageRequest.of(0, 10));
+                if (insights.isEmpty()) {
                     return OwnerContextResult.builder().intent(intent).deterministic(true)
                             .directAnswer("No actionable Owner insights are currently available in APMS.")
                             .context(AssistantContext.builder().contextText("").sources(List.of()).build()).build();
                 }
                 ctx.append("=== ACTIONABLE INSIGHTS ===\n");
                 insights.getContent().forEach(i -> ctx.append("- [").append(i.getType()).append("] ").append(i.getTitle()).append("\n"));
-                if (!insights.isEmpty()) sources.add(AiSourceReference.builder().type("owner_insights").id("insights").title("Owner Insights").build());
+                sources.add(AiSourceReference.builder().type("owner_insights").id("insights").title("Owner Insights").build());
             }
         }
 
@@ -324,12 +648,64 @@ public class OwnerAssistantContextService {
                 .build();
     }
     
-    private OwnerContextResult buildCompareContext(List<CompanyProfile> targets, List<AiSourceReference> sources, StringBuilder ctx) {
+    private OwnerContextResult buildCompareContext(List<CompanyProfile> targets, List<AiSourceReference> sources, StringBuilder ctx, String ownerBusinessCompanyId, String ownerMongoId) {
         List<AiNavigationAction> navs = new ArrayList<>();
         ctx.append("=== COMPANY COMPARISON ===\n");
         for (CompanyProfile p : targets) {
             navs.add(buildNavigationAction(p));
-            ctx.append(formatProfile(p));
+            
+            ctx.append("--- ").append(resolveCompanyName(p)).append(" ---\n");
+            
+            String relType = graphService.getCurrentRelationshipType(ownerBusinessCompanyId, p.getCompanyId());
+            ctx.append("Relationship:\n").append(relType != null ? relType : "None").append("\n\n");
+            
+            var closenessOpt = closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerMongoId, p.getId());
+            if (closenessOpt.isPresent()) {
+                Integer stars = closenessOpt.get().getOwnerStars() != null ? closenessOpt.get().getOwnerStars() : closenessOpt.get().getStars();
+                if (stars != null) {
+                    ctx.append("Closeness:\n").append(stars).append("/5 - ").append(getClosenessLabel(stars)).append("\n\n");
+                }
+            } else {
+                ctx.append("Closeness:\nUnrated\n\n");
+            }
+            
+            if (p.getInsights() != null) {
+                if (p.getInsights().getStrengths() != null && !p.getInsights().getStrengths().isEmpty()) {
+                    ctx.append("Strengths:\n");
+                    p.getInsights().getStrengths().forEach(s -> ctx.append("* ").append(s).append("\n"));
+                    ctx.append("\n");
+                }
+                if (p.getInsights().getWeaknesses() != null && !p.getInsights().getWeaknesses().isEmpty()) {
+                    ctx.append("Weaknesses:\n");
+                    p.getInsights().getWeaknesses().forEach(s -> ctx.append("* ").append(s).append("\n"));
+                    ctx.append("\n");
+                }
+                if (p.getInsights().getOpportunities() != null && !p.getInsights().getOpportunities().isEmpty()) {
+                    ctx.append("Opportunities:\n");
+                    p.getInsights().getOpportunities().forEach(s -> ctx.append("* ").append(s).append("\n"));
+                    ctx.append("\n");
+                }
+                if (p.getInsights().getThreats() != null && !p.getInsights().getThreats().isEmpty()) {
+                    ctx.append("Threats:\n");
+                    p.getInsights().getThreats().forEach(s -> ctx.append("* ").append(s).append("\n"));
+                    ctx.append("\n");
+                }
+            }
+            
+            var signals = externalDataRepository.findTop5ByRelatedCompanyIdInOrderByPublishedAtDesc(List.of(p.getCompanyId()));
+            if (!signals.isEmpty()) {
+                ctx.append("Recent Signals:\n");
+                signals.forEach(s -> ctx.append("* ").append(s.getTitle()).append(" [").append(s.getCategory()).append("]\n"));
+                ctx.append("\n");
+            }
+            
+            var insights = ownerInsightsService.getInsights(null, p.getId(), null, null, org.springframework.data.domain.PageRequest.of(0, 3));
+            if (!insights.isEmpty()) {
+                ctx.append("Owner Insights:\n");
+                insights.getContent().forEach(i -> ctx.append("* ").append(i.getTitle()).append("\n"));
+                ctx.append("\n");
+            }
+            
             sources.add(AiSourceReference.builder().type("company_profiles").id(p.getId()).title(resolveCompanyName(p)).build());
         }
         return OwnerContextResult.builder()
@@ -350,7 +726,10 @@ public class OwnerAssistantContextService {
                 .build();
     }
 
-    private boolean isDeterministic(OwnerIntent intent) {
+    private boolean isDeterministic(OwnerIntent intent, CompanyProfile targetProfile) {
+        if (intent == OwnerIntent.RISKS && targetProfile != null) return true;
+        if (intent == OwnerIntent.OPPORTUNITIES && targetProfile != null) return true;
+        
         return intent == OwnerIntent.ECOSYSTEM_OVERVIEW ||
                intent == OwnerIntent.PARTNERS ||
                intent == OwnerIntent.POTENTIAL_PARTNERS ||
@@ -360,6 +739,7 @@ public class OwnerAssistantContextService {
                intent == OwnerIntent.COMPANY_RELATIONSHIP ||
                intent == OwnerIntent.INTERNAL_NEWS_PROTECTED ||
                intent == OwnerIntent.OUT_OF_SCOPE ||
+               intent == OwnerIntent.GREETING ||
                intent == OwnerIntent.RELATIONSHIP_CLOSENESS ||
                intent == OwnerIntent.COMPANY_PROFILE ||
                intent == OwnerIntent.COMPANY_PUBLIC_NEWS;
@@ -367,6 +747,11 @@ public class OwnerAssistantContextService {
 
     private OwnerIntent detectOwnerIntent(String question) {
         String lower = question.toLowerCase();
+        String trimmed = lower.replaceAll("[^a-z ]", "").trim();
+        
+        if (trimmed.equals("hi") || trimmed.equals("hello") || trimmed.equals("hey") || trimmed.equals("good morning") || trimmed.equals("thanks") || trimmed.equals("thank you")) {
+            return OwnerIntent.GREETING;
+        }
         
         if (lower.contains("internal news") || lower.contains("internal information") || lower.contains("confidential")) {
             return OwnerIntent.INTERNAL_NEWS_PROTECTED;
@@ -376,6 +761,23 @@ public class OwnerAssistantContextService {
             return OwnerIntent.OUT_OF_SCOPE;
         }
         
+        if (lower.contains("relationship") && (lower.contains("need attention") || lower.contains("review") || lower.contains("weak") || lower.contains("concerning") || lower.contains("attention"))) {
+            return OwnerIntent.RELATIONSHIP_ATTENTION;
+        }
+        if ((lower.contains("strengthen") || lower.contains("get closer") || lower.contains("invest more") || lower.contains("worth developing")) && lower.contains("relationship")) {
+            return OwnerIntent.RELATIONSHIP_STRENGTHEN;
+        }
+        if (lower.contains("partner") && (lower.contains("prioritize") || lower.contains("priority") || lower.contains("focus on"))) {
+            return OwnerIntent.PARTNER_PRIORITY;
+        }
+        if (lower.contains("strateg") || lower.contains("focus on") || lower.contains("priorities") || lower.contains("prioritize")) {
+            return OwnerIntent.STRATEGIC_RECOMMENDATION;
+        }
+
+        // Factual Intents
+        if (lower.contains("how close") || lower.contains("relationship closeness") || lower.contains("closeness") || lower.contains("relationship strength")) {
+            return OwnerIntent.RELATIONSHIP_CLOSENESS;
+        }
         if (lower.contains("relationship with") || lower.contains("connected to") || lower.contains("relationship do we have")) {
             return OwnerIntent.COMPANY_RELATIONSHIP;
         }
@@ -432,7 +834,9 @@ public class OwnerAssistantContextService {
                 .fetchAs(String.class)
                 .mappedBy((ts, record) -> record.get("targetId").asString())
                 .all()
-                .stream().toList();
+                .stream()
+                .filter(id -> !ownerCompanyId.equals(id))
+                .toList();
     }
 
     private List<CompanyProfile> loadRelatedProfiles(List<String> relatedCompanyIds) {
@@ -448,10 +852,11 @@ public class OwnerAssistantContextService {
         return intent == OwnerIntent.COMPANY_PROFILE || 
                intent == OwnerIntent.COMPANY_PUBLIC_NEWS || 
                intent == OwnerIntent.COMPANY_RELATIONSHIP || 
+               intent == OwnerIntent.RELATIONSHIP_STRENGTHEN ||
                intent == OwnerIntent.COMPANY_COMPARE;
     }
 
-    private CompanyProfile resolveSingleTarget(String question, CompanyProfile pageContextTarget) {
+    private CompanyProfile resolveSingleTarget(String question, CompanyProfile pageContextTarget, boolean targetRequired) {
         String lowerQ = question.toLowerCase();
         boolean isContextual = lowerQ.contains("this company") || lowerQ.contains("this organization") || 
                                lowerQ.contains("the current company") || lowerQ.contains("this business");
@@ -462,12 +867,20 @@ public class OwnerAssistantContextService {
             CompanyProfile explicitMatch = rankAndSelectMatch(extracted);
             if (explicitMatch != null) return explicitMatch;
             
-            throw new ClarificationRequiredException("I could not find an approved company profile matching \"" + extracted + "\" in APMS.");
+            if (targetRequired) {
+                throw new ClarificationRequiredException("I could not find an approved company profile matching \"" + extracted + "\" in APMS.");
+            } else {
+                return null;
+            }
         }
         
         if (isContextual) {
             if (pageContextTarget != null) return pageContextTarget;
-            throw new ClarificationRequiredException("Please specify the company name or open a company profile first.");
+            if (targetRequired) {
+                throw new ClarificationRequiredException("Please specify the company name or open a company profile first.");
+            } else {
+                return null;
+            }
         }
         
         if (pageContextTarget != null && (!StringUtils.hasText(extracted) || extracted.equals("about"))) {
@@ -486,9 +899,14 @@ public class OwnerAssistantContextService {
                               .replace("compare", "")
                               .replace("what relationship do we have with", "")
                               .replace("relationship do we have with", "")
+                              .replace("should we strengthen our relationship with", "")
                               .replace("what is our relationship with", "")
                               .replace("how close is our relationship with", "")
                               .replace("what public news do we have about", "")
+                              .replace("show recent public updates about", "")
+                              .replace("show recent public updates", "")
+                              .replace("what risks should i know about", "")
+                              .replace("what opportunities do we have with", "")
                               .replace("tell me about", "")
                               .replace("public news", "")
                               .replace("about", "")
@@ -556,15 +974,31 @@ public class OwnerAssistantContextService {
 
     private List<CompanyProfile> resolveCompareTargets(String question, CompanyProfile pageContext) {
         String lower = question.toLowerCase();
-        String cleaned = lower.replace("compare", "").replace("?", "").replace(".", "").trim();
-        String[] parts = cleaned.split(" and ");
-        if (parts.length == 2) {
-            CompanyProfile p1 = rankAndSelectMatch(parts[0].trim());
-            CompanyProfile p2 = rankAndSelectMatch(parts[1].trim());
-            List<CompanyProfile> res = new ArrayList<>();
-            if (p1 != null) res.add(p1);
-            if (p2 != null) res.add(p2);
-            return res;
+        String cleaned = lower.replace("compare", "")
+                              .replace("which is a better strategic partner,", "")
+                              .replace("should we prioritize", "")
+                              .replace("which should we focus on,", "")
+                              .replace("for partnership", "")
+                              .replace("?", "")
+                              .replace(".", "").trim();
+                              
+        String separator = null;
+        if (cleaned.contains(" and ")) separator = " and ";
+        else if (cleaned.contains(" vs. ")) separator = " vs. ";
+        else if (cleaned.contains(" vs ")) separator = " vs ";
+        else if (cleaned.contains(" or ")) separator = " or ";
+        else if (cleaned.contains(" with ")) separator = " with ";
+        
+        if (separator != null) {
+            String[] parts = cleaned.split(separator);
+            if (parts.length == 2) {
+                CompanyProfile p1 = rankAndSelectMatch(parts[0].trim());
+                CompanyProfile p2 = rankAndSelectMatch(parts[1].trim());
+                List<CompanyProfile> res = new ArrayList<>();
+                if (p1 != null) res.add(p1);
+                if (p2 != null) res.add(p2);
+                return res;
+            }
         }
         return List.of();
     }
@@ -646,5 +1080,17 @@ public class OwnerAssistantContextService {
         }
         sb.append("\n");
         return sb.toString();
+    }
+
+    private String getClosenessLabel(Integer stars) {
+        if (stars == null) return "Unrated";
+        return switch(stars) {
+            case 1 -> "Contact Only";
+            case 2 -> "Weak";
+            case 3 -> "Developing";
+            case 4 -> "Close";
+            case 5 -> "Strategic";
+            default -> "Unknown";
+        };
     }
 }

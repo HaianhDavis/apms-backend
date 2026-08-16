@@ -8,6 +8,7 @@ import com.apms.common.enums.TaskType;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
+import com.apms.domain.profile.CompanyProfileVersion;
 import com.apms.domain.profile.repository.mongo.CompanyProfileUpdateProposalRepository;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectTask;
@@ -245,7 +246,7 @@ public class ProjectTaskSubmissionService {
             throw new IllegalArgumentException("Submission does not belong to specified task");
         }
 
-        if (submission.getProjectTask().getTaskType() == com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION) {
+        if (submission.getProjectTask().getTaskType() == TaskType.COMPANY_DATA_PREPARATION) {
             validateManagerAuthorization(submission, currentUser, projectId, taskId);
 
             if ("CompanyCandidate".equals(submission.getTargetEntityType())) {
@@ -295,7 +296,7 @@ public class ProjectTaskSubmissionService {
                         @SuppressWarnings("unchecked")
                         java.util.Map<String, Object> snapshotMap = objectMapper.convertValue(profile, java.util.Map.class);
 
-                        com.apms.domain.profile.CompanyProfileVersion versionSnapshot = com.apms.domain.profile.CompanyProfileVersion.builder()
+                        CompanyProfileVersion versionSnapshot = CompanyProfileVersion.builder()
                                 .companyProfileId(profile.getId())
                                 .companyId(profile.getCompanyId())
                                 .version(profile.getVersion())

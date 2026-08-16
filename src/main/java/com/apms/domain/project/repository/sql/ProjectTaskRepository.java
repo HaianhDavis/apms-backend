@@ -5,6 +5,16 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
 public interface ProjectTaskRepository extends JpaRepository<ProjectTask, Long>, JpaSpecificationExecutor<ProjectTask> {
+    
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"project"})
+    java.util.List<ProjectTask> findByAssignedToAccount_Id(Long accountId);
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"project", "assignedToAccount"})
+    java.util.List<ProjectTask> findByProject_IdIn(java.util.List<Long> projectIds);
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"project", "assignedToAccount"})
+    java.util.List<ProjectTask> findByProject_Id(Long projectId);
+    
     int countByProjectIdAndStatusIn(Long projectId, java.util.Collection<com.apms.common.enums.TaskStatus> statuses);
     java.util.List<ProjectTask> findByProjectIdAndTaskTypeAndTargetCompanyProfileIdIsNull(Long projectId, com.apms.common.enums.TaskType taskType);
     boolean existsByProjectIdAndAssignedToAccountIdAndStatusNotIn(Long projectId, Long assignedToAccountId, java.util.Collection<com.apms.common.enums.TaskStatus> statuses);

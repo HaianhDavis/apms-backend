@@ -1,5 +1,7 @@
 package com.apms.domain.assistant.service;
 
+import com.apms.common.enums.SubmissionStatus;
+import com.apms.common.enums.TaskStatus;
 import com.apms.common.exception.BusinessValidationException;
 import com.apms.common.security.ProjectSecurityEvaluator;
 import com.apms.domain.assistant.AiChatMessage;
@@ -30,8 +32,6 @@ import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
 import com.apms.domain.candidate.CompanyCandidate;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.profile.CompanyProfile;
-import com.apms.common.enums.SubmissionStatus;
-import com.apms.common.enums.TaskStatus;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
@@ -73,10 +73,27 @@ public class AiAssistantService {
             throw new BusinessValidationException("User not authenticated.");
         }
 
+        boolean staffOnly = isStaff(currentUser) && !isManagerOrOwner(currentUser);
+        boolean managerOnly = isManager(currentUser) && !isOwner(currentUser);
+
         // ── 2. Authorisation — project access ─────────────────────────────────
-        if (!projectSecurity.isMemberOrOwner(request.getProjectId())) {
-            throw new BusinessValidationException(
-                    "Access denied: you do not have access to project " + request.getProjectId());
+        if (staffOnly) {
+            if (!projectSecurity.isMemberOrOwner(request.getProjectId())) {
+                throw new BusinessValidationException(
+                        "Access denied: you do not have access to project " + request.getProjectId());
+            }
+        }
+
+        if (managerOnly) {
+            ManagerIntent managerIntent = detectManagerIntent(request.getQuestion());
+            boolean projectSpecific = managerIntent == ManagerIntent.TASK_OVERVIEW;
+
+            if (projectSpecific && request.getProjectId() != null) {
+                if (!projectSecurity.isManager(request.getProjectId())) {
+                    throw new BusinessValidationException(
+                            "Access denied: you do not manage project " + request.getProjectId());
+                }
+            }
         }
 
         // ── 3. Session ID ─────────────────────────────────────────────────────
@@ -87,11 +104,12 @@ public class AiAssistantService {
         // ── 4. Build approved context ─────────────────────────────────────────
         AssistantContext context;
         List<AiNavigationAction> navigationActions = new java.util.ArrayList<>();
-        if (isStaff(currentUser) && !isManagerOrOwner(currentUser)) {
+        if (staffOnly) {
             context = buildStaffContext(request, currentUser);
-        } else if (isManager(currentUser) && !isOwner(currentUser)) {
+        } else if (managerOnly) {
             context = buildManagerContext(request, currentUser, navigationActions);
         } else {
+            // OWNER AI (uses its own independent authorization inside contextService)
             context = contextService.buildContext(
                     request.getProjectId(),
                     request.getCompanyProfileId()
@@ -100,10 +118,10 @@ public class AiAssistantService {
 
         // ── 5. Generate answer ────────────────────────────────────────────────
         String answer;
-        boolean isStaffSimple = isStaff(currentUser) && !isManagerOrOwner(currentUser) &&
+        boolean isStaffSimple = staffOnly &&
             isDeterministicIntent(detectStaffIntent(request.getQuestion()));
 
-        boolean isManagerSimple = isManager(currentUser) && !isOwner(currentUser) &&
+        boolean isManagerSimple = managerOnly &&
             (isDeterministicManagerIntent(detectManagerIntent(request.getQuestion())) ||
              (context != null && context.getContextText().startsWith("DIRECT_ANSWER:")));
 
@@ -137,26 +155,26 @@ public class AiAssistantService {
                 .sources(sourceLabels)
                 .suggestedActions(suggestedActions)
                 .navigationActions(navigationActions)
-                .createdAt(LocalDateTime.now())
-                .build();
+                    .createdAt(LocalDateTime.now())
+                    .build();
 
-        chatMessageRepository.save(message);
-        log.info("AI assistant chat saved: sessionId={}, userId={}, projectId={}",
-                sessionId, currentUser.getId(), request.getProjectId());
+            chatMessageRepository.save(message);
+            log.info("AI assistant chat saved: sessionId={}, userId={}, projectId={}",
+                    sessionId, currentUser.getId(), request.getProjectId());
 
-        // ── 8. Return response ─────────────────────────────────────────────────
-        return AiChatResponse.builder()
-                .sessionId(sessionId)
-                .answer(answer)
-                .sources(context.getSources())
-                .suggestedActions(suggestedActions)
-                .navigationActions(navigationActions)
-                .build();
-    }
+            // ── 8. Return response ─────────────────────────────────────────────────
+            return AiChatResponse.builder()
+                    .sessionId(sessionId)
+                    .answer(answer)
+                    .sources(context.getSources())
+                    .suggestedActions(suggestedActions)
+                    .navigationActions(navigationActions)
+                    .build();
+        }
 
-    // ─── Helpers ─────────────────────────────────────────────────────────────
+        // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    private boolean isStaff(UserDetailsImpl user) {
+        private boolean isStaff(UserDetailsImpl user) {
         return user.getAuthorities().stream()
                 .anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DEVELOPMENT_STAFF"));
     }
@@ -212,6 +230,8 @@ public class AiAssistantService {
             return ManagerIntent.MY_PROJECTS;
         }
         if (lower.contains("project progress") || lower.contains("progress of this project")
+                || lower.contains("progress of my projects") || lower.contains("projects progressing")
+                || lower.contains("team progressing")
                 || lower.contains("on track") || lower.contains("work has been completed")) {
             return ManagerIntent.PROJECT_PROGRESS;
         }
@@ -370,7 +390,8 @@ public class AiAssistantService {
             return StaffIntent.DEADLINE_PRIORITY;
         }
 
-        if (lower.contains("task detail")
+        if (lower.contains("What tasks are status")
+                || lower.contains("task detail")
                 || lower.contains("task details")
                 || lower.contains("task description")
                 || lower.contains("task requirement")
@@ -384,10 +405,19 @@ public class AiAssistantService {
 
         if (lower.contains("status")
                 || lower.contains("incomplete")
+                || lower.contains("unfinished")
                 || lower.contains("todo")
+                || lower.contains("not started")
                 || lower.contains("in progress")
+                || lower.contains("in review")
+                || lower.contains("waiting for review")
+                || lower.contains("blocked")
                 || lower.contains("completed")
-                || lower.contains("finished")) {
+                || lower.contains("finished")
+                || lower.contains("done")
+                || lower.contains("cancelled")
+                || lower.contains("canceled")) {
+
             return StaffIntent.TASK_STATUS;
         }
 
@@ -416,59 +446,315 @@ public class AiAssistantService {
                     ctxText.append("You are currently participating in ").append(projects.getNumberOfElements()).append(" project(s).\n\n");
                     int i = 1;
                     for (Project p : projects) {
-                        ctxText.append("Project ").append(i++).append("  \n")
-                               .append("Name: ").append(p.getProjectName()).append("  \n")
-                               .append("Status: ").append(formatEnum(p.getStatus().name())).append("  \n")
-                               .append("Type: ").append(formatEnum(p.getProjectType() != null ? p.getProjectType().name() : null)).append("  \n")
-                               .append("Target: ").append(p.getTargetCompanyName() != null ? p.getTargetCompanyName() : "N/A").append("\n\n")
-                                .append("Description: ").append(p.getDescription()).append("  \n")
-                                .append("Start date: ").append(formatDate(p.getCreatedAt() != null ? p.getCreatedAt().toLocalDate() : null)).append("  \n")
-                                .append("Due date: ").append(formatDate(p.getPlannedEndDate() != null ? p.getPlannedEndDate().atStartOfDay().toLocalDate() : null));
+                        ctxText.append("Project ").append(i++).append("\n")
+                               .append("Name: ").append(p.getProjectName()).append("\n")
+                               .append("Status: ").append(formatEnum(p.getStatus().name())).append("\n")
+                               .append("Type: ").append(formatEnum(p.getProjectType() != null ? p.getProjectType().name() : null)).append("\n")
+                               .append("Target: ").append(p.getTargetCompanyName() != null ? p.getTargetCompanyName() : "N/A").append("\n")
+                                .append("Description: ").append(p.getDescription()).append("\n")
+                                .append("Start date: ").append(formatDate(p.getCreatedAt() != null ? p.getCreatedAt().toLocalDate() : null)).append("\n")
+                                .append("Due date: ").append(formatDate(p.getPlannedEndDate() != null ? p.getPlannedEndDate().atStartOfDay().toLocalDate() : null)).append("  \n");
                     }
                 }
                 break;
 
-            case MY_TASKS:
-            case TASK_STATUS:
+            case MY_TASKS: {
+                List<ProjectTask> tasks =
+                        projectTaskRepository.findByAssignedToAccount_Id(currentUser.getId());
+
+                if (tasks.isEmpty()) {
+                    ctxText.append("You have no tasks assigned to you.\n");
+                    break;
+                }
+
+                ctxText.append("You currently have ")
+                        .append(tasks.size())
+                        .append(" assigned task(s).\n\n");
+
+                int i = 1;
+
+                for (ProjectTask task : tasks) {
+                    if (tasks.size() > 1) {
+                        ctxText.append("Task ").append(i++).append("\n");
+                    }
+
+                    ctxText.append("Project: ")
+                            .append(task.getProject().getProjectName())
+                            .append("\n")
+
+                            .append("Task: ")
+                            .append(task.getTitle())
+                            .append("\n")
+
+                            .append("Status: ")
+                            .append(formatEnum(task.getStatus().name()))
+                            .append("\n")
+
+                            .append("Priority: ")
+                            .append(formatEnum(
+                                    task.getPriority() != null
+                                            ? task.getPriority().name()
+                                            : null
+                            ))
+                            .append("\n")
+
+                            .append("Type: ")
+                            .append(formatEnum(
+                                    task.getTaskType() != null
+                                            ? task.getTaskType().name()
+                                            : null
+                            ))
+                            .append("\n")
+
+                            .append("Deadline: ")
+                            .append(formatDate(
+                                    task.getDueDate() != null
+                                            ? task.getDueDate().toLocalDate()
+                                            : null
+                            ))
+                            .append(" \n");
+                }
+
+                break;
+            }
+            case TASK_STATUS: {
+                List<ProjectTask> tasks =
+                        projectTaskRepository.findByAssignedToAccount_Id(currentUser.getId());
+
+                if (tasks.isEmpty()) {
+                    ctxText.append("You have no tasks assigned to you.\n");
+                    break;
+                }
+
+                String question = request.getQuestion().toLowerCase();
+
+                TaskStatus requestedStatus = null;
+
+                // Detect the specific status requested by the Staff
+                if (question.contains("in progress")) {
+                    requestedStatus = TaskStatus.IN_PROGRESS;
+
+                } else if (question.contains("todo")
+                        || question.contains("to do")
+                        || question.contains("not started")) {
+                    requestedStatus = TaskStatus.TODO;
+
+                } else if (question.contains("in review")
+                        || question.contains("waiting for review")
+                        || question.contains("waiting for manager review")) {
+                    requestedStatus = TaskStatus.IN_REVIEW;
+
+                } else if (question.contains("blocked")) {
+                    requestedStatus = TaskStatus.BLOCKED;
+
+                } else if (question.contains("completed")
+                        || question.contains("finished")
+                        || question.contains("done")) {
+                    requestedStatus = TaskStatus.DONE;
+
+                } else if (question.contains("cancelled")
+                        || question.contains("canceled")) {
+                    requestedStatus = TaskStatus.CANCELLED;
+                }
+
+                // Specific status requested
+                if (requestedStatus != null) {
+
+                    final TaskStatus statusToFind = requestedStatus;
+
+                    List<ProjectTask> filteredTasks = tasks.stream()
+                            .filter(t -> t.getStatus() == statusToFind)
+                            .toList();
+
+                    if (filteredTasks.isEmpty()) {
+                        ctxText.append("You have no tasks with status ")
+                                .append(formatEnum(requestedStatus.name()))
+                                .append(".\n");
+                        break;
+                    }
+
+                    ctxText.append("You currently have ")
+                            .append(filteredTasks.size())
+                            .append(" task(s) with status ")
+                            .append(formatEnum(requestedStatus.name()))
+                            .append(".\n\n");
+
+                    int i = 1;
+
+                    for (ProjectTask task : filteredTasks) {
+
+                        if (filteredTasks.size() > 1) {
+                            ctxText.append("Task ").append(i++).append("\n");
+                        }
+
+                        ctxText.append("Task: ")
+                                .append(task.getTitle())
+                                .append("\n")
+
+                                .append("Project: ")
+                                .append(task.getProject().getProjectName())
+                                .append("\n")
+
+                                .append("Status: ")
+                                .append(formatEnum(task.getStatus().name()))
+                                .append("\n")
+
+                                .append("Priority: ")
+                                .append(formatEnum(
+                                        task.getPriority() != null
+                                                ? task.getPriority().name()
+                                                : null
+                                ))
+                                .append("\n")
+
+                                .append("Deadline: ")
+                                .append(formatDate(
+                                        task.getDueDate() != null
+                                                ? task.getDueDate().toLocalDate()
+                                                : null
+                                ))
+                                .append("\n\n");
+                    }
+
+                } else if (question.contains("incomplete")
+                        || question.contains("unfinished")) {
+
+                    List<ProjectTask> incompleteTasks = tasks.stream()
+                            .filter(t ->
+                                    t.getStatus() != TaskStatus.DONE
+                                            && t.getStatus() != TaskStatus.CANCELLED)
+                            .toList();
+
+                    if (incompleteTasks.isEmpty()) {
+                        ctxText.append("You have no incomplete tasks.\n");
+                        break;
+                    }
+
+                    ctxText.append("You currently have ")
+                            .append(incompleteTasks.size())
+                            .append(" incomplete task(s).\n\n");
+
+                    int i = 1;
+
+                    for (ProjectTask task : incompleteTasks) {
+
+                        ctxText.append("Task ")
+                                .append(i++)
+                                .append("\n")
+
+                                .append("Task: ")
+                                .append(task.getTitle())
+                                .append("\n")
+
+                                .append("Project: ")
+                                .append(task.getProject().getProjectName())
+                                .append("\n")
+
+                                .append("Status: ")
+                                .append(formatEnum(task.getStatus().name()))
+                                .append("\n\n");
+                    }
+
+                } else if (question.contains("check how many tasks i have left in each status")
+                    || question.contains("check how many tasks i have in each status")
+                    || question.contains("check the status of my tasks")
+                    || question.contains("what is the status of my tasks")) {
+
+                    // Generic question:
+                    // "What is the status of my tasks?"
+
+                    long todoCount = tasks.stream()
+                            .filter(t -> t.getStatus() == TaskStatus.TODO)
+                            .count();
+
+                    long inProgressCount = tasks.stream()
+                            .filter(t -> t.getStatus() == TaskStatus.IN_PROGRESS)
+                            .count();
+
+                    long inReviewCount = tasks.stream()
+                            .filter(t -> t.getStatus() == TaskStatus.IN_REVIEW)
+                            .count();
+
+                    long blockedCount = tasks.stream()
+                            .filter(t -> t.getStatus() == TaskStatus.BLOCKED)
+                            .count();
+
+                    long doneCount = tasks.stream()
+                            .filter(t -> t.getStatus() == TaskStatus.DONE)
+                            .count();
+
+                    long cancelledCount = tasks.stream()
+                            .filter(t -> t.getStatus() == TaskStatus.CANCELLED)
+                            .count();
+
+                    ctxText.append("Here is the current status of your tasks:\n\n")
+                            .append("Total Tasks: ").append(tasks.size()).append("\n")
+                            .append("Todo: ").append(todoCount).append("\n")
+                            .append("In Progress: ").append(inProgressCount).append("\n")
+                            .append("In Review: ").append(inReviewCount).append("\n")
+                            .append("Blocked: ").append(blockedCount).append("\n")
+                            .append("Done: ").append(doneCount).append("\n")
+                            .append("Cancelled: ").append(cancelledCount).append("\n");
+                }
+
+                break;
+            }
             case TASK_DETAIL:
             case DEADLINE_PRIORITY:
             case NEXT_ACTION:
-                Specification<ProjectTask> spec = (root, query, cb) -> cb.equal(root.get("assignedToAccount").get("id"), currentUser.getId());
-                List<ProjectTask> tasks = projectTaskRepository.findAll(spec);
+                List<ProjectTask> tasks = projectTaskRepository.findByAssignedToAccount_Id(currentUser.getId());
 
                 if (intent == StaffIntent.DEADLINE_PRIORITY) {
                     ProjectTask closest = tasks.stream()
-                        .filter(t -> t.getDueDate() != null && t.getStatus() != com.apms.common.enums.TaskStatus.DONE && t.getStatus() != com.apms.common.enums.TaskStatus.CANCELLED)
+                        .filter(t -> t.getDueDate() != null && t.getStatus() != TaskStatus.DONE && t.getStatus() != TaskStatus.CANCELLED && t.getStatus() != TaskStatus.BLOCKED)
                         .min(java.util.Comparator.comparing(ProjectTask::getDueDate))
                         .orElse(null);
                     if (closest != null) {
                         ctxText.append("Your closest active deadline is:\n\n")
-                               .append("Task: ").append(closest.getTitle()).append("  \n")
-                               .append("Project: ").append(closest.getProject().getProjectName()).append("  \n")
-                               .append("Deadline: ").append(formatDate(closest.getDueDate() != null ? closest.getDueDate().toLocalDate() : null)).append("  \n")
-                               .append("Status: ").append(formatEnum(closest.getStatus().name())).append("  \n")
+                               .append("Task: ").append(closest.getTitle()).append("\n")
+                               .append("Project: ").append(closest.getProject().getProjectName()).append("\n")
+                               .append("Deadline: ").append(formatDate(closest.getDueDate() != null ? closest.getDueDate().toLocalDate() : null)).append("\n")
+                               .append("Status: ").append(formatEnum(closest.getStatus().name())).append("\n")
                                .append("Priority: ").append(formatEnum(closest.getPriority() != null ? closest.getPriority().name() : null)).append("\n\n");
                     } else {
                         ctxText.append("You have no active tasks with deadlines.\n");
                     }
                 } else if (intent == StaffIntent.NEXT_ACTION) {
                     ProjectTask nextTask = tasks.stream()
-                        .filter(t -> t.getStatus() != com.apms.common.enums.TaskStatus.DONE && t.getStatus() != com.apms.common.enums.TaskStatus.CANCELLED && t.getStatus() != com.apms.common.enums.TaskStatus.BLOCKED)
-                        .min(java.util.Comparator.comparing(ProjectTask::getPriority)
-                            .thenComparing((t1, t2) -> {
-                                if (t1.getDueDate() == null && t2.getDueDate() == null) return 0;
-                                if (t1.getDueDate() == null) return 1;
-                                if (t2.getDueDate() == null) return -1;
-                                return t1.getDueDate().compareTo(t2.getDueDate());
-                            }))
-                        .orElse(null);
+                            .filter(t -> t.getStatus() == TaskStatus.TODO
+                                    || t.getStatus() == TaskStatus.IN_PROGRESS)
+                            .min(
+                                    java.util.Comparator
+                                            .comparingInt((ProjectTask t) -> {
+                                                if (t.getPriority() == null) return 3;
+
+                                                return switch (t.getPriority()) {
+                                                    case HIGH -> 0;
+                                                    case MEDIUM -> 1;
+                                                    case LOW -> 2;
+                                                };
+                                            })
+                                            .thenComparing(
+                                                    ProjectTask::getDueDate,
+                                                    java.util.Comparator.nullsLast(
+                                                            java.util.Comparator.naturalOrder()
+                                                    )
+                                            )
+                                            .thenComparingInt(t ->
+                                                    t.getStatus() == TaskStatus.IN_PROGRESS
+                                                            ? 0
+                                                            : 1
+                                            )
+                            )
+                            .orElse(null);
+
                     if (nextTask != null) {
                         ctxText.append("You should work on this task next.\n\n")
-                               .append("Task: ").append(nextTask.getTitle()).append("  \n")
-                               .append("Project: ").append(nextTask.getProject().getProjectName()).append("  \n")
-                               .append("Status: ").append(formatEnum(nextTask.getStatus().name())).append("  \n")
-                               .append("Priority: ").append(formatEnum(nextTask.getPriority() != null ? nextTask.getPriority().name() : null)).append("  \n")
-                               .append("Deadline: ").append(formatDate(nextTask.getDueDate() != null ? nextTask.getDueDate().toLocalDate() : null)).append("\n\n")
+                               .append("Task: ").append(nextTask.getTitle()).append("\n")
+                               .append("Project: ").append(nextTask.getProject().getProjectName()).append("\n")
+                               .append("Status: ").append(formatEnum(nextTask.getStatus().name())).append("\n")
+                               .append("Priority: ").append(formatEnum(nextTask.getPriority() != null ? nextTask.getPriority().name() : null)).append("\n")
+                               .append("Deadline: ").append(formatDate(nextTask.getDueDate() != null ? nextTask.getDueDate().toLocalDate() : null)).append("\n")
                                .append("Reason: This is your highest-priority executable task with the nearest deadline.\n");
                     } else {
                         ctxText.append("You have no executable tasks found.\n");
@@ -480,15 +766,15 @@ public class AiAssistantService {
                         ctxText.append("You currently have ").append(tasks.size()).append(" assigned task(s).\n\n");
                         int i = 1;
                         for (ProjectTask t : tasks) {
-                            if (tasks.size() > 1) ctxText.append("Task ").append(i++).append("  \n");
-                            ctxText.append("Task: ").append(t.getTitle()).append("  \n")
-                                   .append("Project: ").append(t.getProject().getProjectName()).append("  \n")
-                                   .append("Status: ").append(formatEnum(t.getStatus().name())).append("  \n")
-                                   .append("Priority: ").append(formatEnum(t.getPriority() != null ? t.getPriority().name() : null)).append("  \n")
-                                   .append("Type: ").append(formatEnum(t.getTaskType() != null ? t.getTaskType().name() : null)).append("  \n")
-                                   .append("Deadline: ").append(formatDate(t.getDueDate() != null ? t.getDueDate().toLocalDate() : null)).append(intent == StaffIntent.TASK_DETAIL ? "  \n" : "\n\n");
+                            if (tasks.size() > 1) ctxText.append("Task ").append(i++).append("\n");
+                            ctxText.append("Task: ").append(t.getTitle()).append("\n")
+                                   .append("Project: ").append(t.getProject().getProjectName()).append("\n")
+                                   .append("Status: ").append(formatEnum(t.getStatus().name())).append("\n")
+                                   .append("Priority: ").append(formatEnum(t.getPriority() != null ? t.getPriority().name() : null)).append("\n")
+                                   .append("Type: ").append(formatEnum(t.getTaskType() != null ? t.getTaskType().name() : null)).append("\n")
+                                   .append("Deadline: ").append(formatDate(t.getDueDate() != null ? t.getDueDate().toLocalDate() : null)).append(intent == StaffIntent.TASK_DETAIL ? "\n" : "  \n");
                             if (intent == StaffIntent.TASK_DETAIL && t.getDescription() != null) {
-                                ctxText.append("Description: ").append(t.getDescription()).append("\n\n");
+                                ctxText.append("Description: ").append(t.getDescription()).append("  \n");
                             }
                         }
                     }
@@ -497,19 +783,17 @@ public class AiAssistantService {
 
             case SUBMISSION_STATUS:
             case RETURNED_WORK:
-                Specification<ProjectTask> specTasks = (root, query, cb) -> cb.equal(root.get("assignedToAccount").get("id"), currentUser.getId());
-                List<ProjectTask> userTasks = projectTaskRepository.findAll(specTasks);
+                List<ProjectTask> userTasks = projectTaskRepository.findByAssignedToAccount_Id(currentUser.getId());
                 List<Long> taskIds = userTasks.stream().map(ProjectTask::getId).collect(Collectors.toList());
 
                 if (taskIds.isEmpty()) {
                     ctxText.append("You have no tasks, so no submissions.\n");
                 } else {
-                    Specification<ProjectTaskSubmission> subSpec = (root, query, cb) -> root.get("projectTask").get("id").in(taskIds);
-                    List<ProjectTaskSubmission> submissions = projectTaskSubmissionRepository.findAll(subSpec);
+                    List<ProjectTaskSubmission> submissions = projectTaskSubmissionRepository.findByProjectTask_IdIn(taskIds);
 
                     if (intent == StaffIntent.RETURNED_WORK) {
                         List<ProjectTaskSubmission> returned = submissions.stream()
-                            .filter(s -> s.getStatus() == com.apms.common.enums.SubmissionStatus.REVISION_REQUESTED)
+                            .filter(s -> s.getStatus() == SubmissionStatus.REVISION_REQUESTED)
                             .collect(Collectors.toList());
                         if (returned.isEmpty()) {
                             ctxText.append("You have no tasks that require revision.\n");
@@ -644,37 +928,52 @@ public class AiAssistantService {
                 break;
 
             case PROJECT_PROGRESS:
+                Page<Project> ppProjectsRaw = projectRepository.findByMemberAccountId(currentUser.getId(), PageRequest.of(0, 100));
+                List<Project> ppProjects = ppProjectsRaw.stream()
+                        .filter(p -> projectSecurity.isManager(p.getId()))
+                        .collect(Collectors.toList());
+
+                if (ppProjects.isEmpty()) {
+                    ctxText.append("DIRECT_ANSWER: You are not currently managing any projects.\n");
+                } else {
+                    ctxText.append("DIRECT_ANSWER: You are currently managing ").append(ppProjects.size()).append(" project(s).\n\n");
+                    int projIndex = 1;
+                    for (Project p : ppProjects) {
+                        List<ProjectTask> pTasks = projectTaskRepository.findByProject_Id(p.getId());
+                        long totalT = pTasks.size();
+                        long completedT = pTasks.stream().filter(t -> t.getStatus() == TaskStatus.DONE).count();
+                        long prog = totalT == 0 ? 0 : (completedT * 100 / totalT);
+
+                        ctxText.append("Project ").append(projIndex++).append("\n")
+                               .append("Name: ").append(p.getProjectName()).append("\n")
+                               .append("Completed Tasks: ").append(completedT).append("/").append(totalT).append("\n")
+                               .append("Progress: ").append(prog).append("%\n\n");
+                    }
+                }
+                break;
+
             case TASK_OVERVIEW:
                 List<ProjectTask> managerTasks = new java.util.ArrayList<>();
                 if (request.getProjectId() != null) {
                     if (projectSecurity.isManager(request.getProjectId())) {
-                        managerTasks = projectTaskRepository.findAll((root, query, cb) -> cb.equal(root.get("project").get("id"), request.getProjectId()));
+                        managerTasks = projectTaskRepository.findByProject_Id(request.getProjectId());
                     }
                 } else {
                     Page<Project> allManagerProjects = projectRepository.findByMemberAccountId(currentUser.getId(), PageRequest.of(0, 100));
                     List<Long> pIds = allManagerProjects.stream().filter(p -> projectSecurity.isManager(p.getId())).map(Project::getId).collect(Collectors.toList());
                     if (!pIds.isEmpty()) {
-                        managerTasks = projectTaskRepository.findAll((root, query, cb) -> root.get("project").get("id").in(pIds));
+                        managerTasks = projectTaskRepository.findByProject_IdIn(pIds);
                     }
                 }
 
                 if (managerTasks.isEmpty()) {
                     ctxText.append("No tasks found in your managed projects.\n");
                 } else {
-                    if (intent == ManagerIntent.TASK_OVERVIEW) {
-                        ctxText.append("Task Overview:\n\n");
-                        for (ProjectTask t : managerTasks) {
-                            ctxText.append("Task: ").append(t.getTitle()).append("\n")
-                                   .append("Project: ").append(t.getProject().getProjectName()).append("\n")
-                                   .append("Status: ").append(formatEnum(t.getStatus().name())).append("\n\n");
-                        }
-                    } else {
-                        long total = managerTasks.size();
-                        long done = managerTasks.stream().filter(t -> t.getStatus() == TaskStatus.DONE).count();
-                        ctxText.append("Project Progress Facts:\n")
-                               .append("Total tasks: ").append(total).append("\n")
-                               .append("Completed tasks: ").append(done).append("\n")
-                               .append("Progress: ").append(total > 0 ? (done * 100 / total) : 0).append("%\n");
+                    ctxText.append("Task Overview:\n\n");
+                    for (ProjectTask t : managerTasks) {
+                        ctxText.append("Task: ").append(t.getTitle()).append("\n")
+                               .append("Project: ").append(t.getProject().getProjectName()).append("\n")
+                               .append("Status: ").append(formatEnum(t.getStatus().name())).append("\n\n");
                     }
                 }
                 break;
@@ -685,7 +984,7 @@ public class AiAssistantService {
                 if (tmPIds.isEmpty()) {
                     ctxText.append("No projects found.\n");
                 } else {
-                    List<ProjectTask> tmTasks = projectTaskRepository.findAll((root, query, cb) -> root.get("project").get("id").in(tmPIds));
+                    List<ProjectTask> tmTasks = projectTaskRepository.findByProject_IdIn(tmPIds);
                     java.util.Map<String, Long> workload = tmTasks.stream()
                             .filter(t -> t.getAssignedToAccount() != null && t.getStatus() != TaskStatus.DONE && t.getStatus() != TaskStatus.CANCELLED)
                             .collect(Collectors.groupingBy(t -> t.getAssignedToAccount().getEmail(), Collectors.counting()));
@@ -700,10 +999,10 @@ public class AiAssistantService {
                 if (odPIds.isEmpty()) {
                     ctxText.append("No overdue tasks found.\n");
                 } else {
-                    List<ProjectTask> odTasks = projectTaskRepository.findAll((root, query, cb) -> root.get("project").get("id").in(odPIds));
+                    List<ProjectTask> odTasks = projectTaskRepository.findByProject_IdIn(odPIds);
                     LocalDateTime now = LocalDateTime.now();
                     List<ProjectTask> overdue = odTasks.stream()
-                            .filter(t -> t.getDueDate() != null && t.getDueDate().isBefore(now) && t.getStatus() != TaskStatus.DONE && t.getStatus() != TaskStatus.CANCELLED)
+                            .filter(t -> t.getDueDate() != null && t.getDueDate().isBefore(now) && t.getStatus() != TaskStatus.DONE && t.getStatus() != TaskStatus.CANCELLED  && t.getStatus() != TaskStatus.BLOCKED)
                             .collect(Collectors.toList());
                     if (overdue.isEmpty()) {
                         ctxText.append("You have no overdue tasks in your projects.\n");
@@ -713,7 +1012,7 @@ public class AiAssistantService {
                             ctxText.append("Task: ").append(t.getTitle()).append("\n")
                                    .append("Project: ").append(t.getProject().getProjectName()).append("\n")
                                    .append("Assigned To: ").append(t.getAssignedToAccount() != null ? t.getAssignedToAccount().getEmail() : "Unassigned").append("\n")
-                                   .append("Deadline: ").append(formatDate(t.getDueDate().toLocalDate())).append("\n\n");
+                                   .append("Deadline: ").append(formatDate(t.getDueDate().toLocalDate())).append("  \n");
                         }
                     }
                 }
@@ -726,10 +1025,7 @@ public class AiAssistantService {
                 if (prPIds.isEmpty()) {
                     ctxText.append("You have no pending reviews.\n");
                 } else {
-                    List<ProjectTaskSubmission> pendingSubs = projectTaskSubmissionRepository.findAll((root, query, cb) -> cb.and(
-                            root.get("project").get("id").in(prPIds),
-                            cb.equal(root.get("status"), SubmissionStatus.IN_REVIEW)
-                    ));
+                    List<ProjectTaskSubmission> pendingSubs = projectTaskSubmissionRepository.findByProject_IdInAndStatus(prPIds, SubmissionStatus.IN_REVIEW);
                     if (pendingSubs.isEmpty()) {
                         ctxText.append("You have no submissions waiting for review.\n");
                     } else {
@@ -771,10 +1067,7 @@ public class AiAssistantService {
                 if (rwPIds.isEmpty()) {
                     ctxText.append("No revision requested work found.\n");
                 } else {
-                    List<ProjectTaskSubmission> returnedSubs = projectTaskSubmissionRepository.findAll((root, query, cb) -> cb.and(
-                            root.get("project").get("id").in(rwPIds),
-                            cb.equal(root.get("status"), SubmissionStatus.REVISION_REQUESTED)
-                    ));
+                    List<ProjectTaskSubmission> returnedSubs = projectTaskSubmissionRepository.findByProject_IdInAndStatus(rwPIds, SubmissionStatus.REVISION_REQUESTED);
                     if (returnedSubs.isEmpty()) {
                         ctxText.append("No work is currently returned for revision.\n");
                     } else {
@@ -794,9 +1087,9 @@ public class AiAssistantService {
                 if (nxPIds.isEmpty()) {
                     ctxText.append("You have no active projects requiring attention.\n");
                 } else {
-                    List<ProjectTask> nxTasks = projectTaskRepository.findAll((root, query, cb) -> root.get("project").get("id").in(nxPIds));
+                    List<ProjectTask> nxTasks = projectTaskRepository.findByProject_IdIn(nxPIds);
                     long overdueCount = nxTasks.stream().filter(t -> t.getDueDate() != null && t.getDueDate().isBefore(LocalDateTime.now()) && t.getStatus() != TaskStatus.DONE && t.getStatus() != TaskStatus.CANCELLED).count();
-                    long pendingSubCount = projectTaskSubmissionRepository.findAll((root, query, cb) -> cb.and(root.get("project").get("id").in(nxPIds), cb.equal(root.get("status"), SubmissionStatus.IN_REVIEW))).size();
+                    long pendingSubCount = projectTaskSubmissionRepository.findByProject_IdInAndStatus(nxPIds, SubmissionStatus.IN_REVIEW).size();
                     long pendingCandCount = companyCandidateRepository.findAll().stream().filter(c -> c.getProjectId() != null && nxPIds.contains(Long.parseLong(c.getProjectId())) && "PENDING_REVIEW".equals(c.getStatus())).count();
 
                     ctxText.append("Management Action Facts:\n")
@@ -963,7 +1256,7 @@ public class AiAssistantService {
         return List.of(
             "What needs my review?",
             "Which tasks are overdue?",
-            "How is my team progressing?",
+            "How are my projects progressing?",
             "What should I focus on next?"
         );
     }
