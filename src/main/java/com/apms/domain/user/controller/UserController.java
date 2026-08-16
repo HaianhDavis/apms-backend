@@ -22,12 +22,6 @@ public class UserController {
 
     private final UserService userService;
 
-    @GetMapping("/users")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
-    public ResponseEntity<ApiResponse<List<UserProfileResponse>>> getAllUsers() {
-        return ResponseEntity.ok(ApiResponse.success(userService.getAllUsers()));
-    }
-
     @GetMapping("/users/me")
     public ResponseEntity<ApiResponse<UserProfileResponse>> getCurrentUser(
             @AuthenticationPrincipal UserDetailsImpl currentUser) {

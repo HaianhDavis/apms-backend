@@ -3,6 +3,7 @@ package com.apms.domain.auth.service;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,7 +36,7 @@ class EmailOtpMailServiceTest {
     void messageContainsRecipientSubjectOtpAndExpiryWithoutPassword() throws Exception {
         MimeMessage message = new MimeMessage((jakarta.mail.Session) null);
         when(mailSender.createMimeMessage()).thenReturn(message);
-        EmailOtpMailService service = new EmailOtpMailService(mailSender, "smtp.test.com", "587", "no-reply@apms.com", "no-reply@apms.com", true);
+        EmailOtpMailService service = new EmailOtpMailService(mailSender, "smtp.test.com", "587", "no-reply@apms.com", "no-reply@apms.com", "System APMS", true);
 
         EmailDeliveryResult result = service.sendVerificationCode("user@example.com", "User", "123456");
 
@@ -48,12 +49,25 @@ class EmailOtpMailServiceTest {
     }
 
     @Test
+    void fromHeaderContainsDisplayName() throws Exception {
+        MimeMessage message = new MimeMessage((jakarta.mail.Session) null);
+        when(mailSender.createMimeMessage()).thenReturn(message);
+        EmailOtpMailService service = new EmailOtpMailService(mailSender, "smtp.test.com", "587", "no-reply@apms.com", "no-reply@apms.com", "System APMS", true);
+
+        service.sendVerificationCode("user@example.com", "User", "123456");
+
+        InternetAddress from = (InternetAddress) message.getFrom()[0];
+        assertThat(from.getAddress()).isEqualTo("no-reply@apms.com");
+        assertThat(from.getPersonal()).isEqualTo("System APMS");
+    }
+
+    @Test
     void smtpFailureIsReturnedWithoutThrowingAndLogsDoNotContainOtp() {
         MimeMessage message = new MimeMessage((jakarta.mail.Session) null);
         when(mailSender.createMimeMessage()).thenReturn(message);
         doThrow(new MailSendException("Failed messages: javax.mail.AuthenticationFailedException; message exceptions (1)"))
                 .when(mailSender).send(message);
-        EmailOtpMailService service = new EmailOtpMailService(mailSender, "smtp.test.com", "587", "user@fpt.works", "no-reply@apms.com", true);
+        EmailOtpMailService service = new EmailOtpMailService(mailSender, "smtp.test.com", "587", "user@fpt.works", "no-reply@apms.com", "System APMS", true);
         ListAppender<ILoggingEvent> logs = attachLogCapture();
 
         EmailDeliveryResult result = service.sendVerificationCode("user@example.com", "User", "123456");
@@ -69,7 +83,7 @@ class EmailOtpMailServiceTest {
 
     @Test
     void devFallbackLogsOtpWhenSmtpMissing() {
-        EmailOtpMailService service = new EmailOtpMailService(mailSender, "", "587", "", "", true);
+        EmailOtpMailService service = new EmailOtpMailService(mailSender, "", "587", "", "", "System APMS", true);
         ListAppender<ILoggingEvent> logs = attachLogCapture();
 
         EmailDeliveryResult result = service.sendVerificationCode("user@example.com", "User", "123456");
@@ -82,7 +96,7 @@ class EmailOtpMailServiceTest {
 
     @Test
     void fallbackDisabledWithoutSmtpReturnsFailureWithoutLoggingOtp() {
-        EmailOtpMailService service = new EmailOtpMailService(mailSender, "", "587", "", "", false);
+        EmailOtpMailService service = new EmailOtpMailService(mailSender, "", "587", "", "", "System APMS", false);
         ListAppender<ILoggingEvent> logs = attachLogCapture();
 
         EmailDeliveryResult result = service.sendVerificationCode("user@example.com", "User", "123456");
@@ -97,12 +111,14 @@ class EmailOtpMailServiceTest {
     void fallsBackToRecipientAsFromWhenConfiguredFromAndUsernameAreBlank() throws Exception {
         MimeMessage message = new MimeMessage((jakarta.mail.Session) null);
         when(mailSender.createMimeMessage()).thenReturn(message);
-        EmailOtpMailService service = new EmailOtpMailService(mailSender, "smtp.test.com", "587", "", "", true);
+        EmailOtpMailService service = new EmailOtpMailService(mailSender, "smtp.test.com", "587", "", "", "System APMS", true);
 
         EmailDeliveryResult result = service.sendVerificationCode("user@example.com", "User", "123456");
 
         assertThat(result.delivered()).isTrue();
         assertThat(result.status()).isEqualTo("SMTP_SUCCESS");
-        assertThat(message.getFrom()[0].toString()).isEqualTo("user@example.com");
+        InternetAddress from = (InternetAddress) message.getFrom()[0];
+        assertThat(from.getAddress()).isEqualTo("user@example.com");
+        assertThat(from.getPersonal()).isEqualTo("System APMS");
     }
 }

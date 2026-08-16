@@ -1,6 +1,7 @@
 package com.apms.domain.auth.service;
 
 import jakarta.mail.MessagingException;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -8,6 +9,8 @@ import org.springframework.mail.MailException;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+
+import java.io.UnsupportedEncodingException;
 
 @Slf4j
 @Service
@@ -17,6 +20,7 @@ public class EmailOtpMailService {
     private final String smtpPort;
     private final String smtpUsername;
     private final String from;
+    private final String fromName;
     private final boolean devFallback;
 
     public EmailOtpMailService(JavaMailSender mailSender,
@@ -24,12 +28,14 @@ public class EmailOtpMailService {
                                @Value("${spring.mail.port:587}") String smtpPort,
                                @Value("${spring.mail.username:}") String smtpUsername,
                                @Value("${app.mail.from:}") String from,
+                               @Value("${app.mail.from-name:System APMS}") String fromName,
                                @Value("${app.mail.dev-fallback:true}") boolean devFallback) {
         this.mailSender = mailSender;
         this.smtpHost = smtpHost;
         this.smtpPort = smtpPort;
         this.smtpUsername = smtpUsername;
         this.from = from;
+        this.fromName = fromName;
         this.devFallback = devFallback;
     }
 
@@ -45,7 +51,7 @@ public class EmailOtpMailService {
         try {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, "UTF-8");
-            helper.setFrom(resolveFrom(recipient));
+            helper.setFrom(buildFromAddress(recipient));
             helper.setTo(recipient);
             helper.setSubject("Xác nhận tài khoản APMS");
             helper.setText("Xác nhận tài khoản\n\n"
@@ -68,6 +74,19 @@ public class EmailOtpMailService {
         if (from != null && !from.isBlank()) return from;
         if (smtpUsername != null && !smtpUsername.isBlank()) return smtpUsername;
         return recipient;
+    }
+
+    private InternetAddress buildFromAddress(String recipient) throws MessagingException {
+        try {
+            InternetAddress address = new InternetAddress(resolveFrom(recipient));
+            if (fromName != null && !fromName.isBlank()) {
+                address.setPersonal(fromName, "UTF-8");
+            }
+            return address;
+        } catch (UnsupportedEncodingException ex) {
+            log.warn("Could not encode from display name '{}', falling back to address only", fromName);
+            return new InternetAddress(resolveFrom(recipient));
+        }
     }
 
     private String sanitizeDetail(Throwable ex, String otp) {
