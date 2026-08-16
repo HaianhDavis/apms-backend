@@ -5,6 +5,9 @@ import com.apms.common.util.CsvExportUtil;
 import com.apms.domain.audit.AuditLog;
 import com.apms.domain.audit.dto.AuditLogResponse;
 import com.apms.domain.audit.repository.sql.AuditLogRepository;
+import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
+import com.apms.domain.user.repository.sql.AccountRepository;
 import com.apms.security.UserDetailsImpl;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +33,8 @@ public class AuditLogQueryService {
 
     private final AuditLogRepository auditLogRepository;
     private final AuditLogService auditLogService;
+    private final AccountRepository accountRepository;
+    private final CompanyProfileRepository companyProfileRepository;
 
     @Transactional(readOnly = true)
     public Page<AuditLogResponse> searchAuditLogs(
@@ -37,11 +42,12 @@ public class AuditLogQueryService {
             String action,
             String entityType,
             String entityId,
+            String keyword,
             LocalDateTime fromDate,
             LocalDateTime toDate,
             Pageable pageable) {
 
-        Specification<AuditLog> spec = buildSpecification(actorUserId, action, entityType, entityId, fromDate, toDate);
+        Specification<AuditLog> spec = buildSpecification(actorUserId, action, entityType, entityId, keyword, fromDate, toDate);
         return auditLogRepository.findAll(spec, pageable).map(this::toResponse);
     }
 
@@ -50,10 +56,11 @@ public class AuditLogQueryService {
             String action,
             String entityType,
             String entityId,
+            String keyword,
             LocalDateTime fromDate,
             LocalDateTime toDate) {
 
-        Specification<AuditLog> spec = buildSpecification(actorUserId, action, entityType, entityId, fromDate, toDate);
+        Specification<AuditLog> spec = buildSpecification(actorUserId, action, entityType, entityId, keyword, fromDate, toDate);
         List<AuditLog> logs = auditLogRepository.findAll(spec);
 
         StringBuilder csv = new StringBuilder();
@@ -93,6 +100,7 @@ public class AuditLogQueryService {
             String action,
             String entityType,
             String entityId,
+            String keyword,
             LocalDateTime fromDate,
             LocalDateTime toDate) {
 
@@ -117,6 +125,16 @@ public class AuditLogQueryService {
             if (StringUtils.hasText(entityId)) {
                 predicates.add(cb.equal(root.get("entityId"), entityId));
             }
+            if (StringUtils.hasText(keyword)) {
+                String pattern = "%" + keyword.trim().toLowerCase() + "%";
+                List<Predicate> keywordPredicates = new ArrayList<>();
+                keywordPredicates.add(cb.like(cb.lower(root.get("actorAccount").get("email")), pattern));
+                keywordPredicates.add(cb.like(cb.lower(root.get("action").as(String.class)), pattern));
+                keywordPredicates.add(cb.like(cb.lower(root.get("entityType")), pattern));
+                keywordPredicates.add(cb.like(cb.lower(root.get("entityId")), pattern));
+                keywordPredicates.add(cb.like(cb.lower(root.get("detail")), pattern));
+                predicates.add(cb.or(keywordPredicates.toArray(new Predicate[0])));
+            }
             if (fromDate != null) {
                 predicates.add(cb.greaterThanOrEqualTo(root.get("timestamp"), fromDate));
             }
@@ -139,10 +157,53 @@ public class AuditLogQueryService {
                 .actorAccountId(log.getActorAccountId())
                 .actorEmail(email)
                 .action(log.getAction().name())
+                .actionLabel(toActionLabel(log.getAction().name()))
                 .entityType(log.getEntityType())
                 .entityId(log.getEntityId())
+                .entityName(resolveEntityName(log.getEntityType(), log.getEntityId()))
                 .detail(log.getDetail())
                 .timestamp(log.getTimestamp())
                 .build();
+    }
+
+    private String toActionLabel(String action) {
+        if (!StringUtils.hasText(action)) return action;
+        StringBuilder label = new StringBuilder();
+        for (String word : action.split("_")) {
+            if (word.isBlank()) continue;
+            if (label.length() > 0) label.append(' ');
+            label.append("IP".equalsIgnoreCase(word) ? "IP"
+                    : Character.toUpperCase(word.charAt(0)) + word.substring(1).toLowerCase());
+        }
+        return label.toString();
+    }
+
+    private String resolveEntityName(String entityType, String entityId) {
+        if (!StringUtils.hasText(entityType) || !StringUtils.hasText(entityId)) return null;
+        try {
+            if ("Account".equalsIgnoreCase(entityType)) {
+                return accountRepository.findById(Long.parseLong(entityId))
+                        .map(account -> account.getEmail())
+                        .orElse(null);
+            }
+            if ("CompanyProfile".equalsIgnoreCase(entityType)) {
+                return companyProfileRepository.findById(entityId)
+                        .or(() -> companyProfileRepository.findByCompanyId(entityId))
+                        .map(this::companyDisplayName)
+                        .orElse(null);
+            }
+        } catch (Exception e) {
+            log.debug("Could not resolve entity name for {} [{}]: {}", entityType, entityId, e.getMessage());
+        }
+        return null;
+    }
+
+    private String companyDisplayName(CompanyProfile profile) {
+        if (profile == null) return null;
+        if (profile.getIdentity() != null) {
+            if (StringUtils.hasText(profile.getIdentity().getLegalName())) return profile.getIdentity().getLegalName();
+            if (StringUtils.hasText(profile.getIdentity().getTradeName())) return profile.getIdentity().getTradeName();
+        }
+        return null;
     }
 }

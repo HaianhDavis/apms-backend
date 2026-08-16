@@ -31,6 +31,7 @@ public class AuditLogController {
             @RequestParam(required = false) String action,
             @RequestParam(required = false) String entityType,
             @RequestParam(required = false) String entityId,
+            @RequestParam(required = false) String keyword,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate,
             @RequestParam(defaultValue = "0") int page,
@@ -38,7 +39,7 @@ public class AuditLogController {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "timestamp"));
         PageResponse<AuditLogResponse> response = PageResponse.of(
-                auditLogQueryService.searchAuditLogs(actorUserId, action, entityType, entityId, fromDate, toDate, pageable));
+                auditLogQueryService.searchAuditLogs(actorUserId, action, entityType, entityId, keyword, fromDate, toDate, pageable));
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }
@@ -56,10 +57,11 @@ public class AuditLogController {
             @RequestParam(required = false) String action,
             @RequestParam(required = false) String entityType,
             @RequestParam(required = false) String entityId,
+            @RequestParam(required = false) String keyword,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime fromDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime toDate) {
 
-        byte[] csvBytes = auditLogQueryService.exportAuditLogs(actorUserId, action, entityType, entityId, fromDate, toDate);
+        byte[] csvBytes = auditLogQueryService.exportAuditLogs(actorUserId, action, entityType, entityId, keyword, fromDate, toDate);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType("text/csv"));
