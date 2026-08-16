@@ -420,7 +420,10 @@ public class AiAssistantService {
                                .append("Name: ").append(p.getProjectName()).append("  \n")
                                .append("Status: ").append(formatEnum(p.getStatus().name())).append("  \n")
                                .append("Type: ").append(formatEnum(p.getProjectType() != null ? p.getProjectType().name() : null)).append("  \n")
-                               .append("Target: ").append(p.getTargetCompanyName() != null ? p.getTargetCompanyName() : "N/A").append("\n\n");
+                               .append("Target: ").append(p.getTargetCompanyName() != null ? p.getTargetCompanyName() : "N/A").append("\n\n")
+                                .append("Description: ").append(p.getDescription()).append("  \n")
+                                .append("Start date: ").append(formatDate(p.getCreatedAt() != null ? p.getCreatedAt().toLocalDate() : null)).append("  \n")
+                                .append("Due date: ").append(formatDate(p.getPlannedEndDate() != null ? p.getPlannedEndDate().atStartOfDay().toLocalDate() : null));
                     }
                 }
                 break;

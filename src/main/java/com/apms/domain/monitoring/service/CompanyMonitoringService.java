@@ -241,7 +241,7 @@ public class CompanyMonitoringService {
                 });
     }
 
-    private LocalDateTime calculateNextReviewAt(LocalDateTime baseTime, MonitoringFrequency frequency) {
+    public LocalDateTime calculateNextReviewAt(LocalDateTime baseTime, MonitoringFrequency frequency) {
         LocalDateTime time = baseTime != null ? baseTime : LocalDateTime.now();
         return switch (frequency) {
             case MONTHLY -> time.plusMonths(1);
@@ -302,7 +302,7 @@ public class CompanyMonitoringService {
         }
     }
 
-    private void enforceResponsibleManager(CompanyProfile profile, Account manager) {
+    public void enforceResponsibleManager(CompanyProfile profile, Account manager) {
         if (!manager.getRoles().contains(SystemRole.SYSTEM_ADMIN)) {
             if (profile.getResponsibleManagerId() == null || !manager.getId().equals(profile.getResponsibleManagerId())) {
                 throw new org.springframework.security.access.AccessDeniedException("Only the responsible Manager or SYSTEM_ADMIN can manage this monitoring assignment");

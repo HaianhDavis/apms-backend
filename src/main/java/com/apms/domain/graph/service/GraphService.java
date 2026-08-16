@@ -388,4 +388,59 @@ public class GraphService {
                 })
                 .toList();
     }
+
+    public String getCurrentRelationshipType(String sourceCompanyId, String targetCompanyId) {
+        String cypher = """
+            MATCH (:Company {companyId: $sourceCompanyId})-[r]->(:Company {companyId: $targetCompanyId})
+            RETURN type(r) as relType
+            """;
+        java.util.List<String> types = neo4jClient.query(cypher)
+                .bindAll(java.util.Map.of("sourceCompanyId", sourceCompanyId, "targetCompanyId", targetCompanyId))
+                .fetchAs(String.class)
+                .all()
+                .stream().toList();
+        
+        if (types.isEmpty()) {
+            throw new com.apms.common.exception.BusinessConflictException("No relationship found between " + sourceCompanyId + " and " + targetCompanyId);
+        }
+        if (types.size() > 1) {
+            throw new com.apms.common.exception.BusinessConflictException("Multiple relationships found between " + sourceCompanyId + " and " + targetCompanyId);
+        }
+        return types.get(0);
+    }
+
+    public void updateRelationship(String sourceCompanyId, String targetCompanyId, com.apms.common.enums.RelationshipType oldRelType, com.apms.common.enums.RelationshipType newRelType) {
+        String oldRel = switch (oldRelType) {
+            case PARTNER_WITH -> "PARTNER_WITH";
+            case POTENTIAL_PARTNER_OF -> "POTENTIAL_PARTNER_OF";
+            case COMPETITOR_OF -> "COMPETITOR_OF";
+            case CUSTOMER_OF -> "CUSTOMER_OF";
+            case SUPPLIER_OF -> "SUPPLIER_OF";
+            default -> throw new IllegalArgumentException("Unsupported old relationship type");
+        };
+        String newRel = switch (newRelType) {
+            case PARTNER_WITH -> "PARTNER_WITH";
+            case POTENTIAL_PARTNER_OF -> "POTENTIAL_PARTNER_OF";
+            case COMPETITOR_OF -> "COMPETITOR_OF";
+            case CUSTOMER_OF -> "CUSTOMER_OF";
+            case SUPPLIER_OF -> "SUPPLIER_OF";
+            default -> throw new IllegalArgumentException("Unsupported new relationship type");
+        };
+
+        String cypher = String.format("""
+            MATCH (c1:Company {companyId: $sourceCompanyId})-[old:%s]->(c2:Company {companyId: $targetCompanyId})
+            WITH c1, c2, old, properties(old) AS props
+            DELETE old
+            MERGE (c1)-[newRel:%s]->(c2)
+            SET newRel = props
+            """, oldRel, newRel);
+
+        neo4jClient.query(cypher)
+                .bindAll(java.util.Map.of("sourceCompanyId", sourceCompanyId, "targetCompanyId", targetCompanyId))
+                .run();
+    }
+
+    public void restoreRelationship(String sourceCompanyId, String targetCompanyId, com.apms.common.enums.RelationshipType fromRelType, com.apms.common.enums.RelationshipType toRelType) {
+        updateRelationship(sourceCompanyId, targetCompanyId, fromRelType, toRelType);
+    }
 }

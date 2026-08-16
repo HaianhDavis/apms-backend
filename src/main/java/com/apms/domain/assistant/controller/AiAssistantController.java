@@ -41,7 +41,7 @@ public class AiAssistantController {
      *   - sessionId      (optional) — continue an existing session thread
      */
     @PostMapping("/chat")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<AiChatResponse>> chat(
             @Valid @RequestBody AiChatRequest request) {
 
