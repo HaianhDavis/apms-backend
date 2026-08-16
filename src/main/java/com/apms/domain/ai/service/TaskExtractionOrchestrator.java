@@ -341,14 +341,21 @@ public class TaskExtractionOrchestrator {
             return evidenceText;
         }
 
-        Pattern sourcePattern = Pattern.compile("\\[([^|\\]]+)\\s*\\|\\s*([^\\]]+)\\]\\s*([^\\[]+)");
+        Pattern sourcePattern = Pattern.compile("\\[([^|\\]]+)\\s*\\|\\s*([^|\\]]+)(?:\\s*\\|\\s*([^\\]]+))?\\]\\s*([^\\[]+)");
         Matcher matcher = sourcePattern.matcher(evidenceText);
         List<String> matches = new ArrayList<>();
         while (matcher.find()) {
             String taggedFileName = matcher.group(1).trim();
             String taggedRawDocumentId = matcher.group(2).trim();
+            String taggedPage = matcher.group(3) != null ? matcher.group(3).trim() : null;
+            String quote = matcher.group(4).trim();
+            
             if (taggedRawDocumentId.equals(rawDocumentId) || taggedFileName.equalsIgnoreCase(fileName)) {
-                matches.add(matcher.group(3).trim());
+                if (taggedPage != null) {
+                    matches.add("[" + taggedPage + "] " + quote);
+                } else {
+                    matches.add(quote);
+                }
             }
         }
 
@@ -395,7 +402,15 @@ public class TaskExtractionOrchestrator {
             try (PDDocument document = Loader.loadPDF(file)) {
                 PDFTextStripper stripper = new PDFTextStripper();
                 stripper.setSortByPosition(true);
-                return stripper.getText(document);
+                StringBuilder sb = new StringBuilder();
+                int totalPages = document.getNumberOfPages();
+                for (int i = 1; i <= totalPages; i++) {
+                    stripper.setStartPage(i);
+                    stripper.setEndPage(i);
+                    sb.append("\n--- Page ").append(i).append(" ---\n");
+                    sb.append(stripper.getText(document));
+                }
+                return sb.toString();
             }
         } catch (Exception e) {
             log.error("Failed to extract text from RawDocument {}", rawDocument.getId(), e);

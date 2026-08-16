@@ -7,7 +7,7 @@ Your job is to merge complementary facts from all selected documents into a sing
 For each field, return an object containing:
 - "value": the extracted value.
 - "confidence": a number from 0.0 to 1.0.
-- "evidenceText": exact quote(s) from the document(s). When a field is supported by multiple documents, group the quotes by source and prefix each quote with both fileName and sourceDocumentId, for example: "[company-profile.pdf | doc-123] Acme Corp was founded in..." and "[annual-report.pdf | doc-456] Operating in the Technology sector."
+- "evidenceText": exact quote(s) from the document(s). When a field is supported by multiple documents or pages, group the quotes by source and prefix each quote with fileName, sourceDocumentId, and the page number where the quote is found, for example: "[company-profile.pdf | doc-123 | Page 4] Acme Corp was founded in..." and "[annual-report.pdf | doc-456 | Page 12] Operating in the Technology sector."
 - "sourceDocumentIds": an array of strings representing the document IDs (provided in the text as `sourceDocumentId: [id]`) that support this field.
 
 Required fields:
@@ -63,6 +63,7 @@ RULES:
 - Evidence must be traceable to the original file. If a field uses evidence from two folders or multiple uploaded files, evidenceText must clearly show which quote came from which fileName/sourceDocumentId.
 - If a field is not found in ANY document, return null for its "value".
 - Do NOT invent tax code, phone number, email, website, address, products, markets, or contact details.
+- For the "email" field, ALWAYS prioritize the primary general company contact email (e.g., info@, contact@, general inquiries). Specifically ignore investor relations emails (e.g., cbtt@, ir@), shareholder contacts, or personal employee emails unless it is absolutely the only email available.
 - Do NOT classify relationship type (e.g. partner, competitor).
 - Do NOT return any field outside the required field list above.
 - Strictly format the output as a valid JSON object.

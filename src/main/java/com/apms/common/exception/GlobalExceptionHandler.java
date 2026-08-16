@@ -90,6 +90,20 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
     }
 
+    @ExceptionHandler(org.springframework.dao.DuplicateKeyException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDuplicateKeyException(org.springframework.dao.DuplicateKeyException ex) {
+        log.warn("Duplicate key error: {}", ex.getMessage());
+        String message = "Thông tin đã tồn tại trên hệ thống.";
+        if (ex.getMessage() != null) {
+            if (ex.getMessage().contains("taxCode")) {
+                message = "Mã số thuế này đã tồn tại trên hệ thống.";
+            } else if (ex.getMessage().contains("registrationNumber")) {
+                message = "Mã số doanh nghiệp này đã tồn tại trên hệ thống.";
+            }
+        }
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error(message));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGeneralException(Exception ex) {
         log.error("Unexpected error occurred", ex);

@@ -60,10 +60,33 @@ public class CompanyProfileUpdateProposalController {
         return ResponseEntity.ok(proposalService.getProposal(id));
     }
 
+    @PatchMapping("/profile-update-proposals/{id}/approve")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<CompanyProfileUpdateProposalResponse> approveProposal(
+            @PathVariable String id,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(proposalService.approveMonitoringProposal(id, currentUser.getId()));
+    }
+
+    @PatchMapping("/profile-update-proposals/{id}/reject")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<CompanyProfileUpdateProposalResponse> rejectProposal(
+            @PathVariable String id,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(proposalService.rejectMonitoringProposal(id, currentUser.getId()));
+    }
+
     @PostMapping("/profile-update-proposals/monitoring")
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<CompanyProfileUpdateProposalResponse> createMonitoringProposal(
             @Valid @RequestBody CreateCompanyProfileUpdateProposalRequest request) {
         return ResponseEntity.ok(proposalService.createMonitoringProposal(request));
+    }
+
+    @GetMapping("/company-profiles/{companyProfileId}/pending-proposals")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<java.util.List<CompanyProfileUpdateProposalResponse>> getPendingProposals(
+            @PathVariable String companyProfileId) {
+        return ResponseEntity.ok(proposalService.getPendingProposalsByCompany(companyProfileId));
     }
 }

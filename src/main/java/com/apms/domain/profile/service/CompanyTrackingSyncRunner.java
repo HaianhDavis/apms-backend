@@ -65,6 +65,10 @@ public class CompanyTrackingSyncRunner implements CommandLineRunner {
             if (org.springframework.util.StringUtils.hasText(tradeName) && !tradeName.trim().equalsIgnoreCase(primaryName)) {
                 aliases.add(tradeName.trim());
             }
+            String stockTicker = profile.getIdentity().getStockTicker();
+            if (org.springframework.util.StringUtils.hasText(stockTicker)) {
+                aliases.add(stockTicker.trim());
+            }
 
             TrackedCompany newCompany = TrackedCompany.builder()
                     .id(profile.getId())

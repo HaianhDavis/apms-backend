@@ -56,6 +56,8 @@ public class CompanyProfileUpdateProposal {
     private Map<String, Object> proposedRisk;
     private Map<String, Object> proposedCompliance;
 
+    private String proposedRelationship;
+
     private List<String> sourceDocumentIds;
     private String extractionId;        // Legacy: single extraction ID
     private List<String> extractionIds; // Multi-extraction merge IDs

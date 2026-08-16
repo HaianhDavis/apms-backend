@@ -197,20 +197,23 @@ public class CompanyMonitoringService {
                 .build();
     }
 
+    @Transactional(readOnly = true)
     public CompanyMonitoringAssignmentResponse getAssignment(Long id) {
         CompanyMonitoringAssignment assignment = assignmentRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Assignment not found"));
+                .orElseThrow(() -> new com.apms.common.exception.ResourceNotFoundException("Assignment not found"));
         CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId()).orElse(null);
         return mapToResponse(assignment, companyProfile);
     }
 
+    @Transactional(readOnly = true)
     public CompanyMonitoringAssignmentResponse getAssignmentByCompany(String companyProfileId) {
         CompanyMonitoringAssignment assignment = assignmentRepository.findByCompanyProfileId(companyProfileId)
-                .orElseThrow(() -> new IllegalArgumentException("Assignment not found for company"));
+                .orElseThrow(() -> new com.apms.common.exception.ResourceNotFoundException("Assignment not found for company"));
         CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId()).orElse(null);
         return mapToResponse(assignment, companyProfile);
     }
 
+    @Transactional(readOnly = true)
     public Page<CompanyMonitoringAssignmentResponse> getMyAssignments(Long staffId, Pageable pageable) {
         return assignmentRepository.findByAssignedStaffId(staffId, pageable)
                 .map(assignment -> {
@@ -219,6 +222,7 @@ public class CompanyMonitoringService {
                 });
     }
 
+    @Transactional(readOnly = true)
     public Page<CompanyMonitoringAssignmentResponse> getAllAssignments(Pageable pageable) {
         return assignmentRepository.findAll(pageable)
                 .map(assignment -> {
@@ -227,6 +231,7 @@ public class CompanyMonitoringService {
                 });
     }
 
+    @Transactional(readOnly = true)
     public Page<CompanyMonitoringAssignmentResponse> getDueOrOverdueAssignments(Pageable pageable) {
         LocalDateTime now = LocalDateTime.now();
         return assignmentRepository.findDueOrOverdueActiveAssignments(now, pageable)
@@ -251,6 +256,17 @@ public class CompanyMonitoringService {
                 : "Unknown Company";
 
         String displayStatus = calculateDisplayStatus(assignment);
+        
+        String latestProposalStatus = null;
+        String latestProposalId = null;
+        if (companyProfile != null) {
+            java.util.Optional<com.apms.domain.profile.CompanyProfileUpdateProposal> latestProposalOpt = 
+                proposalRepository.findTopByCompanyProfileIdAndOriginOrderByCreatedAtDesc(companyProfile.getCompanyId(), com.apms.common.enums.ProposalOrigin.MONITORING);
+            if (latestProposalOpt.isPresent()) {
+                latestProposalStatus = latestProposalOpt.get().getStatus().name();
+                latestProposalId = latestProposalOpt.get().getId();
+            }
+        }
 
         return CompanyMonitoringAssignmentResponse.builder()
                 .id(assignment.getId())
@@ -263,6 +279,8 @@ public class CompanyMonitoringService {
                 .frequency(assignment.getFrequency())
                 .assignmentStatus(assignment.getStatus())
                 .displayStatus(displayStatus)
+                .latestProposalStatus(latestProposalStatus)
+                .latestProposalId(latestProposalId)
                 .lastReviewedAt(assignment.getLastReviewedAt())
                 .nextReviewAt(assignment.getNextReviewAt())
                 .createdAt(assignment.getCreatedAt())

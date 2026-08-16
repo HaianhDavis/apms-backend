@@ -5,6 +5,7 @@ import com.apms.common.enums.SubmissionStatus;
 import com.apms.common.enums.SystemRole;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.audit.service.AuditLogService;
+import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
 import com.apms.domain.profile.dto.CompanyProfileUpdateProposalResponse;
 import com.apms.domain.profile.dto.CreateCompanyProfileUpdateProposalRequest;
@@ -34,6 +35,8 @@ public class CompanyProfileUpdateProposalService {
     private final ProjectRepository projectRepository;
     private final AuditLogService auditLogService;
     private final FieldApprovalService fieldApprovalService;
+    private final com.apms.domain.graph.service.GraphService graphService;
+    private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
 
     @Transactional
     public CompanyProfileUpdateProposalResponse createProposal(Long projectId, Long taskId, CreateCompanyProfileUpdateProposalRequest request) {
@@ -102,6 +105,7 @@ public class CompanyProfileUpdateProposalService {
                 .proposedInnovation(request.getProposedInnovation())
                 .proposedRisk(request.getProposedRisk())
                 .proposedCompliance(request.getProposedCompliance())
+                .proposedRelationship(request.getProposedRelationship())
                 .sourceDocumentIds(request.getSourceDocumentIds())
                 .extractionId(request.getExtractionId())
                 .changeSummary(request.getChangeSummary())
@@ -112,6 +116,109 @@ public class CompanyProfileUpdateProposalService {
         proposal = proposalRepository.save(proposal);
 
         auditLogService.log(currentUser.getId(), AuditAction.PROFILE_UPDATE_PROPOSAL_CREATED, "CompanyProfileUpdateProposal", proposal.getId(), "Monitoring Proposal created for profile: " + request.getCompanyProfileId());
+
+        return toResponse(proposal);
+    }
+
+    private <T> T updateObject(com.fasterxml.jackson.databind.ObjectMapper mapper, T existing, Object proposed, Class<T> clazz) {
+        if (proposed == null) return existing;
+        if (existing == null) return mapper.convertValue(proposed, clazz);
+        try {
+            return mapper.readerForUpdating(existing).readValue(mapper.writeValueAsString(proposed));
+        } catch (Exception e) {
+            log.error("Failed to merge proposed update", e);
+            return existing;
+        }
+    }
+
+    @Transactional
+    public CompanyProfileUpdateProposalResponse approveMonitoringProposal(String id, Long approverId) {
+        CompanyProfileUpdateProposal proposal = proposalRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Proposal not found"));
+
+        if (proposal.getOrigin() != com.apms.common.enums.ProposalOrigin.MONITORING) {
+            throw new com.apms.common.exception.BusinessValidationException("Only MONITORING proposals can be approved via this endpoint");
+        }
+
+        if (proposal.getStatus() != SubmissionStatus.DRAFT && proposal.getStatus() != SubmissionStatus.SUBMITTED && proposal.getStatus() != SubmissionStatus.IN_REVIEW) {
+            throw new com.apms.common.exception.BusinessValidationException("Proposal is already processed");
+        }
+
+        CompanyProfile companyProfile = companyProfileRepository.findById(proposal.getCompanyProfileId())
+                .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found"));
+
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        mapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        mapper.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+
+        companyProfile.setIdentity(updateObject(mapper, companyProfile.getIdentity(), proposal.getProposedIdentity(), CompanyProfile.Identity.class));
+        companyProfile.setBusiness(updateObject(mapper, companyProfile.getBusiness(), proposal.getProposedBusiness(), CompanyProfile.Business.class));
+        companyProfile.setCompanySize(updateObject(mapper, companyProfile.getCompanySize(), proposal.getProposedCompanySize(), CompanyProfile.CompanySize.class));
+        companyProfile.setContact(updateObject(mapper, companyProfile.getContact(), proposal.getProposedContact(), CompanyProfile.Contact.class));
+        companyProfile.setFinancial(updateObject(mapper, companyProfile.getFinancial(), proposal.getProposedFinancial(), com.apms.domain.company.model.FinancialInfo.class));
+        companyProfile.setMarket(updateObject(mapper, companyProfile.getMarket(), proposal.getProposedMarket(), com.apms.domain.company.model.MarketInfo.class));
+        companyProfile.setInnovation(updateObject(mapper, companyProfile.getInnovation(), proposal.getProposedInnovation(), com.apms.domain.company.model.InnovationInfo.class));
+        companyProfile.setRisk(updateObject(mapper, companyProfile.getRisk(), proposal.getProposedRisk(), com.apms.domain.company.model.RiskInfo.class));
+        companyProfile.setCompliance(updateObject(mapper, companyProfile.getCompliance(), proposal.getProposedCompliance(), com.apms.domain.company.model.ComplianceInfo.class));
+
+        if (proposal.getProposedRelationship() != null && !proposal.getProposedRelationship().isEmpty()) {
+            String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+            String rawRel = proposal.getProposedRelationship().toUpperCase().replace(" ", "_");
+            String relType = "PARTNER_WITH"; // Default
+            switch (rawRel) {
+                case "PARTNER": relType = "PARTNER_WITH"; break;
+                case "COMPETITOR": relType = "COMPETITOR_OF"; break;
+                case "SUPPLIER": relType = "SUPPLIER_OF"; break;
+                case "CUSTOMER": relType = "CUSTOMER_OF"; break;
+                case "POTENTIAL_PARTNER": relType = "POTENTIAL_PARTNER_OF"; break;
+                default: relType = rawRel;
+            }
+            String confirmedBy = String.valueOf(approverId);
+            graphService.replaceRelationship(ownerCompanyId, companyProfile.getCompanyId(), relType, confirmedBy);
+        }
+
+        companyProfile.setVersion(companyProfile.getVersion() + 1);
+        
+        // Ensure source document ids are added to the profile
+        if (proposal.getSourceDocumentIds() != null && !proposal.getSourceDocumentIds().isEmpty()) {
+            if (companyProfile.getSourceRefs() == null) {
+                companyProfile.setSourceRefs(new CompanyProfile.SourceRefs());
+            }
+            if (companyProfile.getSourceRefs().getRawDocumentIds() == null) {
+                companyProfile.getSourceRefs().setRawDocumentIds(new java.util.HashSet<>());
+            }
+            for (String docId : proposal.getSourceDocumentIds()) {
+                companyProfile.getSourceRefs().getRawDocumentIds().add(docId);
+            }
+        }
+
+        companyProfileRepository.save(companyProfile);
+
+        proposal.setStatus(SubmissionStatus.APPROVED);
+        proposalRepository.save(proposal);
+
+        auditLogService.log(approverId, AuditAction.PROFILE_UPDATE_PROPOSAL_APPROVED, "CompanyProfileUpdateProposal", proposal.getId(), "Monitoring Proposal approved");
+
+        return toResponse(proposal);
+    }
+
+    @Transactional
+    public CompanyProfileUpdateProposalResponse rejectMonitoringProposal(String id, Long approverId) {
+        CompanyProfileUpdateProposal proposal = proposalRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Proposal not found"));
+
+        if (proposal.getOrigin() != com.apms.common.enums.ProposalOrigin.MONITORING) {
+            throw new com.apms.common.exception.BusinessValidationException("Only MONITORING proposals can be rejected via this endpoint");
+        }
+
+        if (proposal.getStatus() != SubmissionStatus.DRAFT && proposal.getStatus() != SubmissionStatus.SUBMITTED && proposal.getStatus() != SubmissionStatus.IN_REVIEW) {
+            throw new com.apms.common.exception.BusinessValidationException("Proposal is already processed");
+        }
+
+        proposal.setStatus(SubmissionStatus.REJECTED);
+        proposalRepository.save(proposal);
+
+        auditLogService.log(approverId, AuditAction.PROFILE_UPDATE_PROPOSAL_REJECTED, "CompanyProfileUpdateProposal", proposal.getId(), "Monitoring Proposal rejected");
 
         return toResponse(proposal);
     }
@@ -267,6 +374,22 @@ public class CompanyProfileUpdateProposalService {
     public CompanyProfileUpdateProposalResponse getProposal(String id) {
         CompanyProfileUpdateProposal proposal = proposalRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Proposal not found"));
+        return toResponse(proposal);
+    }
+
+    @Transactional(readOnly = true)
+    public java.util.List<CompanyProfileUpdateProposalResponse> getPendingProposalsByCompany(String companyProfileId) {
+        java.util.List<CompanyProfileUpdateProposal> proposals = proposalRepository.findByCompanyProfileIdAndStatusIn(
+                companyProfileId, 
+                java.util.Arrays.asList(SubmissionStatus.DRAFT, SubmissionStatus.SUBMITTED, SubmissionStatus.IN_REVIEW)
+        );
+        return proposals.stream().map(this::toResponse).collect(java.util.stream.Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public CompanyProfileUpdateProposalResponse getProposalDetails(String id) {
+        CompanyProfileUpdateProposal proposal = proposalRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Proposal not found"));
 
         UserDetailsImpl currentUser = getCurrentUser();
         if (currentUser == null) {
@@ -305,6 +428,7 @@ public class CompanyProfileUpdateProposalService {
                 .proposedInnovation(proposal.getProposedInnovation())
                 .proposedRisk(proposal.getProposedRisk())
                 .proposedCompliance(proposal.getProposedCompliance())
+                .proposedRelationship(proposal.getProposedRelationship())
                 .sourceDocumentIds(proposal.getSourceDocumentIds())
                 .extractionId(proposal.getExtractionId())
                 .status(proposal.getStatus())

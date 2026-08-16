@@ -24,6 +24,9 @@ public class CompanyMonitoringAssignmentResponse {
     private MonitoringStatus assignmentStatus;
     private String displayStatus; // UP_TO_DATE, DUE, OVERDUE, PAUSED
 
+    private String latestProposalStatus;
+    private String latestProposalId;
+
     private LocalDateTime lastReviewedAt;
     private LocalDateTime nextReviewAt;
 

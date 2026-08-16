@@ -1,7 +1,5 @@
 package com.apms.domain.crawler.scheduler;
 
-import com.apms.domain.crawler.ai.CompanyDetectionService;
-import com.apms.domain.crawler.ai.GeminiArticleSummarizer;
 import com.apms.domain.crawler.config.CrawlerConfig;
 import com.apms.domain.crawler.crawl.CrawlerResult;
 import com.apms.domain.crawler.crawl.TargetedNewsCrawler;
@@ -38,10 +36,6 @@ public class CrawlerSchedulerTest {
     private TargetedNewsCrawler targetedNewsCrawler;
     @Mock
     private CrawledArticleRepository articleRepository;
-    @Mock
-    private CompanyDetectionService companyDetectionService;
-    @Mock
-    private GeminiArticleSummarizer articleSummarizer;
     @Mock
     private ArticlePublisher articlePublisher;
     @Mock

@@ -28,6 +28,7 @@ public class CompanyProfileUpdateProposalResponse {
     private Map<String, Object> proposedInnovation;
     private Map<String, Object> proposedRisk;
     private Map<String, Object> proposedCompliance;
+    private String proposedRelationship;
 
     private List<String> sourceDocumentIds;
     private String extractionId;

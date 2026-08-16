@@ -25,4 +25,5 @@ public class CreateCompanyProfileUpdateProposalRequest {
     private List<String> sourceDocumentIds;
     private String extractionId;
     private String changeSummary;
+    private String proposedRelationship;
 }

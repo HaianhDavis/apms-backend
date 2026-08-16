@@ -867,10 +867,14 @@ public class ProfileService {
     }
 
     private String resolveRelationshipType(String companyId) {
-        if (!StringUtils.hasText(companyId)) return "PARTNER_WITH";
+        if (!StringUtils.hasText(companyId)) return null;
         try {
-            String cypher = "MATCH (c:Company {companyId: $companyId})-[r]-(:Company) RETURN type(r) LIMIT 1";
+            String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+            if (companyId.equals(ownerCompanyId)) return null; // It's the owner
+
+            String cypher = "MATCH (:Company {companyId: $ownerCompanyId})-[r]->(:Company {companyId: $companyId}) RETURN type(r) LIMIT 1";
             java.util.List<String> types = new java.util.ArrayList<>(neo4jClient.query(cypher)
+                    .bind(ownerCompanyId).to("ownerCompanyId")
                     .bind(companyId).to("companyId")
                     .fetchAs(String.class)
                     .all());
@@ -880,7 +884,7 @@ public class ProfileService {
         } catch (Exception e) {
             log.debug("Failed to resolve Neo4j relationship for companyId {}: {}", companyId, e.getMessage());
         }
-        return "PARTNER_WITH";
+        return null;
     }
 
     private CompanyProfile.Identity mapIdentity(CompanyCandidate.Identity i) {
@@ -944,5 +948,12 @@ public class ProfileService {
                 .opportunities(i.getOpportunities())
                 .threats(i.getThreats())
                 .build();
+    }
+
+    public boolean checkDuplicateByTaxCode(String taxCode) {
+        if (!StringUtils.hasText(taxCode)) {
+            return false;
+        }
+        return profileRepository.existsByIdentityTaxCode(taxCode.trim());
     }
 }

@@ -134,8 +134,13 @@ public class CompanyProfile {
         @TextIndexed
         private String legalName;
         private String tradeName;
+        
+        @Indexed(unique = true, sparse = true)
         private String taxCode;
+        
+        @Indexed(unique = true, sparse = true)
         private String registrationNumber;
+        
         private String stockTicker;
         private String stockExchange;
     }

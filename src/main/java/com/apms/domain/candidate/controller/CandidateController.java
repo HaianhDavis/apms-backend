@@ -55,6 +55,21 @@ public class CandidateController {
     }
 
     // ─────────────────────────────────────────────
+    // POST /api/v1/projects/{projectId}/tasks/{taskId}/candidates/manual
+    // ─────────────────────────────────────────────
+    @PostMapping("/projects/{projectId}/tasks/{taskId}/candidates/manual")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<CandidateResponse>> createManualCandidate(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        CandidateResponse response = candidateService.createManualCandidate(projectId, taskId, currentUser.getId());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(response, "Draft manual candidate created successfully"));
+    }
+
+    // ─────────────────────────────────────────────
     // GET /api/v1/projects/{projectId}/candidates
     // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
     // ─────────────────────────────────────────────

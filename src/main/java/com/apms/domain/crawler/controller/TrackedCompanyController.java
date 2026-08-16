@@ -1,7 +1,6 @@
 package com.apms.domain.crawler.controller;
 
 import com.apms.domain.crawler.config.CrawlerConfig;
-import com.apms.domain.crawler.ai.GeminiArticleSummarizer;
 import com.apms.domain.crawler.domain.CrawledArticle;
 import com.apms.domain.crawler.domain.TrackedCompany;
 import com.apms.domain.crawler.dto.CrawlerStatsResponse;
@@ -48,7 +47,6 @@ public class TrackedCompanyController {
     private final TrackedCompanyCache companyCache;
     private final CrawlerScheduler crawlerScheduler;
     private final CrawlerConfig crawlerConfig;
-    private final GeminiArticleSummarizer articleSummarizer;
 
     // ═══════════════════════════════════════════════
     // Tracked Company CRUD
@@ -254,17 +252,8 @@ public class TrackedCompanyController {
     @PostMapping("/crawler/articles/{id}/summarize")
     public ResponseEntity<?> summarizeArticle(@PathVariable String id,
                                               @RequestParam(required = false, defaultValue = "false") boolean refresh) {
-        return crawledArticleRepository.findById(id)
-                .map(article -> {
-                    try {
-                        CrawledArticle summarized = articleSummarizer.summarizeArticle(article, refresh);
-                        return ResponseEntity.ok(summarized);
-                    } catch (Exception e) {
-                        log.warn("Failed to summarize article '{}': {}", id, e.getMessage());
-                        return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
-                    }
-                })
-                .orElse(ResponseEntity.notFound().build());
+        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED)
+                .body(Map.of("message", "Summarization service is no longer available"));
     }
 
     // ═══════════════════════════════════════════════

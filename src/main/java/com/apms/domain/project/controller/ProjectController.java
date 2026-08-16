@@ -58,10 +58,10 @@ public class ProjectController {
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        boolean staffOnly = currentUser.getAuthorities().stream()
-                .anyMatch(authority -> "ROLE_BUSINESS_DEVELOPMENT_STAFF".equals(authority.getAuthority()));
+        boolean restrictToMembership = currentUser.getAuthorities().stream()
+                .noneMatch(authority -> "ROLE_BUSINESS_OWNER".equals(authority.getAuthority()));
         PageResponse<ProjectResponse> response = PageResponse.of(
-                projectService.getAllProjects(status, type, pageable, currentUser.getId(), staffOnly));
+                projectService.getAllProjects(status, type, pageable, currentUser.getId(), restrictToMembership));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

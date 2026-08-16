@@ -1,7 +1,5 @@
 package com.apms.domain.crawler.scheduler;
 
-import com.apms.domain.crawler.ai.CompanyDetectionService;
-import com.apms.domain.crawler.ai.GeminiArticleSummarizer;
 import com.apms.domain.crawler.config.CrawlerConfig;
 import com.apms.domain.crawler.crawl.CrawlerResult;
 import com.apms.domain.crawler.crawl.TargetedNewsCrawler;
@@ -32,8 +30,6 @@ public class CrawlerScheduler {
     private final CrawlerConfig crawlerConfig;
     private final TargetedNewsCrawler targetedNewsCrawler;
     private final CrawledArticleRepository articleRepository;
-    private final CompanyDetectionService companyDetectionService;
-    private final GeminiArticleSummarizer articleSummarizer;
     private final ArticlePublisher articlePublisher;
     private final TrackedCompanyCache companyCache;
     private final ArticleTriageService articleTriageService;
@@ -78,9 +74,9 @@ public class CrawlerScheduler {
             long startTime = System.currentTimeMillis();
             CrawlerResult crawlerResult = crawlAllFeeds();
             int totalNew = crawlerResult != null ? crawlerResult.getNewArticles() : 0;
-            int totalMatched = companyDetectionService.processAllPending();
+            int totalMatched = 0;
             int totalTriaged = articleTriageService.backfillMissingTriage();
-            int totalSummarized = autoSummaryEnabled ? articleSummarizer.summarizeReadyArticles() : 0;
+            int totalSummarized = 0;
             int totalPublished = articlePublisher.publishMatchedArticles();
             long elapsed = System.currentTimeMillis() - startTime;
 

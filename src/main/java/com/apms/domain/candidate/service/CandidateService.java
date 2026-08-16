@@ -90,6 +90,60 @@ public class CandidateService {
         return buildAndSaveCandidate(String.valueOf(importJob.getProjectId()), String.valueOf(importJob.getId()), importJob.getRawDocumentId(), cache.getExtractedData(), cache.getFieldResults(), creatorId);
     }
 
+    @Transactional
+    public CandidateResponse createManualCandidate(Long projectId, Long taskId, Long creatorId) {
+        LocalDateTime now = LocalDateTime.now();
+
+        CompanyCandidate candidate = CompanyCandidate.builder()
+                .projectId(String.valueOf(projectId))
+                .taskId(taskId)
+                .status(CandidateStatus.DRAFT)
+                .revisionNumber(1)
+                .documentVersion(0L)
+                .identity(CompanyCandidate.Identity.builder().build())
+                .business(CompanyCandidate.Business.builder()
+                        .industries(new java.util.ArrayList<>())
+                        .products(new java.util.ArrayList<>())
+                        .markets(new java.util.ArrayList<>())
+                        .targetCustomers(new java.util.ArrayList<>())
+                        .build())
+                .companySize(CompanyCandidate.CompanySize.builder().build())
+                .contact(CompanyCandidate.Contact.builder()
+                        .emails(new java.util.ArrayList<>())
+                        .phones(new java.util.ArrayList<>())
+                        .addresses(new java.util.ArrayList<>())
+                        .build())
+                .insights(CompanyCandidate.Insights.builder()
+                        .strengths(new java.util.ArrayList<>())
+                        .weaknesses(new java.util.ArrayList<>())
+                        .opportunities(new java.util.ArrayList<>())
+                        .threats(new java.util.ArrayList<>())
+                        .build())
+                .financial(new com.apms.domain.company.model.FinancialInfo())
+                .innovation(new com.apms.domain.company.model.InnovationInfo())
+                .market(new com.apms.domain.company.model.MarketInfo())
+                .risk(new com.apms.domain.company.model.RiskInfo())
+                .compliance(new com.apms.domain.company.model.ComplianceInfo())
+                .fieldEvidence(new java.util.HashMap<>())
+                .fieldResults(new java.util.HashMap<>())
+                .qualityStatus(com.apms.domain.ai.dto.ExtractionQualityStatus.PENDING_VALIDATION)
+                .qualityMetrics(null)
+                .extractionSource(CompanyCandidate.ExtractionSource.builder()
+                        .extractionMethod("MANUAL")
+                        .build())
+                .metadata(CompanyCandidate.Metadata.builder()
+                        .createdBy(String.valueOf(creatorId))
+                        .createdAt(now)
+                        .lastModifiedBy(String.valueOf(creatorId))
+                        .updatedAt(now)
+                        .build())
+                .build();
+
+        CompanyCandidate saved = candidateRepository.save(candidate);
+
+        return toResponse(saved);
+    }
+
     private CandidateResponse buildAndSaveCandidate(String projectId, String importJobId, String rawDocumentId, ExtractedCompanyData extractedData,
                                                     java.util.Map<String, ExtractionFieldResult> sourceFieldResults, Long creatorId) {
         // 2. Map extracted data to Candidate flexible embedded documents

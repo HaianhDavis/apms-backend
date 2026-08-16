@@ -179,6 +179,27 @@ public class GraphService {
         log.info("Created/Updated relationship ({})-[:{}]->({})", dto.getSourceCompanyId(), dto.getRelationshipType(), dto.getTargetCompanyId());
     }
 
+    public void replaceRelationship(String sourceCompanyId, String targetCompanyId, String newRelType, String confirmedBy) {
+        if (!newRelType.matches("^[A-Z_]+$")) {
+            throw new IllegalArgumentException("Invalid relationship type: " + newRelType);
+        }
+
+        String deleteCypher = """
+            MATCH (c1:Company {companyId: $sourceCompanyId})-[r]->(c2:Company {companyId: $targetCompanyId})
+            DELETE r
+            """;
+
+        neo4jClient.query(deleteCypher)
+                .bindAll(Map.of(
+                        "sourceCompanyId", sourceCompanyId,
+                        "targetCompanyId", targetCompanyId
+                ))
+                .run();
+
+        createRelationship(sourceCompanyId, targetCompanyId, newRelType, confirmedBy, null, null, 1.0);
+        log.info("Replaced relationships from {} to {} with type {}", sourceCompanyId, targetCompanyId, newRelType);
+    }
+
     public void updateRelationshipMetadata(String sourceCompanyId, String targetCompanyId, String relType, CompanyRelationshipDto metadataDto) {
         if (!relType.matches("^[A-Z_]+$")) {
             throw new IllegalArgumentException("Invalid relationship type: " + relType);

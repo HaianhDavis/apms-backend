@@ -231,6 +231,8 @@ public class CompanyRelationshipClosenessService {
         }
 
         if (hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
+
+
             // Can GET and PUT if in scope
             List<ProjectStatus> allowedStatuses = isPut 
                     ? List.of(ProjectStatus.DRAFT, ProjectStatus.ACTIVE)
@@ -246,11 +248,7 @@ public class CompanyRelationshipClosenessService {
             if (isPut) {
                 throw new org.springframework.security.access.AccessDeniedException("Business Development Staff cannot update relationship closeness.");
             }
-            // Can GET if in scope
-            List<ProjectStatus> allowedStatuses = List.of(ProjectStatus.DRAFT, ProjectStatus.ACTIVE, ProjectStatus.COMPLETED);
-            if (!isInScope(targetCompanyProfileId, user.getId(), allowedStatuses)) {
-                throw new org.springframework.security.access.AccessDeniedException("Target company is not within your project scope.");
-            }
+            // Can GET without scope restrictions so they can view Company Profiles
             return;
         }
 
@@ -258,7 +256,12 @@ public class CompanyRelationshipClosenessService {
     }
 
     private boolean isInScope(String targetCompanyProfileId, Long accountId, List<ProjectStatus> allowedStatuses) {
-        return projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(targetCompanyProfileId, accountId, allowedStatuses);
+        if (projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(targetCompanyProfileId, accountId, allowedStatuses)) {
+            return true;
+        }
+        return companyProfileRepository.findById(targetCompanyProfileId)
+                .map(p -> accountId.equals(p.getResponsibleManagerId()))
+                .orElse(false);
     }
 
     private boolean hasRole(UserDetailsImpl user, SystemRole role) {

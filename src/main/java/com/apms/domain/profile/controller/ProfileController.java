@@ -58,6 +58,14 @@ public class ProfileController {
         return ResponseEntity.ok(ApiResponse.success(profileService.getProfileByCompanyId(companyId)));
     }
 
+    @GetMapping("/exists")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<Boolean>> checkDuplicateTaxCode(
+            @RequestParam String taxCode) {
+        boolean exists = profileService.checkDuplicateByTaxCode(taxCode);
+        return ResponseEntity.ok(ApiResponse.success(exists));
+    }
+
     // ─────────────────────────────────────────────
     // GET /api/v1/profiles/search?name=
     // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
