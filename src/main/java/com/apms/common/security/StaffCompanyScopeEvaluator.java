@@ -56,6 +56,7 @@ public class StaffCompanyScopeEvaluator {
     private final ImportJobRepository importJobRepository;
     private final CompanyProfileUpdateProposalRepository proposalRepository;
     private final AiExtractionCacheRepository extractionCacheRepository;
+    private final com.apms.domain.monitoring.repository.CompanyMonitoringAssignmentRepository monitoringAssignmentRepository;
 
     // ─────────────────────────────────────────────
     // Company-level guards
@@ -79,7 +80,7 @@ public class StaffCompanyScopeEvaluator {
         CompanyProfile profile = resolveProfile(companyIdOrProfileId);
         if (profile == null) return false;
 
-        return isCompanyInScope(profile.getCompanyId(), user.getId());
+        return isCompanyInScope(profile.getId(), user.getId());
     }
 
     /**
@@ -90,7 +91,9 @@ public class StaffCompanyScopeEvaluator {
         if (!isStaff(user)) return true;
         if (!StringUtils.hasText(companyId)) return false;
         if (ownerOrganizationService.isOwnerCompany(companyId)) return true;
-        return isCompanyInScope(companyId, user.getId());
+        CompanyProfile profile = resolveProfile(companyId);
+        if (profile == null) return false;
+        return isCompanyInScope(profile.getId(), user.getId());
     }
 
     // ─────────────────────────────────────────────
@@ -194,8 +197,11 @@ public class StaffCompanyScopeEvaluator {
     }
 
     private boolean isCompanyInScope(String companyId, Long accountId) {
-        return projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(
-                companyId, accountId, ALL_PROJECT_STATUSES);
+        if (projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(
+                companyId, accountId, ALL_PROJECT_STATUSES)) {
+            return true;
+        }
+        return monitoringAssignmentRepository.existsByCompanyProfileIdAndAssignedStaffId(companyId, accountId);
     }
 
     private boolean isStaff(UserDetailsImpl user) {

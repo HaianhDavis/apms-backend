@@ -21,6 +21,7 @@ public class CreateCompanyProfileUpdateProposalRequest {
     private Map<String, Object> proposedInnovation;
     private Map<String, Object> proposedRisk;
     private Map<String, Object> proposedCompliance;
+    private List<Map<String, Object>> proposedCompanyMembers;
 
     private List<String> sourceDocumentIds;
     private String extractionId;

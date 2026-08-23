@@ -23,7 +23,7 @@ public class DebugMongo {
     }
 
     @Bean
-    public CommandLineRunner run(MongoTemplate mongoTemplate) {
+    public CommandLineRunner runDebugMongo(MongoTemplate mongoTemplate) {
         return args -> {
             Query query = new Query().with(Sort.by(Sort.Direction.DESC, "createdAt")).limit(1);
             List<CompanyCandidate> candidates = mongoTemplate.find(query, CompanyCandidate.class);

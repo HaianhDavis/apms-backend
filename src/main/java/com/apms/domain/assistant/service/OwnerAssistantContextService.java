@@ -128,15 +128,7 @@ public class OwnerAssistantContextService {
                 default -> "";
             };
             
-            List<String> targetCompanyIds = neo4jClient.query("MATCH (a:Company)-[:" + relType + "]->(b:Company) WHERE a.companyId = $ownerId RETURN b.companyId as targetId")
-                    .bind(ownerBusinessCompanyId).to("ownerId")
-                    .fetchAs(String.class)
-                    .mappedBy((ts, record) -> record.get("targetId").asString())
-                    .all()
-                    .stream()
-                    .filter(id -> !ownerBusinessCompanyId.equals(id)) // Defensive exclusion
-                    .distinct()
-                    .toList();
+            List<String> targetCompanyIds = graphService.getTargetCompanyIdsByRelationship(ownerBusinessCompanyId, relType);
                     
             List<CompanyProfile> targetProfiles = loadRelatedProfiles(targetCompanyIds);
             
@@ -828,15 +820,7 @@ public class OwnerAssistantContextService {
     }
 
     private List<String> getCanonicalEcosystemCompanyIds(String ownerCompanyId) {
-        String cypher = "MATCH (:Company {companyId: $ownerId})-[r:PARTNER_WITH|POTENTIAL_PARTNER_OF|COMPETITOR_OF|CUSTOMER_OF|SUPPLIER_OF]-(t:Company) RETURN DISTINCT t.companyId as targetId";
-        return neo4jClient.query(cypher)
-                .bindAll(Map.of("ownerId", ownerCompanyId))
-                .fetchAs(String.class)
-                .mappedBy((ts, record) -> record.get("targetId").asString())
-                .all()
-                .stream()
-                .filter(id -> !ownerCompanyId.equals(id))
-                .toList();
+        return graphService.getEcosystemCompanyIds(ownerCompanyId);
     }
 
     private List<CompanyProfile> loadRelatedProfiles(List<String> relatedCompanyIds) {

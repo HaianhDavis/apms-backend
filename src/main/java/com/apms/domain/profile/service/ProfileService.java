@@ -203,7 +203,7 @@ public class ProfileService {
         if (candidate.getCompliance() != null) profile.setCompliance(candidate.getCompliance());
 
         profile.setReviewStatus("APPROVED");
-        profile.setVersion(profile.getVersion() + 1);
+        profile.incrementMinorVersion();
         profile.getMetadata().setUpdatedAt(LocalDateTime.now());
         profile.getMetadata().setLastModifiedBy("SYSTEM");
 
@@ -514,7 +514,7 @@ public class ProfileService {
 
         if (request.getTags() != null) profile.setTags(request.getTags());
 
-        profile.setVersion(profile.getVersion() + 1);
+        profile.incrementMinorVersion();
         profile.getMetadata().setUpdatedAt(LocalDateTime.now());
 
         Long currentUserId = getCurrentUserId();
@@ -609,7 +609,7 @@ public class ProfileService {
 
         if (request.getTags() != null) profile.setTags(request.getTags());
 
-        profile.setVersion(profile.getVersion() + 1);
+        profile.incrementMinorVersion();
 
         if (profile.getMetadata() == null) {
             profile.setMetadata(CompanyProfile.Metadata.builder()
@@ -746,7 +746,7 @@ public class ProfileService {
     }
 
     private ProfileResponse saveOwnerProfileWithAudit(CompanyProfile profile) {
-        profile.setVersion(profile.getVersion() + 1);
+        profile.incrementMinorVersion();
 
         if (profile.getMetadata() == null) {
             profile.setMetadata(CompanyProfile.Metadata.builder()

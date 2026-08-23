@@ -42,7 +42,7 @@
 //    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyProfileId))")
 //    public ResponseEntity<CompanyProfileVersionResponse> getVersion(
 //            @PathVariable String companyProfileId,
-//            @PathVariable Integer version) {
+//            @PathVariable String version) {
 //        return ResponseEntity.ok(versionService.getVersion(companyProfileId, version));
 //    }
 //}

@@ -233,8 +233,7 @@ class CompanyRelationshipClosenessServiceTest {
     @Test
     void staffGetWithScopeAllowed_PutDeleteDenied() {
         mockTargetValid();
-        when(projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(eq(targetCompanyId), eq(staffUser.getId()), anyList()))
-                .thenReturn(true);
+
         when(closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerCompanyId, targetCompanyId))
                 .thenReturn(Optional.empty());
 

@@ -120,7 +120,7 @@ public class CompanyProfile {
     private Metadata metadata;
 
     @Builder.Default
-    private Integer version = 1;
+    private String version = "1.0";
 
     // ─────────────────────────────────────────────────────────────
     // Nested Classes (mirrors or extends Candidate data structures)
@@ -246,6 +246,30 @@ public class CompanyProfile {
         private LocalDateTime updatedAt;
         private LocalDateTime deletedAt;
     }
+
+    public void incrementMinorVersion() {
+        if (this.version == null) this.version = "1.0";
+        try {
+            String[] parts = this.version.split("\\.");
+            int major = Integer.parseInt(parts[0]);
+            int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
+            this.version = major + "." + (minor + 1);
+        } catch (Exception e) {
+            this.version = this.version + ".1";
+        }
+    }
+
+    public void incrementMajorVersion() {
+        if (this.version == null) this.version = "1.0";
+        try {
+            String[] parts = this.version.split("\\.");
+            int major = Integer.parseInt(parts[0]);
+            this.version = (major + 1) + ".0";
+        } catch (Exception e) {
+            this.version = "2.0";
+        }
+    }
+
 
     @Data
     @Builder

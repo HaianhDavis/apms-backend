@@ -61,6 +61,7 @@ public class CompanyProfileUpdateProposalService {
                 .companyProfileId(request.getCompanyProfileId())
                 .proposedIdentity(request.getProposedIdentity())
                 .proposedBusiness(request.getProposedBusiness())
+                .proposedCompanySize(request.getProposedCompanySize())
                 .proposedContact(request.getProposedContact())
                 .proposedInsights(request.getProposedInsights())
                 .proposedFinancial(request.getProposedFinancial())
@@ -68,6 +69,7 @@ public class CompanyProfileUpdateProposalService {
                 .proposedInnovation(request.getProposedInnovation())
                 .proposedRisk(request.getProposedRisk())
                 .proposedCompliance(request.getProposedCompliance())
+                .proposedCompanyMembers(request.getProposedCompanyMembers())
                 .sourceDocumentIds(request.getSourceDocumentIds())
                 .extractionId(request.getExtractionId())
                 .changeSummary(request.getChangeSummary())
@@ -98,6 +100,7 @@ public class CompanyProfileUpdateProposalService {
                 .companyProfileId(request.getCompanyProfileId())
                 .proposedIdentity(request.getProposedIdentity())
                 .proposedBusiness(request.getProposedBusiness())
+                .proposedCompanySize(request.getProposedCompanySize())
                 .proposedContact(request.getProposedContact())
                 .proposedInsights(request.getProposedInsights())
                 .proposedFinancial(request.getProposedFinancial())
@@ -105,6 +108,7 @@ public class CompanyProfileUpdateProposalService {
                 .proposedInnovation(request.getProposedInnovation())
                 .proposedRisk(request.getProposedRisk())
                 .proposedCompliance(request.getProposedCompliance())
+                .proposedCompanyMembers(request.getProposedCompanyMembers())
                 .proposedRelationship(request.getProposedRelationship())
                 .sourceDocumentIds(request.getSourceDocumentIds())
                 .extractionId(request.getExtractionId())
@@ -170,6 +174,12 @@ public class CompanyProfileUpdateProposalService {
         companyProfile.setInnovation(updateObject(mapper, companyProfile.getInnovation(), proposal.getProposedInnovation(), com.apms.domain.company.model.InnovationInfo.class));
         companyProfile.setRisk(updateObject(mapper, companyProfile.getRisk(), proposal.getProposedRisk(), com.apms.domain.company.model.RiskInfo.class));
         companyProfile.setCompliance(updateObject(mapper, companyProfile.getCompliance(), proposal.getProposedCompliance(), com.apms.domain.company.model.ComplianceInfo.class));
+
+        if (proposal.getProposedCompanyMembers() != null) {
+            companyProfile.setCompanyMembers(proposal.getProposedCompanyMembers().stream()
+                    .map(m -> mapper.convertValue(m, CompanyProfile.CompanyMember.class))
+                    .collect(java.util.stream.Collectors.toList()));
+        }
 
         if (proposal.getProposedRelationship() != null && !proposal.getProposedRelationship().isEmpty()) {
             String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
@@ -431,6 +441,7 @@ public class CompanyProfileUpdateProposalService {
                 .companyProfileId(proposal.getCompanyProfileId())
                 .proposedIdentity(proposal.getProposedIdentity())
                 .proposedBusiness(proposal.getProposedBusiness())
+                .proposedCompanySize(proposal.getProposedCompanySize())
                 .proposedContact(proposal.getProposedContact())
                 .proposedInsights(proposal.getProposedInsights())
                 .proposedFinancial(proposal.getProposedFinancial())
@@ -438,6 +449,7 @@ public class CompanyProfileUpdateProposalService {
                 .proposedInnovation(proposal.getProposedInnovation())
                 .proposedRisk(proposal.getProposedRisk())
                 .proposedCompliance(proposal.getProposedCompliance())
+                .proposedCompanyMembers(proposal.getProposedCompanyMembers())
                 .proposedRelationship(proposal.getProposedRelationship())
                 .sourceDocumentIds(proposal.getSourceDocumentIds())
                 .extractionId(proposal.getExtractionId())

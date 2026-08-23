@@ -26,7 +26,7 @@ public class CompanyProfileVersionService {
                 .map(this::toResponse);
     }
 
-    public CompanyProfileVersionResponse getVersion(String companyProfileId, Integer version) {
+    public CompanyProfileVersionResponse getVersion(String companyProfileId, String version) {
         checkAccess();
         CompanyProfileVersion profileVersion = versionRepository.findByCompanyProfileIdAndVersion(companyProfileId, version)
                 .orElseThrow(() -> new ResourceNotFoundException("Version not found"));

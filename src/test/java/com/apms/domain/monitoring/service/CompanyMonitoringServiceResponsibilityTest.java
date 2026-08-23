@@ -37,7 +37,9 @@ public class CompanyMonitoringServiceResponsibilityTest {
 
     @Mock
     private AuditLogService auditLogService;
-
+    
+    @Mock
+    private com.apms.domain.profile.repository.mongo.CompanyProfileUpdateProposalRepository proposalRepository;
     @InjectMocks
     private CompanyMonitoringService companyMonitoringService;
 

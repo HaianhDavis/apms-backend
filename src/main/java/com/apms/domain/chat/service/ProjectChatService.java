@@ -128,6 +128,9 @@ public class ProjectChatService {
     }
 
     private void validateProjectMembership(Long projectId, UserDetailsImpl user) {
+        boolean isOwner = user.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_OWNER"));
+        if (isOwner) return;
+
         if (!projectMemberRepository.existsByProject_IdAndAccount_Id(projectId, user.getId())) {
             throw new AccessDeniedException("User is not a member of this project");
         }

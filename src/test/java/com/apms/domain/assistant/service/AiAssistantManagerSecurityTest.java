@@ -79,7 +79,7 @@ public class AiAssistantManagerSecurityTest {
 
     @Test
     void managerCanQueryManagedProjects() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         when(projectSecurity.isManager(any())).thenReturn(true);
         Project p1 = new Project();
         p1.setId(1L);
@@ -101,7 +101,7 @@ public class AiAssistantManagerSecurityTest {
 
     @Test
     void managerAsksForInternalNews_returnsProtectedResponse_withoutCallingGemini() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         
         AiChatRequest request = new AiChatRequest();
         request.setQuestion("Show me the internal news about FPT");
@@ -114,7 +114,7 @@ public class AiAssistantManagerSecurityTest {
 
     @Test
     void managerGeneralKnowledgeQuestion_returnsOutOfScope_withoutCallingGemini() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         
         AiChatRequest request = new AiChatRequest();
         request.setQuestion("What is SWOT analysis?");
@@ -127,7 +127,7 @@ public class AiAssistantManagerSecurityTest {
     
     @Test
     void managerCanQueryApprovedCompanyProfile() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         when(assistantProvider.answer(anyString(), any())).thenReturn("Gemini answer for approved profile");
         
         CompanyProfile cp = new CompanyProfile();
@@ -152,7 +152,7 @@ public class AiAssistantManagerSecurityTest {
 
     @Test
     void managerCompanyProfileResponse_containsNavigationAction() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         when(assistantProvider.answer(anyString(), any())).thenReturn("Gemini answer for approved profile");
         
         CompanyProfile cp = new CompanyProfile();
@@ -179,7 +179,7 @@ public class AiAssistantManagerSecurityTest {
 
     @Test
     void managerCompanyCompareResponse_containsTwoNavigationActions() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         when(assistantProvider.answer(anyString(), any())).thenReturn("Gemini answer");
         
         CompanyProfile cp1 = new CompanyProfile();
@@ -210,7 +210,7 @@ public class AiAssistantManagerSecurityTest {
 
     @Test
     void unapprovedProfile_hasNoNavigationAction() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         when(assistantProvider.answer(anyString(), any())).thenReturn("Gemini answer");
         
         CompanyProfile cp = new CompanyProfile();
@@ -233,7 +233,7 @@ public class AiAssistantManagerSecurityTest {
 
     @Test
     void unresolvedProfile_hasNoNavigationAction() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         when(assistantProvider.answer(anyString(), any())).thenReturn("Gemini answer");
         
         when(companyProfileRepository.searchByName(anyString(), any(Pageable.class)))
@@ -249,7 +249,7 @@ public class AiAssistantManagerSecurityTest {
 
     @Test
     void internalNewsProtected_hasNoNavigationAction() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         
         AiChatRequest request = new AiChatRequest();
         request.setQuestion("Show me the internal news about FPT");
@@ -261,7 +261,7 @@ public class AiAssistantManagerSecurityTest {
 
     @Test
     void whatIsRelationshipBetweenOurCompanyAndFpt_mapsToCompanyRelationships() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         
         CompanyProfile ownerProfile = new CompanyProfile();
         ownerProfile.setId("owner-id");
@@ -305,7 +305,7 @@ public class AiAssistantManagerSecurityTest {
 
     @Test
     public void whatRelationshipDoWeHaveWithMomo_returnsPotentialPartnerRelationship() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         
         CompanyProfile ownerProfile = new CompanyProfile();
         ownerProfile.setId("owner-id");
@@ -345,7 +345,7 @@ public class AiAssistantManagerSecurityTest {
 
     @Test
     void pairRelationshipNoEdge_doesNotCallGemini() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         
         CompanyProfile ownerProfile = new CompanyProfile();
         ownerProfile.setId("owner-id");
@@ -384,7 +384,7 @@ public class AiAssistantManagerSecurityTest {
 
     @Test
     void relationshipOverviewDoesNotBecomePairQuery() {
-        when(projectSecurity.isMemberOrOwner(any())).thenReturn(true);
+
         
         CompanyProfile targetProfile = new CompanyProfile();
         targetProfile.setId("target-id");

@@ -61,4 +61,20 @@ public class DataSeeder implements CommandLineRunner {
             log.info("Demo account already exists: {}", email);
         }
     }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository companyCandidateRepository;
+    
+    @jakarta.annotation.PostConstruct
+    public void printCandidate() {
+        companyCandidateRepository.findByTaskId(1L).forEach(c -> {
+            if (!"1".equals(c.getProjectId())) {
+                c.setProjectId("1");
+                companyCandidateRepository.save(c);
+                log.info("FIXED CANDIDATE {} projectId to 1", c.getId());
+            }
+        });
+    }
 }
+
+

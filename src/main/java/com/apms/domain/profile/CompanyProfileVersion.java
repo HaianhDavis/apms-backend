@@ -25,7 +25,7 @@ public class CompanyProfileVersion {
     @Indexed
     private String companyId;
 
-    private Integer version;
+    private String version;
 
     private Map<String, Object> snapshot;
 

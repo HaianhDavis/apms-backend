@@ -30,6 +30,12 @@ public class ProjectTask {
     private Project project;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "key_result_id", nullable = true)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private ProjectKeyResult keyResult;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "assigned_to_account_id", nullable = true)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude

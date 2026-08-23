@@ -9,6 +9,7 @@ import lombok.Data;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.List;
 
 @Data
 @Builder
@@ -19,9 +20,12 @@ public class ProjectResponse {
     private ProjectType projectType;
     private String targetCompanyProfileId;
     private String targetCompanyName;
+    private String targetCompanyTaxCode;
     private RelationshipType targetRelationshipType;
     private String description;
+    private String objective;
     private ProjectStatus status;
+    private List<ProjectKeyResultResponse> keyResults;
     private Long createdBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

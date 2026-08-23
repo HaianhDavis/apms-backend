@@ -177,7 +177,7 @@ public class CompanyMemberResearchService {
         }
 
         if (addedCount > 0) {
-            profile.setVersion(profile.getVersion() == null ? 2 : profile.getVersion() + 1);
+            profile.setVersion(incrementMinorVersion(profile.getVersion()));
             if (profile.getMetadata() == null) {
                 profile.setMetadata(new CompanyProfile.Metadata());
             }
@@ -317,5 +317,17 @@ public class CompanyMemberResearchService {
 
     private boolean hasRole(UserDetailsImpl user, SystemRole role) {
         return user.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_" + role.name()));
+    }
+
+    private String incrementMinorVersion(String currentVersion) {
+        if (currentVersion == null || currentVersion.isEmpty()) return "1.1";
+        try {
+            String[] parts = currentVersion.split("\\.");
+            int major = Integer.parseInt(parts[0]);
+            int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
+            return major + "." + (minor + 1);
+        } catch (Exception e) {
+            return currentVersion + ".1";
+        }
     }
 }

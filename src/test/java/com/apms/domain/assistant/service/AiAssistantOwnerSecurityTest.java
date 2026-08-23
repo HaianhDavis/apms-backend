@@ -77,6 +77,8 @@ public class AiAssistantOwnerSecurityTest {
         lenient().when(securityContext.getAuthentication()).thenReturn(authentication);
         SecurityContextHolder.setContext(securityContext);
 
+        lenient().when(ownerInsightsService.getInsights(any(), any(), any(), any(), any()))
+                .thenReturn(org.springframework.data.domain.Page.empty());
         ownerContextService = new OwnerAssistantContextService(
                 companyProfileRepository,
                 neo4jClient,
@@ -188,16 +190,9 @@ public class AiAssistantOwnerSecurityTest {
         OwnerAiChatRequest request = new OwnerAiChatRequest();
         request.setQuestion("What risks should I pay attention to?");
         
-        
-        
-        when(externalDataRepository.findTop5ByCategoryAndRelatedCompanyIdInOrderByPublishedAtDesc(
-                eq(ExternalDataCategory.RISK), anyList())).thenReturn(List.of());
-
         AiChatResponse response = ownerAiAssistantService.chat(request);
 
-        assertTrue(response.getAnswer().contains("No current risk signals"));
-        verify(externalDataRepository).findTop5ByCategoryAndRelatedCompanyIdInOrderByPublishedAtDesc(
-                eq(ExternalDataCategory.RISK), anyList());
+        assertTrue(response.getAnswer().contains("enough approved risk evidence"));
     }
 
     // --- Context Precedence Tests ---
@@ -234,8 +229,12 @@ public class AiAssistantOwnerSecurityTest {
         request.setQuestion("Who are our competitors?");
         request.setCompanyProfileId("mongo-momo");
         
-        GraphCompanyDto comp = GraphCompanyDto.builder().name("Competitor A").build();
-        when(graphService.getCompaniesByRelationshipType("COMPETITOR_OF")).thenReturn(List.of(comp));
+        when(graphService.getTargetCompanyIdsByRelationship(eq("uuid-owner-1"), eq("COMPETITOR_OF"))).thenReturn(List.of("uuid-comp-2"));
+        CompanyProfile comp = new CompanyProfile();
+        CompanyProfile.Identity id = new CompanyProfile.Identity();
+        id.setLegalName("Competitor A");
+        comp.setIdentity(id);
+        when(companyProfileRepository.findByCompanyId("uuid-comp-2")).thenReturn(Optional.of(comp));
 
         AiChatResponse response = ownerAiAssistantService.chat(request);
 
@@ -482,6 +481,7 @@ public class AiAssistantOwnerSecurityTest {
         identity.setLegalName("FPT");
         fpt.setIdentity(identity);
         fpt.setReviewStatus("APPROVED");
+        fpt.setCompanyId("C-FPT");
 
         CompanyProfile cmc = new CompanyProfile();
         cmc.setId("mongo-cmc");
@@ -489,6 +489,7 @@ public class AiAssistantOwnerSecurityTest {
         identity2.setLegalName("CMC");
         cmc.setIdentity(identity2);
         cmc.setReviewStatus("APPROVED");
+        cmc.setCompanyId("C-CMC");
         
         org.springframework.data.domain.Page<CompanyProfile> p1 = new org.springframework.data.domain.PageImpl<>(List.of(fpt));
         org.springframework.data.domain.Page<CompanyProfile> p2 = new org.springframework.data.domain.PageImpl<>(List.of(cmc));
@@ -523,8 +524,12 @@ public class AiAssistantOwnerSecurityTest {
         request2.setQuestion("Who are our potential partners?");
         request2.setSessionId("session-123");
         
-        GraphCompanyDto comp = GraphCompanyDto.builder().name("Potential Partner A").build();
-        when(graphService.getCompaniesByRelationshipType("POTENTIAL_PARTNER_OF")).thenReturn(List.of(comp));
+        when(graphService.getTargetCompanyIdsByRelationship(eq("uuid-owner-1"), eq("POTENTIAL_PARTNER_OF"))).thenReturn(List.of("uuid-potential-2"));
+        CompanyProfile comp = new CompanyProfile();
+        CompanyProfile.Identity id = new CompanyProfile.Identity();
+        id.setLegalName("Potential Partner A");
+        comp.setIdentity(id);
+        when(companyProfileRepository.findByCompanyId("uuid-potential-2")).thenReturn(Optional.of(comp));
 
         AiChatResponse response2 = ownerAiAssistantService.chat(request2);
 
@@ -613,8 +618,12 @@ public class AiAssistantOwnerSecurityTest {
         OwnerAiChatRequest request = new OwnerAiChatRequest();
         request.setQuestion("Who are our current partners?");
         
-        GraphCompanyDto comp = GraphCompanyDto.builder().name("Partner A").build();
-        when(graphService.getCompaniesByRelationshipType("PARTNER_WITH")).thenReturn(List.of(comp));
+        when(graphService.getTargetCompanyIdsByRelationship(eq("uuid-owner-1"), eq("PARTNER_WITH"))).thenReturn(List.of("uuid-partner-1"));
+        CompanyProfile comp = new CompanyProfile();
+        CompanyProfile.Identity id = new CompanyProfile.Identity();
+        id.setLegalName("Partner A");
+        comp.setIdentity(id);
+        when(companyProfileRepository.findByCompanyId("uuid-partner-1")).thenReturn(Optional.of(comp));
 
         AiChatResponse response = ownerAiAssistantService.chat(request);
         assertTrue(response.getAnswer().contains("Partner A"));
@@ -626,8 +635,12 @@ public class AiAssistantOwnerSecurityTest {
         OwnerAiChatRequest request = new OwnerAiChatRequest();
         request.setQuestion("Which companies are potential partners?");
         
-        GraphCompanyDto comp = GraphCompanyDto.builder().name("Potential Partner A").build();
-        when(graphService.getCompaniesByRelationshipType("POTENTIAL_PARTNER_OF")).thenReturn(List.of(comp));
+        when(graphService.getTargetCompanyIdsByRelationship(eq("uuid-owner-1"), eq("POTENTIAL_PARTNER_OF"))).thenReturn(List.of("uuid-potential-1"));
+        CompanyProfile comp = new CompanyProfile();
+        CompanyProfile.Identity id = new CompanyProfile.Identity();
+        id.setLegalName("Potential Partner A");
+        comp.setIdentity(id);
+        when(companyProfileRepository.findByCompanyId("uuid-potential-1")).thenReturn(Optional.of(comp));
 
         AiChatResponse response = ownerAiAssistantService.chat(request);
         assertTrue(response.getAnswer().contains("Potential Partner A"));
@@ -639,8 +652,12 @@ public class AiAssistantOwnerSecurityTest {
         OwnerAiChatRequest request = new OwnerAiChatRequest();
         request.setQuestion("Who are our competitors?");
         
-        GraphCompanyDto comp = GraphCompanyDto.builder().name("Competitor A").build();
-        when(graphService.getCompaniesByRelationshipType("COMPETITOR_OF")).thenReturn(List.of(comp));
+        when(graphService.getTargetCompanyIdsByRelationship(eq("uuid-owner-1"), eq("COMPETITOR_OF"))).thenReturn(List.of("uuid-comp-1"));
+        CompanyProfile comp = new CompanyProfile();
+        CompanyProfile.Identity id = new CompanyProfile.Identity();
+        id.setLegalName("Competitor A");
+        comp.setIdentity(id);
+        when(companyProfileRepository.findByCompanyId("uuid-comp-1")).thenReturn(Optional.of(comp));
 
         AiChatResponse response = ownerAiAssistantService.chat(request);
         assertTrue(response.getAnswer().contains("Competitor A"));
@@ -717,8 +734,27 @@ public class AiAssistantOwnerSecurityTest {
         request.setQuestion("What opportunities have been detected?");
         
         when(ownerAssistantProvider.answer(anyString(), any())).thenReturn("Gemini Opportunity Synthesis");
-        when(externalDataRepository.findTop5ByCategoryAndRelatedCompanyIdInOrderByPublishedAtDesc(
-                eq(com.apms.common.enums.ExternalDataCategory.OPPORTUNITY), anyList())).thenReturn(List.of(com.apms.domain.externaldata.ExternalDataItem.builder().build()));
+        
+        com.apms.domain.graph.dto.GraphCompanyDto gc = com.apms.domain.graph.dto.GraphCompanyDto.builder().build();
+        com.apms.domain.graph.dto.CompanyRelationshipDto rel = com.apms.domain.graph.dto.CompanyRelationshipDto.builder()
+                .relationshipType("PARTNER_WITH")
+                .targetCompanyId("uuid-opp-1")
+                .build();
+        gc.setRelationships(List.of(rel));
+        when(graphService.getCompanyNodeWithRelationships("uuid-owner-1")).thenReturn(gc);
+        
+        CompanyProfile tp = new CompanyProfile();
+        tp.setId("mongo-opp-1");
+        tp.setCompanyId("uuid-opp-1");
+        CompanyProfile.Identity id = new CompanyProfile.Identity();
+        id.setLegalName("Opp Partner");
+        tp.setIdentity(id);
+        
+        CompanyProfile.Insights insights = new CompanyProfile.Insights();
+        insights.setOpportunities(List.of("Great opportunity"));
+        tp.setInsights(insights);
+        
+        when(companyProfileRepository.findByCompanyId("uuid-opp-1")).thenReturn(Optional.of(tp));
 
         AiChatResponse response = ownerAiAssistantService.chat(request);
         assertEquals("Gemini Opportunity Synthesis", response.getAnswer());
@@ -761,6 +797,7 @@ public class AiAssistantOwnerSecurityTest {
         identity.setLegalName("FPT");
         fpt.setIdentity(identity);
         fpt.setReviewStatus("APPROVED");
+        fpt.setCompanyId("C-FPT");
 
         CompanyProfile cmc = new CompanyProfile();
         cmc.setId("mongo-cmc");
@@ -768,6 +805,7 @@ public class AiAssistantOwnerSecurityTest {
         identity2.setLegalName("CMC");
         cmc.setIdentity(identity2);
         cmc.setReviewStatus("APPROVED");
+        cmc.setCompanyId("C-CMC");
         
         org.springframework.data.domain.Page<CompanyProfile> p1 = new org.springframework.data.domain.PageImpl<>(List.of(fpt));
         org.springframework.data.domain.Page<CompanyProfile> p2 = new org.springframework.data.domain.PageImpl<>(List.of(cmc));
@@ -790,7 +828,11 @@ public class AiAssistantOwnerSecurityTest {
         
         when(ownerAssistantProvider.answer(anyString(), any())).thenReturn("Strategic Briefing");
         
-        org.springframework.data.domain.Page<com.apms.domain.dashboard.dto.OwnerInsightDto> page = new org.springframework.data.domain.PageImpl<>(java.util.List.of());
+        com.apms.domain.dashboard.dto.OwnerInsightDto insight = com.apms.domain.dashboard.dto.OwnerInsightDto.builder()
+                .title("Test Insight")
+                .type(com.apms.domain.dashboard.dto.InsightType.RECOMMENDATION)
+                .build();
+        org.springframework.data.domain.Page<com.apms.domain.dashboard.dto.OwnerInsightDto> page = new org.springframework.data.domain.PageImpl<>(java.util.List.of(insight));
         org.mockito.Mockito.lenient().when(ownerInsightsService.getInsights(any(), any(), any(), any(), any())).thenReturn(page);
 
         AiChatResponse response = ownerAiAssistantService.chat(request);

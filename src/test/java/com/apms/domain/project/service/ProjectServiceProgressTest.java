@@ -9,11 +9,14 @@ import com.apms.domain.project.ProjectMember;
 import com.apms.domain.project.dto.CreateProjectRequest;
 import com.apms.domain.project.dto.ProjectResponse;
 import com.apms.domain.project.dto.UpdateProjectRequest;
+import com.apms.domain.project.dto.*;
+import com.apms.domain.project.repository.sql.ProjectKeyResultRepository;
 import com.apms.domain.project.repository.sql.ProjectMemberRepository;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.project.repository.sql.ProjectTaskRepository;
 import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
+import com.apms.domain.user.repository.sql.UserProfileRepository;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.profile.service.OwnerOrganizationService;
 import com.apms.domain.profile.CompanyProfile;
@@ -52,6 +55,14 @@ public class ProjectServiceProgressTest {
     private AccountRepository accountRepository;
     @Mock
     private Neo4jClient neo4jClient;
+
+
+    @Mock
+    private UserProfileRepository userProfileRepository;
+
+    @Mock
+    private ProjectKeyResultRepository projectKeyResultRepository;
+
     @Mock
     private ProjectTaskRepository projectTaskRepository;
     @Mock

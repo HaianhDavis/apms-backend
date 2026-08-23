@@ -21,6 +21,22 @@ public interface ProjectTaskRepository extends JpaRepository<ProjectTask, Long>,
 
     void deleteByProjectId(Long projectId);
 
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @org.springframework.data.jpa.repository.Query("UPDATE ProjectTask t SET t.assignedToAccount = :account, t.status = :newStatus WHERE t.id = :taskId AND t.project.id = :projectId AND t.status = :oldStatus AND t.assignedToAccount IS NULL")
+    int claimTaskAtomically(@org.springframework.data.repository.query.Param("taskId") Long taskId, 
+                            @org.springframework.data.repository.query.Param("projectId") Long projectId,
+                            @org.springframework.data.repository.query.Param("account") com.apms.domain.user.Account account,
+                            @org.springframework.data.repository.query.Param("oldStatus") com.apms.common.enums.TaskStatus oldStatus,
+                            @org.springframework.data.repository.query.Param("newStatus") com.apms.common.enums.TaskStatus newStatus);
+
+    @org.springframework.data.jpa.repository.Modifying(clearAutomatically = true)
+    @org.springframework.data.jpa.repository.Query("UPDATE ProjectTask t SET t.assignedToAccount = null, t.status = :newStatus WHERE t.id = :taskId AND t.project.id = :projectId AND t.status = :oldStatus AND t.assignedToAccount.id = :accountId")
+    int releaseTaskAtomically(@org.springframework.data.repository.query.Param("taskId") Long taskId, 
+                              @org.springframework.data.repository.query.Param("projectId") Long projectId,
+                              @org.springframework.data.repository.query.Param("accountId") Long accountId,
+                              @org.springframework.data.repository.query.Param("oldStatus") com.apms.common.enums.TaskStatus oldStatus,
+                              @org.springframework.data.repository.query.Param("newStatus") com.apms.common.enums.TaskStatus newStatus);
+
     public interface ProjectTaskStats {
         Long getProjectId();
         Long getTotalTasks();

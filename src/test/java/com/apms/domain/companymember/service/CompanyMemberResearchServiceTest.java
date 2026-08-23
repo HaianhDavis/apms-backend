@@ -188,7 +188,7 @@ class CompanyMemberResearchServiceTest {
         CompanyProfile profile = new CompanyProfile();
         profile.setId("profile-1");
         profile.setCompanyId("company-1");
-        profile.setVersion(1);
+        profile.setVersion("1.0");
         profile.setCompanyMembers(new ArrayList<>(List.of(
                 CompanyProfile.CompanyMember.builder().fullName("Jane Doe").position("CEO").build()
         )));

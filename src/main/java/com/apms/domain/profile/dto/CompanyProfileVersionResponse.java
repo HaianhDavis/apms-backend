@@ -13,7 +13,7 @@ public class CompanyProfileVersionResponse {
     private String id;
     private String companyProfileId;
     private String companyId;
-    private Integer version;
+    private String version;
     private Map<String, Object> snapshot;
     private String createdFromProposalId;
     private Long createdFromProjectId;

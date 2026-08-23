@@ -213,7 +213,9 @@ public class NotificationService {
         String projectName = task.getProject() != null ? task.getProject().getProjectName() : "Project";
         String title = "You have a new task";
         String message = String.format("%s - %s", projectName, task.getTitle());
-        Notification notification = createSystemNotification(recipient, sender, title, message, NotificationType.TASK);
+        Long projectId = task.getProject() != null ? task.getProject().getId() : null;
+        Notification notification = createSystemNotification(
+                recipient, sender, title, message, NotificationType.TASK, projectId, task.getId(), null, "TASK_ASSIGNED");
 
         runAfterCommit(() -> pushToUser(
                 recipient.getId(),
@@ -235,7 +237,8 @@ public class NotificationService {
 
         String title = "You were added to a project";
         String message = project.getProjectName();
-        Notification notification = createSystemNotification(recipient, sender, title, message, NotificationType.SYSTEM);
+        Notification notification = createSystemNotification(
+                recipient, sender, title, message, NotificationType.SYSTEM, project.getId(), null, null, "PROJECT_MEMBER_ADDED");
 
         runAfterCommit(() -> pushToUser(
                 recipient.getId(),
@@ -245,6 +248,78 @@ public class NotificationService {
                         "type", "PROJECT_MEMBER_ADDED",
                         "notificationId", String.valueOf(notification.getId()),
                         "projectId", String.valueOf(project.getId())
+                )));
+    }
+
+    @Transactional
+    public void notifyTasksAvailable(Project project, Account recipient, Account sender) {
+        if (project == null || recipient == null) {
+            return;
+        }
+
+        String title = "New tasks are available";
+        String message = String.format("New tasks are available in Project %s.", project.getProjectName());
+        Notification notification = createSystemNotification(
+                recipient, sender, title, message, NotificationType.TASK, project.getId(), null, null, "TASKS_AVAILABLE");
+
+        runAfterCommit(() -> pushToUser(
+                recipient.getId(),
+                title,
+                message,
+                java.util.Map.of(
+                        "type", "TASKS_AVAILABLE",
+                        "notificationId", String.valueOf(notification.getId()),
+                        "projectId", String.valueOf(project.getId())
+                )));
+    }
+
+    @Transactional
+    public void notifyTaskSubmitted(ProjectTask task, Account recipient, Account sender) {
+        if (task == null || recipient == null) {
+            return;
+        }
+
+        String projectName = task.getProject() != null ? task.getProject().getProjectName() : "Project";
+        String title = "Task submitted for review";
+        String message = String.format("Task submitted: %s (%s)", task.getTitle(), projectName);
+        Long projectId = task.getProject() != null ? task.getProject().getId() : null;
+        Notification notification = createSystemNotification(
+                recipient, sender, title, message, NotificationType.TASK, projectId, task.getId(), null, "TASK_SUBMITTED");
+
+        runAfterCommit(() -> pushToUser(
+                recipient.getId(),
+                title,
+                message,
+                java.util.Map.of(
+                        "type", "TASK_SUBMITTED",
+                        "notificationId", String.valueOf(notification.getId()),
+                        "projectId", String.valueOf(task.getProject() != null ? task.getProject().getId() : ""),
+                        "taskId", String.valueOf(task.getId())
+                )));
+    }
+
+    @Transactional
+    public void notifyTaskApproved(ProjectTask task, Account recipient, Account sender) {
+        if (task == null || recipient == null) {
+            return;
+        }
+
+        String projectName = task.getProject() != null ? task.getProject().getProjectName() : "Project";
+        String title = "Task approved";
+        String message = String.format("Task approved: %s (%s)", task.getTitle(), projectName);
+        Long projectId = task.getProject() != null ? task.getProject().getId() : null;
+        Notification notification = createSystemNotification(
+                recipient, sender, title, message, NotificationType.TASK, projectId, task.getId(), null, "TASK_APPROVED");
+
+        runAfterCommit(() -> pushToUser(
+                recipient.getId(),
+                title,
+                message,
+                java.util.Map.of(
+                        "type", "TASK_APPROVED",
+                        "notificationId", String.valueOf(notification.getId()),
+                        "projectId", String.valueOf(task.getProject() != null ? task.getProject().getId() : ""),
+                        "taskId", String.valueOf(task.getId())
                 )));
     }
 
@@ -436,12 +511,30 @@ public class NotificationService {
     }
 
     private Notification createSystemNotification(Account recipient, Account sender, String title, String message, NotificationType type) {
+        return createSystemNotification(recipient, sender, title, message, type, null, null, null, null);
+    }
+
+    private Notification createSystemNotification(
+            Account recipient, 
+            Account sender, 
+            String title, 
+            String message, 
+            NotificationType type,
+            Long projectId,
+            Long taskId,
+            Long submissionId,
+            String actionType) {
+        
         Notification notification = Notification.builder()
                 .recipientAccount(recipient)
                 .senderAccount(sender)
                 .title(title)
                 .message(message)
                 .type(type)
+                .projectId(projectId)
+                .taskId(taskId)
+                .submissionId(submissionId)
+                .actionType(actionType)
                 .isRead(false)
                 .isDeleted(false)
                 .build();

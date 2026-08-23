@@ -91,12 +91,18 @@ public class CandidateController {
     // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
     // ─────────────────────────────────────────────
     @GetMapping("/candidates/{candidateId}")
-    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.canAccessCandidate(#candidateId)")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.canAccessCandidate(#candidateId))")
     public ResponseEntity<ApiResponse<CandidateResponse>> getCandidate(
             @PathVariable String candidateId) {
 
         return ResponseEntity.ok(ApiResponse.success(candidateService.getCandidate(candidateId)));
     }
+
+    @GetMapping("/candidates/{candidateId}/test")
+    public ResponseEntity<String> getCandidateTest(@PathVariable String candidateId) {
+        return ResponseEntity.ok(candidateService.getCandidate(candidateId).getProjectId());
+    }
+
 
     // ─────────────────────────────────────────────
     // PATCH /api/v1/candidates/{candidateId}

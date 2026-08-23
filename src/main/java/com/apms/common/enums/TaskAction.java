@@ -1,6 +1,8 @@
 package com.apms.common.enums;
 
 public enum TaskAction {
+    CLAIM_TASK,
+    RELEASE_TASK,
     VIEW_DOCUMENTS,
     UPLOAD_DOCUMENT,
     ADD_MANUAL_DOCUMENT,

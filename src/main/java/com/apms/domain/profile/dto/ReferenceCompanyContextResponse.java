@@ -22,7 +22,7 @@ import java.util.Set;
 @AllArgsConstructor
 public class ReferenceCompanyContextResponse {
     private String companyProfileId;
-    private Integer profileVersion;
+    private String profileVersion;
 
     private String legalName;
     private String tradeName;

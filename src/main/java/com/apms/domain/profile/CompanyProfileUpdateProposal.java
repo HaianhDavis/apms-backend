@@ -55,6 +55,7 @@ public class CompanyProfileUpdateProposal {
     private Map<String, Object> proposedInnovation;
     private Map<String, Object> proposedRisk;
     private Map<String, Object> proposedCompliance;
+    private List<Map<String, Object>> proposedCompanyMembers;
 
     private String proposedRelationship;
 

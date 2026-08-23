@@ -29,6 +29,6 @@ public class ProfileResponse {
     private String relationshipType;
     private List<String> tags;
     private CompanyProfile.Metadata metadata;
-    private Integer version;
+    private String version;
     private Long responsibleManagerId;
 }

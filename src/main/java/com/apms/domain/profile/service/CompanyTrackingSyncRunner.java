@@ -34,17 +34,14 @@ public class CompanyTrackingSyncRunner implements CommandLineRunner {
     public void run(String... args) throws Exception {
         log.info("Starting CompanyTrackingSyncRunner to sync existing companies to TrackedCompany...");
         
-        // --- Wipe all dummy seed companies and start fresh from Profiles ---
-        trackedCompanyRepository.deleteAll();
-        log.info("Wiped all existing TrackedCompany records to clean up dummy seed data.");
-        
-        // --- WIPE ALL CRAWLED ARTICLES AS REQUESTED BY USER ---
-        mongoTemplate.dropCollection("crawled_articles");
-        log.info("Wiped crawled_articles collection to allow a fresh crawl with correct names.");
-        // ----------------------------------------------------------------------------
+        // Remove destructive wipes:
+        // trackedCompanyRepository.deleteAll();
+        // mongoTemplate.dropCollection("crawled_articles");
 
         List<CompanyProfile> profiles = companyProfileRepository.findAll();
         boolean hasAdded = false;
+
+        java.util.Map<String, TrackedCompany> companiesToSave = new java.util.HashMap<>();
 
         for (CompanyProfile profile : profiles) {
             if (profile.getIdentity() == null) continue;
@@ -61,6 +58,11 @@ public class CompanyTrackingSyncRunner implements CommandLineRunner {
 
             if (primaryName == null) continue;
 
+            String normalizedName = primaryName.toLowerCase();
+            if (companiesToSave.containsKey(normalizedName)) {
+                continue;
+            }
+
             List<String> aliases = new ArrayList<>();
             if (org.springframework.util.StringUtils.hasText(tradeName) && !tradeName.trim().equalsIgnoreCase(primaryName)) {
                 aliases.add(tradeName.trim());
@@ -70,20 +72,33 @@ public class CompanyTrackingSyncRunner implements CommandLineRunner {
                 aliases.add(stockTicker.trim());
             }
 
-            TrackedCompany newCompany = TrackedCompany.builder()
-                    .id(profile.getId())
-                    .companyName(primaryName)
-                    .aliases(aliases)
-                    .isActive(true)
-                    .createdAt(LocalDateTime.now())
-                    .updatedAt(LocalDateTime.now())
-                    .build();
-            trackedCompanyRepository.save(newCompany);
-            log.info("Created synced TrackedCompany for: {} with aliases {}", primaryName, aliases);
-            hasAdded = true;
+            Optional<TrackedCompany> existingOpt = trackedCompanyRepository.findByCompanyNameIgnoreCase(primaryName);
+            TrackedCompany company;
+            if (existingOpt.isPresent()) {
+                company = existingOpt.get();
+                company.setAliases(aliases);
+                company.setUpdatedAt(LocalDateTime.now());
+                company.setIsActive(true);
+            } else {
+                company = TrackedCompany.builder()
+                        .id(profile.getId())
+                        .companyName(primaryName)
+                        .aliases(aliases)
+                        .isActive(true)
+                        .createdAt(LocalDateTime.now())
+                        .updatedAt(LocalDateTime.now())
+                        .build();
+                hasAdded = true;
+            }
+            companiesToSave.put(normalizedName, company);
         }
 
-        if (hasAdded) {
+        for (TrackedCompany company : companiesToSave.values()) {
+            trackedCompanyRepository.save(company);
+            log.info("Saved synced TrackedCompany for: {}", company.getCompanyName());
+        }
+
+        if (hasAdded || !companiesToSave.isEmpty()) {
             trackedCompanyCache.forceRefresh();
         }
         log.info("CompanyTrackingSyncRunner completed.");

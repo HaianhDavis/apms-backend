@@ -9,5 +9,5 @@ import java.util.Optional;
 
 public interface CompanyProfileVersionRepository extends MongoRepository<CompanyProfileVersion, String> {
     Page<CompanyProfileVersion> findByCompanyProfileIdOrderByVersionDesc(String companyProfileId, Pageable pageable);
-    Optional<CompanyProfileVersion> findByCompanyProfileIdAndVersion(String companyProfileId, Integer version);
+    Optional<CompanyProfileVersion> findByCompanyProfileIdAndVersion(String companyProfileId, String version);
 }

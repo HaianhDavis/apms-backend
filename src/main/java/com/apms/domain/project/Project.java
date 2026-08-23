@@ -47,6 +47,13 @@ public class Project {
     private String targetCompanyName;
 
     /**
+     * Nullable. Required when projectType = RESEARCH_NEW_COMPANY.
+     * Contains the tax code of the company being researched for duplicate detection.
+     */
+    @Column(nullable = true)
+    private String targetCompanyTaxCode;
+
+    /**
      * The official business relationship type for the target company.
      * Selected by the Manager at project creation time.
      */
@@ -56,6 +63,9 @@ public class Project {
 
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String description;
+
+    @Column(columnDefinition = "NVARCHAR(MAX)")
+    private String objective;
 
     @Column(name = "planned_end_date")
     private LocalDate plannedEndDate;

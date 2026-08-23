@@ -31,7 +31,7 @@ public class GraphController {
     }
 
     @GetMapping("/network")
-    @PreAuthorize("hasRole('BUSINESS_OWNER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<List<GraphCompanyDto>>> getNetwork() {
         return ResponseEntity.ok(ApiResponse.success(graphService.getNetwork()));
     }

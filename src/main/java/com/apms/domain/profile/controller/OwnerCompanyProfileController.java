@@ -95,7 +95,7 @@ public class OwnerCompanyProfileController {
     @GetMapping("/company-profile/versions/{version}")
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<CompanyProfileVersionResponse> getOwnerVersion(
-            @PathVariable Integer version) {
+            @PathVariable String version) {
         String ownerId = ownerOrganizationService.getOwnerCompanyId();
         return ResponseEntity.ok(versionService.getVersion(ownerId, version));
     }
