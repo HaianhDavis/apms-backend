@@ -21,9 +21,9 @@ public class CompanyRelationshipChangeStubController {
         return ResponseEntity.ok(Collections.emptyList());
     }
 
-    @GetMapping("/company-profiles/{companyProfileId}/relationship-changes/pending")
-    @Operation(summary = "Get pending relationship changes (Stub)")
-    public ResponseEntity<List<Object>> getPendingProposals(@PathVariable String companyProfileId) {
-        return ResponseEntity.ok(Collections.emptyList());
-    }
+//    @GetMapping("/company-profiles/{companyProfileId}/relationship-changes/pending")
+//    @Operation(summary = "Get pending relationship changes (Stub)")
+//    public ResponseEntity<List<Object>> getPendingProposals(@PathVariable String companyProfileId) {
+//        return ResponseEntity.ok(Collections.emptyList());
+//    }
 }

@@ -687,6 +687,10 @@ public class CandidateService {
             throw new BusinessValidationException("The Owner Organization cannot be selected as a project target.");
         }
 
+        CandidateStatus previousStatus = candidate.getStatus();
+        com.apms.domain.ai.dto.ExtractionQualityStatus previousQuality = candidate.getQualityStatus();
+        CandidateStatus previousLifecycleStatus = candidate.getLifecycle() != null ? candidate.getLifecycle().getStatus() : null;
+
         candidate.setStatus(CandidateStatus.APPROVED);
         candidate.setQualityStatus(com.apms.domain.ai.dto.ExtractionQualityStatus.REVIEWED);
         CompanyCandidate.Lifecycle lifecycle = Optional.ofNullable(candidate.getLifecycle()).orElse(new CompanyCandidate.Lifecycle());
@@ -729,8 +733,19 @@ public class CandidateService {
                 ? candidate.getRelationshipConfidenceScore()
                 : 1.0;
 
-        // Publish event for Profile & Graph downstream handling
-        eventPublisher.publishEvent(new CandidateApprovedEvent(candidateId, candidate.getProjectId(), finalType, confidence));
+        try {
+            // Publish event for Profile & Graph downstream handling
+            eventPublisher.publishEvent(new CandidateApprovedEvent(candidateId, candidate.getProjectId(), finalType, confidence));
+        } catch (Exception e) {
+            // Rollback MongoDB save since it doesn't participate in Spring's JPA transaction manager by default
+            candidate.setStatus(previousStatus);
+            candidate.setQualityStatus(previousQuality);
+            if (candidate.getLifecycle() != null) {
+                candidate.getLifecycle().setStatus(previousLifecycleStatus);
+            }
+            candidateRepository.save(candidate);
+            throw e;
+        }
 
         CompanyCandidate refreshed = candidateRepository.findById(candidateId).orElse(candidate);
         log.info("Candidate approved: id={}, finalType={}", candidateId, finalType);

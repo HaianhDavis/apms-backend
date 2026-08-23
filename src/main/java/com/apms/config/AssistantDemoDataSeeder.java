@@ -100,7 +100,6 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
     public void run(String... args) {
         log.info("Running AssistantDemoDataSeeder with CafeF-listed FPT-centric data...");
 
-        ensureProjectExists();
         seedCompanyProfiles();
         seedNeo4jGraph();
 
@@ -126,27 +125,6 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
     // PROJECT
     // ============================================================
 
-    private Project ensureProjectExists() {
-        Account manager = accountRepository.findByEmail("manager@apms.com").orElseThrow();
-
-        Project project = projectRepository.findById(1L).orElse(null);
-        if (project == null) {
-            project = Project.builder()
-                    .projectName("AI Assistant Demo Project")
-                    .projectType(ProjectType.RESEARCH_NEW_COMPANY)
-                    .targetCompanyName("FPT Business Ecosystem - CafeF Companies")
-                    .description("FPT-centric company data using enterprises that have company/ticker profiles on CafeF.")
-                    .status(ProjectStatus.ACTIVE)
-                    .createdByAccount(manager)
-                    .build();
-
-            project = projectRepository.save(project);
-        }
-
-        ensureMembership(project, "manager@apms.com", MemberRole.MANAGER);
-        ensureMembership(project, "staff@apms.com", MemberRole.STAFF);
-        return project;
-    }
 
     private void ensureMembership(Project project, String email, MemberRole role) {
         accountRepository.findByEmail(email).ifPresent(account -> {

@@ -55,8 +55,8 @@ public class OwnerCompanyProfileController {
     // GET /api/v1/owner/company-profile/versions
     // Role: SYSTEM_ADMIN, BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
-    @GetMapping("/company-profile/versions")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+//    @GetMapping("/company-profile/versions")
+//    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<PageResponse<CompanyProfileVersionResponse>> getOwnerVersions(
         @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "10") int size

@@ -152,6 +152,16 @@ public class CompanyProfileUpdateProposalService {
         mapper.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
         companyProfile.setIdentity(updateObject(mapper, companyProfile.getIdentity(), proposal.getProposedIdentity(), CompanyProfile.Identity.class));
+        
+        if (companyProfile.getIdentity() != null) {
+            if ("".equals(companyProfile.getIdentity().getTaxCode())) {
+                companyProfile.getIdentity().setTaxCode(null);
+            }
+            if ("".equals(companyProfile.getIdentity().getRegistrationNumber())) {
+                companyProfile.getIdentity().setRegistrationNumber(null);
+            }
+        }
+        
         companyProfile.setBusiness(updateObject(mapper, companyProfile.getBusiness(), proposal.getProposedBusiness(), CompanyProfile.Business.class));
         companyProfile.setCompanySize(updateObject(mapper, companyProfile.getCompanySize(), proposal.getProposedCompanySize(), CompanyProfile.CompanySize.class));
         companyProfile.setContact(updateObject(mapper, companyProfile.getContact(), proposal.getProposedContact(), CompanyProfile.Contact.class));

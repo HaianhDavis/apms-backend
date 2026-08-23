@@ -37,38 +37,38 @@ public class ListingDataController {
     private final CrawledArticleRepository crawledArticleRepository;
     private final MongoTemplate mongoTemplate;
 
-    @PostMapping("/{companyId}/search-news")
-    public ResponseEntity<ApiResponse<CompanyNewsSearchResponse>> searchCompanyNews(@PathVariable String companyId) {
-        log.info("Received request to search news for companyId: {}", companyId);
-
-        String companyName = "Unknown Company";
-        var profileOpt = profileRepository.findByCompanyId(companyId);
-        if (profileOpt.isEmpty()) {
-            profileOpt = profileRepository.findById(companyId);
-        }
-
-        if (profileOpt.isPresent()) {
-            CompanyProfile profile = profileOpt.get();
-            if (profile.getIdentity() != null && profile.getIdentity().getLegalName() != null) {
-                companyName = profile.getIdentity().getLegalName();
-            } else if (profile.getIdentity() != null && profile.getIdentity().getTradeName() != null) {
-                companyName = profile.getIdentity().getTradeName();
-            }
-        }
-
-        // Return a dummy response for now, as real crawling might take too long synchronously
-        CompanyNewsSearchResponse response = CompanyNewsSearchResponse.builder()
-                .companyId(companyId)
-                .companyName(companyName)
-                .searchedAt(LocalDateTime.now())
-                .savedNew(0)
-                .alreadyExisting(0)
-                .rejected(0)
-                .results(new ArrayList<>())
-                .build();
-
-        return ResponseEntity.ok(ApiResponse.success(response));
-    }
+//    @PostMapping("/{companyId}/search-news")
+//    public ResponseEntity<ApiResponse<CompanyNewsSearchResponse>> searchCompanyNews(@PathVariable String companyId) {
+//        log.info("Received request to search news for companyId: {}", companyId);
+//
+//        String companyName = "Unknown Company";
+//        var profileOpt = profileRepository.findByCompanyId(companyId);
+//        if (profileOpt.isEmpty()) {
+//            profileOpt = profileRepository.findById(companyId);
+//        }
+//
+//        if (profileOpt.isPresent()) {
+//            CompanyProfile profile = profileOpt.get();
+//            if (profile.getIdentity() != null && profile.getIdentity().getLegalName() != null) {
+//                companyName = profile.getIdentity().getLegalName();
+//            } else if (profile.getIdentity() != null && profile.getIdentity().getTradeName() != null) {
+//                companyName = profile.getIdentity().getTradeName();
+//            }
+//        }
+//
+//        // Return a dummy response for now, as real crawling might take too long synchronously
+//        CompanyNewsSearchResponse response = CompanyNewsSearchResponse.builder()
+//                .companyId(companyId)
+//                .companyName(companyName)
+//                .searchedAt(LocalDateTime.now())
+//                .savedNew(0)
+//                .alreadyExisting(0)
+//                .rejected(0)
+//                .results(new ArrayList<>())
+//                .build();
+//
+//        return ResponseEntity.ok(ApiResponse.success(response));
+//    }
 
     @GetMapping("/{companyId}/news")
     public ResponseEntity<ApiResponse<ListingTabResponse<List<CompanyNews>>>> getCompanyNews(@PathVariable String companyId) {
