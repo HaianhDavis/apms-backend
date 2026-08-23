@@ -71,7 +71,16 @@ class DashboardServiceTest {
         when(ownerOrganizationService.getOwnerCompanyProfileId()).thenReturn("owner-mongo-id");
 
         // Mock counts
-        when(profileRepository.count()).thenReturn(100L);
+        java.util.List<CompanyProfile> allProfiles = new java.util.ArrayList<>();
+        for (int i = 0; i < 100; i++) {
+            CompanyProfile p = new CompanyProfile();
+            p.setCompanyId("comp-" + i);
+            allProfiles.add(p);
+        }
+        CompanyProfile ownerProfile = new CompanyProfile();
+        ownerProfile.setCompanyId("owner-business-id");
+        allProfiles.add(ownerProfile);
+        when(profileRepository.findAll()).thenReturn(allProfiles);
         when(projectRepository.count()).thenReturn(10L);
         when(candidateRepository.count()).thenReturn(50L);
         when(candidateRepository.countByStatus(CandidateStatus.APPROVED)).thenReturn(30L);

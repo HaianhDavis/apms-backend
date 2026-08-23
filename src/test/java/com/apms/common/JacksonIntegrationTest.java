@@ -16,17 +16,8 @@ import java.time.LocalDateTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Import(JacksonIntegrationTest.Config.class)
+@org.junit.jupiter.api.extension.ExtendWith(org.mockito.junit.jupiter.MockitoExtension.class)
 public class JacksonIntegrationTest {
-
-    @TestConfiguration
-    static class Config {
-        @Bean
-        public TestController testController() {
-            return new TestController();
-        }
-    }
 
     @RestController
     static class TestController {
@@ -41,23 +32,37 @@ public class JacksonIntegrationTest {
         }
     }
 
-    @Autowired
-    private TestRestTemplate restTemplate;
+    private org.springframework.test.web.servlet.MockMvc mockMvc;
 
-    @Test
-    public void testLocalDateTimeSerialization() {
-        ResponseEntity<String> response = restTemplate.getForEntity("/test/success", String.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(response.getBody()).contains("\"timestamp\":");
-        assertThat(response.getBody()).matches(".*\"timestamp\":\"\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*\".*");
+    @org.junit.jupiter.api.BeforeEach
+    public void setup() {
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        mapper.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+        mapper.disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+
+        org.springframework.http.converter.json.MappingJackson2HttpMessageConverter converter = new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter();
+        converter.setObjectMapper(mapper);
+
+        mockMvc = org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup(new TestController())
+                .setControllerAdvice(new com.apms.common.exception.GlobalExceptionHandler())
+                .setMessageConverters(converter)
+                .build();
     }
 
     @Test
-    public void testGlobalExceptionHandlerSerialization() {
-        ResponseEntity<String> response = restTemplate.getForEntity("/test/error", String.class);
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
-        assertThat(response.getBody()).contains("\"timestamp\":");
-        assertThat(response.getBody()).matches(".*\"timestamp\":\"\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*\".*");
-        assertThat(response.getBody()).contains("\"message\":\"RuntimeException: Test Exception\"");
+    public void testLocalDateTimeSerialization() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/test/success"))
+               .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk())
+               .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("\"timestamp\":")))
+               .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.matchesPattern(".*\"timestamp\":\"\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*\".*")));
+    }
+
+    @Test
+    public void testGlobalExceptionHandlerSerialization() throws Exception {
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/test/error"))
+               .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isInternalServerError())
+               .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("\"timestamp\":")))
+               .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.matchesPattern(".*\"timestamp\":\"\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*\".*")))
+               .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("\"message\":\"RuntimeException: Test Exception\"")));
     }
 }

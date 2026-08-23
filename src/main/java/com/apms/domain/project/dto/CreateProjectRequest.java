@@ -6,7 +6,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+import jakarta.validation.Valid;
 import java.time.LocalDate;
+import java.util.List;
 
 @Data
 public class CreateProjectRequest {
@@ -32,11 +34,18 @@ public class CreateProjectRequest {
     @NotBlank(message = "targetCompanyName is required")
     private String targetCompanyName;
 
+    private String targetCompanyTaxCode;
+
     @Schema(description = "Optional for UPDATE_EXISTING_COMPANY. Required for RESEARCH_NEW_COMPANY.")
     private RelationshipType targetRelationshipType;
 
     private String description;
 
+    private String objective;
+
     @NotNull(message = "plannedEndDate is required")
     private LocalDate plannedEndDate;
+
+    @Valid
+    private List<CreateProjectKeyResultRequest> keyResults;
 }

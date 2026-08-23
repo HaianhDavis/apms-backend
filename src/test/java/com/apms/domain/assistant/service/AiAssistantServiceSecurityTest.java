@@ -112,8 +112,8 @@ public class AiAssistantServiceSecurityTest {
         request.setQuestion("What tasks am I assigned to?");
 
         Project p = Project.builder().id(1L).projectName("Secret Project").status(ProjectStatus.ACTIVE).build();
-        ProjectTask t = ProjectTask.builder().id(1L).title("Do something").project(p).build();
-        when(projectTaskRepository.findAll(any(Specification.class))).thenReturn(List.of(t));
+        ProjectTask t = ProjectTask.builder().id(1L).title("Do something").project(p).status(com.apms.common.enums.TaskStatus.TODO).build();
+        when(projectTaskRepository.findByAssignedToAccount_Id(any())).thenReturn(List.of(t));
 
         AiChatResponse response = aiAssistantService.chat(request);
 
@@ -128,7 +128,7 @@ public class AiAssistantServiceSecurityTest {
 
         Project p = Project.builder().id(1L).projectName("Secret Project").status(ProjectStatus.ACTIVE).build();
         ProjectTask t = ProjectTask.builder().id(1L).title("Urgent Task").project(p).status(com.apms.common.enums.TaskStatus.TODO).priority(com.apms.common.enums.TaskPriority.HIGH).build();
-        when(projectTaskRepository.findAll(any(Specification.class))).thenReturn(List.of(t));
+        when(projectTaskRepository.findByAssignedToAccount_Id(any())).thenReturn(List.of(t));
 
         AiChatResponse response = aiAssistantService.chat(request);
 
@@ -143,12 +143,12 @@ public class AiAssistantServiceSecurityTest {
         request.setQuestion("Which tasks have I submitted?");
 
         Project p = Project.builder().id(1L).projectName("Secret Project").status(ProjectStatus.ACTIVE).build();
-        ProjectTask t = ProjectTask.builder().id(1L).title("Do something").project(p).build();
-        when(projectTaskRepository.findAll(any(Specification.class))).thenReturn(List.of(t));
+        ProjectTask t = ProjectTask.builder().id(1L).title("Do something").project(p).status(com.apms.common.enums.TaskStatus.TODO).build();
+        when(projectTaskRepository.findByAssignedToAccount_Id(any())).thenReturn(List.of(t));
         
         com.apms.domain.project.ProjectTaskSubmission sub = com.apms.domain.project.ProjectTaskSubmission.builder()
             .projectTask(t).status(com.apms.common.enums.SubmissionStatus.IN_REVIEW).build();
-        when(projectTaskSubmissionRepository.findAll(any(Specification.class))).thenReturn(List.of(sub));
+        when(projectTaskSubmissionRepository.findByProjectTask_IdIn(any())).thenReturn(List.of(sub));
 
         AiChatResponse response = aiAssistantService.chat(request);
 

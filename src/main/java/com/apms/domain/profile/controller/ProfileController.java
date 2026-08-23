@@ -42,7 +42,7 @@ public class ProfileController {
 
         Set<String> allowedCompanyIds = companyScope.allowedCompanyIds();
         PageResponse<ProfileResponse> response = PageResponse.of(
-                profileService.searchCompanyProfiles(keyword, industry, market, reviewStatus, relationshipType, excludeOwner, PageRequest.of(page, size)));
+                profileService.searchCompanyProfiles(keyword, industry, market, reviewStatus, relationshipType, excludeOwner, allowedCompanyIds, PageRequest.of(page, size)));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

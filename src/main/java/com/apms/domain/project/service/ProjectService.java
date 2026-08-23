@@ -8,7 +8,10 @@ import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectMember;
 import com.apms.domain.project.dto.*;
+import com.apms.domain.project.dto.ProjectKeyResultResponse;
 import com.apms.domain.project.dto.DuplicateCompanyCheckResponse;
+import com.apms.domain.project.ProjectKeyResult;
+import com.apms.domain.project.repository.sql.ProjectKeyResultRepository;
 import com.apms.domain.project.repository.sql.ProjectMemberRepository;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.user.Account;
@@ -46,9 +49,11 @@ import java.util.stream.Collectors;
 public class ProjectService {
 
     private final ProjectRepository projectRepository;
+    private final ProjectKeyResultRepository projectKeyResultRepository;
     private final ProjectMemberRepository projectMemberRepository;
     private final AccountRepository accountRepository;
     private final UserProfileRepository userProfileRepository;
+    private final TaskGeneratorService taskGeneratorService;
     private final Neo4jClient neo4jClient;
     private final ProjectTaskRepository projectTaskRepository;
     private final ProjectTaskSubmissionRepository projectTaskSubmissionRepository;
@@ -56,6 +61,7 @@ public class ProjectService {
     private final AuditLogService auditLogService;
     private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
     private final NotificationService notificationService;
+    private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
 
     // ─────────────────────────────────────────────
     // CREATE
@@ -94,6 +100,15 @@ public class ProjectService {
             }
         }
 
+        if (request.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY) {
+            if (org.springframework.util.StringUtils.hasText(request.getTargetCompanyTaxCode())) {
+                com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse duplicateCheck = checkDuplicateTaxCode(request.getTargetCompanyTaxCode());
+                if (duplicateCheck.isExists()) {
+                    throw new BusinessValidationException("Duplicate tax code found: " + duplicateCheck.getMatchType());
+                }
+            }
+        }
+
         validateProjectTypeInvariants(request.getProjectType(),
                 request.getTargetCompanyProfileId(),
                 request.getTargetCompanyName(),
@@ -103,19 +118,76 @@ public class ProjectService {
             throw new com.apms.common.exception.BusinessValidationException("Planned end date cannot be before today");
         }
 
+        if (request.getKeyResults() != null && !request.getKeyResults().isEmpty()) {
+            int totalWeight = request.getKeyResults().stream().mapToInt(com.apms.domain.project.dto.CreateProjectKeyResultRequest::getWeight).sum();
+            if (totalWeight != 100) {
+                throw new com.apms.common.exception.BusinessValidationException("KR_WEIGHT_TOTAL_MUST_EQUAL_100", "Total weight of Key Results must be exactly 100.");
+            }
+            if (request.getKeyResults().stream().anyMatch(kr -> kr.getWeight() <= 0)) {
+                throw new com.apms.common.exception.BusinessValidationException("KR_WEIGHT_MUST_BE_POSITIVE", "Key Result weight must be greater than 0.");
+            }
+            long uniqueTypesCount = request.getKeyResults().stream().map(com.apms.domain.project.dto.CreateProjectKeyResultRequest::getType).distinct().count();
+            if (uniqueTypesCount != request.getKeyResults().size()) {
+                throw new com.apms.common.exception.BusinessValidationException("KR_DUPLICATE_TYPE", "Duplicate Key Result type found.");
+            }
+            if (request.getKeyResults().stream().anyMatch(kr -> kr.getType() == com.apms.common.enums.ProjectKeyResultType.CONTRACT_INFORMATION)) {
+                if (resolvedRelationshipType != com.apms.common.enums.RelationshipType.PARTNER_WITH &&
+                    resolvedRelationshipType != com.apms.common.enums.RelationshipType.CUSTOMER_OF &&
+                    resolvedRelationshipType != com.apms.common.enums.RelationshipType.SUPPLIER_OF) {
+                    throw new com.apms.common.exception.BusinessValidationException("KR_CONTRACT_INFORMATION_UNSUPPORTED_RELATIONSHIP", "CONTRACT_INFORMATION key result is only supported for PARTNER, CUSTOMER, or SUPPLIER relationships.");
+                }
+            }
+        }
+
         Project project = Project.builder()
                 .projectName(request.getProjectName())
                 .projectType(request.getProjectType())
                 .targetCompanyProfileId(request.getTargetCompanyProfileId())
                 .targetCompanyName(request.getTargetCompanyName())
+                .targetCompanyTaxCode(request.getTargetCompanyTaxCode())
                 .targetRelationshipType(resolvedRelationshipType)
                 .description(request.getDescription())
+                .objective(request.getObjective())
                 .plannedEndDate(request.getPlannedEndDate())
                 .status(ProjectStatus.DRAFT)
                 .createdByAccount(accountRepository.getReferenceById(creatorAccountId))
                 .build();
 
         project = projectRepository.save(project);
+        
+        if (request.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY && !org.springframework.util.StringUtils.hasText(request.getTargetCompanyProfileId())) {
+            com.apms.domain.profile.CompanyProfile newProfile = new com.apms.domain.profile.CompanyProfile();
+            newProfile.setCompanyId(java.util.UUID.randomUUID().toString());
+            newProfile.setReviewStatus("PENDING_RESEARCH");
+            
+            com.apms.domain.profile.CompanyProfile.Identity identity = new com.apms.domain.profile.CompanyProfile.Identity();
+            identity.setLegalName(request.getTargetCompanyName());
+            newProfile.setIdentity(identity);
+            
+            com.apms.domain.profile.CompanyProfile.SourceRefs refs = new com.apms.domain.profile.CompanyProfile.SourceRefs();
+            refs.setProjectIds(new java.util.HashSet<>(java.util.List.of(String.valueOf(project.getId()))));
+            newProfile.setSourceRefs(refs);
+            
+            newProfile = companyProfileRepository.save(newProfile);
+            
+            project.setTargetCompanyProfileId(newProfile.getCompanyId());
+            project = projectRepository.save(project);
+        }
+        
+        final Project finalProject = project;
+
+        if (request.getKeyResults() != null && !request.getKeyResults().isEmpty()) {
+            List<ProjectKeyResult> keyResultsToSave = request.getKeyResults().stream().map(krReq -> ProjectKeyResult.builder()
+                .project(finalProject)
+                .type(krReq.getType())
+                .name(krReq.getType().getDisplayName())
+                .description(krReq.getType().getDescription())
+                .weight(krReq.getWeight())
+                .build()
+            ).collect(Collectors.toList());
+            List<ProjectKeyResult> savedKrs = projectKeyResultRepository.saveAll(keyResultsToSave);
+            taskGeneratorService.generateTasksForProject(savedKrs, creatorAccountId);
+        }
 
         // Creator is automatically added as MANAGER
         ProjectMember creator = ProjectMember.builder()
@@ -195,6 +267,9 @@ public class ProjectService {
         if (request.getDescription() != null) {
             project.setDescription(request.getDescription());
         }
+        if (request.getObjective() != null) {
+            project.setObjective(request.getObjective());
+        }
         if (request.getTargetRelationshipType() != null) {
             project.setTargetRelationshipType(request.getTargetRelationshipType());
         }
@@ -224,9 +299,17 @@ public class ProjectService {
 
         if (newStatus == ProjectStatus.COMPLETED && !Boolean.TRUE.equals(request.getForce())) {
             int unfinishedCount = projectTaskRepository.countByProjectIdAndStatusIn(
-                    id, Arrays.asList(TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.BLOCKED));
+                    id, Arrays.asList(TaskStatus.TODO, TaskStatus.AVAILABLE, TaskStatus.IN_PROGRESS, TaskStatus.IN_REVIEW, TaskStatus.BLOCKED));
             if (unfinishedCount > 0) {
                 throw new BusinessValidationException("Project cannot be completed while there are unfinished tasks (" + unfinishedCount + ").");
+            }
+            
+            List<ProjectKeyResult> krs = projectKeyResultRepository.findByProject_Id(id);
+            if (krs != null && !krs.isEmpty()) {
+                int okrProgress = calculateOkrProgress(id, krs);
+                if (okrProgress < 100) {
+                    throw new BusinessValidationException("Project cannot be completed until OKR progress is 100%.");
+                }
             }
         }
 
@@ -319,6 +402,11 @@ public class ProjectService {
         if (request.getMemberRole() == MemberRole.STAFF) {
             Account sender = actorId != null ? accountRepository.findById(actorId).orElse(null) : null;
             notificationService.notifyProjectMemberAdded(project, account, sender);
+            
+            // Phase 6: Notify available tasks
+            if (projectTaskRepository.countByProjectIdAndStatusIn(projectId, java.util.List.of(com.apms.common.enums.TaskStatus.AVAILABLE)) > 0) {
+                notificationService.notifyTasksAvailable(project, account, sender);
+            }
         }
         log.info("Member added: projectId={}, accountId={}, email={}, role={}", projectId, accountId, account.getEmail(), request.getMemberRole());
         return toMemberResponse(member);
@@ -434,6 +522,28 @@ public class ProjectService {
     // ─────────────────────────────────────────────
     // HELPERS
     // ─────────────────────────────────────────────
+    
+    private int calculateOkrProgress(Long projectId, List<ProjectKeyResult> krs) {
+        if (krs == null || krs.isEmpty()) {
+            return 0;
+        }
+        List<com.apms.domain.project.ProjectTask> projectTasks = projectTaskRepository.findByProject_Id(projectId);
+        java.util.Map<Long, List<com.apms.domain.project.ProjectTask>> tasksByKrId = projectTasks.stream()
+                .filter(t -> t.getKeyResult() != null)
+                .collect(Collectors.groupingBy(t -> t.getKeyResult().getId()));
+        
+        int totalOkrProgress = 0;
+        for (ProjectKeyResult kr : krs) {
+            List<com.apms.domain.project.ProjectTask> krTasks = tasksByKrId.getOrDefault(kr.getId(), java.util.Collections.emptyList());
+            if (!krTasks.isEmpty()) {
+                boolean allDone = krTasks.stream().allMatch(t -> t.getStatus() == TaskStatus.DONE);
+                if (allDone) {
+                    totalOkrProgress += (kr.getWeight() != null ? kr.getWeight() : 0);
+                }
+            }
+        }
+        return Math.min(100, totalOkrProgress);
+    }
 
     private Project findProjectOrThrow(Long id) {
         return projectRepository.findById(id)
@@ -474,14 +584,57 @@ public class ProjectService {
             managerName = managers.stream().map(ProjectMemberResponse::getFullName).collect(Collectors.joining(", "));
         }
 
+        List<com.apms.domain.project.dto.ProjectKeyResultResponse> krResponses = null;
+        List<ProjectKeyResult> krs = projectKeyResultRepository.findByProject_Id(project.getId());
+        if (krs != null && !krs.isEmpty()) {
+            List<com.apms.domain.project.ProjectTask> projectTasks = projectTaskRepository.findByProject_Id(project.getId());
+            java.util.Map<Long, List<com.apms.domain.project.ProjectTask>> tasksByKrId = projectTasks.stream()
+                    .filter(t -> t.getKeyResult() != null)
+                    .collect(Collectors.groupingBy(t -> t.getKeyResult().getId()));
+            
+            int totalOkrProgress = 0;
+            krResponses = new java.util.ArrayList<>();
+            for (ProjectKeyResult kr : krs) {
+                List<com.apms.domain.project.ProjectTask> krTasks = tasksByKrId.getOrDefault(kr.getId(), java.util.Collections.emptyList());
+                int krProgress = 0;
+                if (!krTasks.isEmpty()) {
+                    boolean allDone = krTasks.stream().allMatch(t -> t.getStatus() == TaskStatus.DONE);
+                    if (allDone) {
+                        krProgress = 100;
+                        totalOkrProgress += (kr.getWeight() != null ? kr.getWeight() : 0);
+                    }
+                }
+                krResponses.add(com.apms.domain.project.dto.ProjectKeyResultResponse.builder()
+                    .id(kr.getId())
+                    .type(kr.getType())
+                    .name(kr.getName())
+                    .description(kr.getDescription())
+                    .weight(kr.getWeight())
+                    .progress(krProgress)
+                    .build());
+            }
+            progressPercentage = Math.min(100, totalOkrProgress);
+            
+            // Re-evaluate overdue based on the newly calculated OKR progress
+            isOverdue = false;
+            if (project.getPlannedEndDate() != null && progressPercentage < 100) {
+                if (LocalDate.now().isAfter(project.getPlannedEndDate())) {
+                    isOverdue = true;
+                }
+            }
+        }
+
         return ProjectResponse.builder()
                 .id(project.getId())
                 .projectName(project.getProjectName())
                 .projectType(project.getProjectType())
                 .targetCompanyProfileId(project.getTargetCompanyProfileId())
                 .targetCompanyName(project.getTargetCompanyName())
+                .targetCompanyTaxCode(project.getTargetCompanyTaxCode())
                 .targetRelationshipType(project.getTargetRelationshipType())
                 .description(project.getDescription())
+                .objective(project.getObjective())
+                .keyResults(krResponses)
                 .status(project.getStatus())
                 .createdBy(project.getCreatedById())
                 .createdAt(project.getCreatedAt())
@@ -540,6 +693,45 @@ public class ProjectService {
         return DuplicateCompanyCheckResponse.builder()
                 .duplicate(!matchingProjects.isEmpty())
                 .matchingProjects(matchingProjects)
+                .build();
+    }
+
+    public com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse checkDuplicateTaxCode(String taxCode) {
+        if (!org.springframework.util.StringUtils.hasText(taxCode)) {
+            return com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse.builder()
+                    .exists(false)
+                    .build();
+        }
+        String normalizedTaxCode = taxCode.replaceAll("[\\s\\-]", "").trim();
+
+        // Check Profile
+        Optional<com.apms.domain.profile.CompanyProfile> profileOpt = companyProfileRepository.findByIdentityTaxCode(normalizedTaxCode);
+        if (profileOpt.isPresent()) {
+            com.apms.domain.profile.CompanyProfile profile = profileOpt.get();
+            return com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse.builder()
+                    .exists(true)
+                    .matchType("COMPANY_PROFILE")
+                    .companyProfileId(profile.getCompanyId())
+                    .companyName(profile.getIdentity() != null ? profile.getIdentity().getLegalName() : null)
+                    .taxCode(profile.getIdentity() != null ? profile.getIdentity().getTaxCode() : null)
+                    .build();
+        }
+
+        // Check Active Project
+        List<Project> activeProjects = projectRepository.findActiveProjectsByTargetCompanyTaxCode(normalizedTaxCode);
+        if (!activeProjects.isEmpty()) {
+            Project project = activeProjects.get(0);
+            return com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse.builder()
+                    .exists(true)
+                    .matchType("ACTIVE_PROJECT")
+                    .projectId(project.getId())
+                    .companyName(project.getTargetCompanyName())
+                    .taxCode(project.getTargetCompanyTaxCode())
+                    .build();
+        }
+
+        return com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse.builder()
+                .exists(false)
                 .build();
     }
 }

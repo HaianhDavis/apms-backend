@@ -8,6 +8,7 @@ import com.apms.common.response.PageResponse;
 import com.apms.domain.project.dto.*;
 import com.apms.domain.project.service.ProjectService;
 import com.apms.security.UserDetailsImpl;
+import io.swagger.v3.oas.annotations.Operation;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -70,12 +71,23 @@ public class ProjectController {
     // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @GetMapping("/check-duplicate-company")
+    @Operation(summary = "Check for duplicate company by name")
     @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<DuplicateCompanyCheckResponse>> checkDuplicateCompany(
-            @RequestParam String companyName,
-            @RequestParam(required = false) Long excludeProjectId) {
+            @RequestParam("companyName") String companyName,
+            @RequestParam(value = "excludeProjectId", required = false) Long excludeProjectId) {
 
         DuplicateCompanyCheckResponse response = projectService.checkDuplicateCompanyName(companyName, excludeProjectId);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    // GET /api/v1/projects/check-duplicate-tax-code
+    @GetMapping("/check-duplicate-tax-code")
+    @Operation(summary = "Check for duplicate company by tax code")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<ApiResponse<com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse>> checkDuplicateTaxCode(
+            @RequestParam("taxCode") String taxCode) {
+        com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse response = projectService.checkDuplicateTaxCode(taxCode);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

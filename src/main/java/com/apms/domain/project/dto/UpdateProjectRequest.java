@@ -12,6 +12,8 @@ public class UpdateProjectRequest {
 
     private String description;
 
+    private String objective;
+
     private RelationshipType targetRelationshipType;
 
     private LocalDate plannedEndDate;

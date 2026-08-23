@@ -4,17 +4,10 @@ import com.apms.domain.ai.dto.RawExtractionOutput;
 import com.apms.domain.ai.service.provider.AiExtractionResponseMapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-
-@SpringBootTest(classes = com.apms.ApmsBackendApplication.class)
 public class DebugExtractionTest {
 
-    @Autowired
-    private ObjectMapper objectMapper;
-
-    @Autowired
-    private AiExtractionResponseMapper responseMapper;
+    private ObjectMapper objectMapper = new ObjectMapper();
+    private AiExtractionResponseMapper responseMapper = new AiExtractionResponseMapper(objectMapper);
 
     @Test
     public void testMapper() throws Exception {

@@ -4,6 +4,7 @@ import com.apms.common.enums.TaskStatus;
 import com.apms.common.response.ApiResponse;
 import com.apms.common.response.PageResponse;
 import com.apms.domain.project.dto.CreateProjectTaskRequest;
+import com.apms.domain.project.dto.ProjectTaskActivityResponse;
 import com.apms.domain.project.dto.ProjectTaskResponse;
 import com.apms.domain.project.dto.ProjectTaskWorkbenchResponse;
 import com.apms.domain.project.dto.UpdateProjectTaskRequest;
@@ -47,9 +48,19 @@ public class ProjectTaskController {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         boolean staffOnly = currentUser.getAuthorities().stream()
                 .anyMatch(authority -> "ROLE_BUSINESS_DEVELOPMENT_STAFF".equals(authority.getAuthority()));
-        Long effectiveAssignedToUserId = staffOnly ? currentUser.getId() : assignedToUserId;
+        Long effectiveAssignedToUserId;
+        if (staffOnly) {
+            if (status == TaskStatus.AVAILABLE) {
+                effectiveAssignedToUserId = null; // Unassigned pool
+            } else {
+                effectiveAssignedToUserId = currentUser.getId(); // Only their own tasks
+            }
+        } else {
+            effectiveAssignedToUserId = assignedToUserId;
+        }
+        
         PageResponse<ProjectTaskResponse> response = PageResponse.of(
-                projectTaskService.getTasks(projectId, status, effectiveAssignedToUserId, pageable));
+                projectTaskService.getTasks(projectId, status, effectiveAssignedToUserId, pageable, staffOnly && status == TaskStatus.AVAILABLE));
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }
@@ -74,6 +85,15 @@ public class ProjectTaskController {
         return ResponseEntity.ok(ApiResponse.success(null, "Task deleted"));
     }
 
+    @GetMapping("/{taskId}/activity")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId))")
+    public ResponseEntity<ApiResponse<java.util.List<ProjectTaskActivityResponse>>> getTaskActivity(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId) {
+
+        return ResponseEntity.ok(ApiResponse.success(projectTaskService.getTaskActivity(projectId, taskId)));
+    }
+
     @GetMapping("/{taskId}/workbench")
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId))")
     public ResponseEntity<ApiResponse<ProjectTaskWorkbenchResponse>> getTaskWorkbench(
@@ -81,5 +101,23 @@ public class ProjectTaskController {
             @PathVariable Long taskId) {
 
         return ResponseEntity.ok(ApiResponse.success(projectTaskService.getTaskWorkbench(projectId, taskId)));
+    }
+
+    @PostMapping("/{taskId}/claim")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<ProjectTaskResponse>> claimTask(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId) {
+
+        return ResponseEntity.ok(ApiResponse.success(projectTaskService.claimTask(projectId, taskId), "Task claimed successfully"));
+    }
+
+    @PostMapping("/{taskId}/release")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<ProjectTaskResponse>> releaseTask(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId) {
+
+        return ResponseEntity.ok(ApiResponse.success(projectTaskService.releaseTask(projectId, taskId), "Task released successfully"));
     }
 }

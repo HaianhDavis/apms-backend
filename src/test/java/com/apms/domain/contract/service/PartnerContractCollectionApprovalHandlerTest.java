@@ -39,6 +39,10 @@ public class PartnerContractCollectionApprovalHandlerTest {
     private OwnerOrganizationService ownerOrganizationService;
     @Mock
     private com.apms.domain.audit.service.AuditLogService auditLogService;
+    @Mock
+    private com.apms.domain.document.repository.mongo.RawDocumentRepository rawDocumentRepository;
+    @Mock
+    private com.apms.domain.document.service.CompanyDocumentPublisher companyDocumentPublisher;
 
     @InjectMocks
     private PartnerContractCollectionApprovalHandler approvalHandler;
@@ -69,6 +73,14 @@ public class PartnerContractCollectionApprovalHandlerTest {
         draft.setId("draft1");
         draft.setRawDocumentId("raw1");
         when(draftRepository.findById("draft1")).thenReturn(Optional.of(draft));
+        com.apms.domain.document.RawDocument rawDoc = new com.apms.domain.document.RawDocument();
+        rawDoc.setId("raw1");
+        rawDoc.setProjectId("1");
+        rawDoc.setTaskId("1");
+        com.apms.domain.document.RawDocument.Source source = new com.apms.domain.document.RawDocument.Source();
+        source.setType("PARTNER_CONTRACT");
+        rawDoc.setSource(source);
+        when(rawDocumentRepository.findById("raw1")).thenReturn(Optional.of(rawDoc));
         
         when(contractRepository.findByExtractionDraftId("draft1")).thenReturn(Optional.empty());
         when(contractRepository.save(any())).thenAnswer(inv -> {

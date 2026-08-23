@@ -55,6 +55,7 @@ public class ProjectTaskSubmissionService {
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final List<ProjectTaskSubmissionApprovalHandler> approvalHandlers;
     private final com.apms.domain.notification.service.NotificationService notificationService;
+    private final com.apms.domain.project.repository.sql.ProjectMemberRepository projectMemberRepository;
 
     @org.springframework.beans.factory.annotation.Autowired
     @org.springframework.context.annotation.Lazy
@@ -82,8 +83,8 @@ public class ProjectTaskSubmissionService {
         if (!task.getProject().getId().equals(projectId)) {
             throw new IllegalArgumentException("Task does not belong to project");
         }
-        if (task.getStatus() == TaskStatus.DONE || task.getStatus() == TaskStatus.CANCELLED) {
-            throw new IllegalStateException("Cannot submit work for a task that is DONE or CANCELLED");
+        if (task.getStatus() == TaskStatus.DONE || task.getStatus() == TaskStatus.CANCELLED || task.getStatus() == TaskStatus.AVAILABLE) {
+            throw new IllegalStateException("Cannot submit work for a task that is DONE, CANCELLED, or AVAILABLE");
         }
 
         List<ProjectTaskSubmission> existingSubmissions = submissionRepository.findByProjectTask_Id(taskId);
@@ -202,6 +203,12 @@ public class ProjectTaskSubmissionService {
                 String.valueOf(task.getId()),
                 "Task submitted for review");
 
+        // Notify managers
+        Account sender = accountRepository.findById(currentUser.getId()).orElse(null);
+        projectMemberRepository.findByProject_Id(projectId).stream()
+                .filter(m -> m.getMemberRole() == com.apms.common.enums.MemberRole.MANAGER)
+                .forEach(m -> notificationService.notifyTaskSubmitted(task, m.getAccount(), sender));
+
         return toResponse(submission);
     }
 
@@ -278,6 +285,11 @@ public class ProjectTaskSubmissionService {
                 task.setStatus(TaskStatus.DONE);
                 task.setCompletedAt(now);
                 auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMISSION_APPROVED, "ProjectTaskSubmission", String.valueOf(submissionId), "Submission approved");
+                
+                // Notify assigned staff
+                if (task.getAssignedToAccount() != null) {
+                    notificationService.notifyTaskApproved(task, task.getAssignedToAccount(), reviewer);
+                }
 
                 // Handle proposal apply
                 if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
@@ -391,6 +403,12 @@ public class ProjectTaskSubmissionService {
                 task.setStatus(TaskStatus.IN_PROGRESS);
                 task.setCompletedAt(null);
                 auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMISSION_REJECTED, "ProjectTaskSubmission", String.valueOf(submissionId), "Submission rejected");
+                
+                // Notify assigned staff
+                if (task.getAssignedToAccount() != null) {
+                    notificationService.notifyTaskChangesRequested(task, submission, task.getAssignedToAccount(), reviewer, request.getComment());
+                }
+
                 if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
                     proposalRepository.findById(submission.getTargetEntityId()).ifPresent(proposal -> {
                         proposal.setStatus(SubmissionStatus.REJECTED);
@@ -420,6 +438,11 @@ public class ProjectTaskSubmissionService {
                 task.setStatus(TaskStatus.IN_PROGRESS);
                 task.setCompletedAt(null);
                 auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMISSION_REVISION_REQUESTED, "ProjectTaskSubmission", String.valueOf(submissionId), "Revision requested");
+                
+                // Notify assigned staff
+                if (task.getAssignedToAccount() != null) {
+                    notificationService.notifyTaskChangesRequested(task, submission, task.getAssignedToAccount(), reviewer, request.getComment());
+                }
                 if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
                     proposalRepository.findById(submission.getTargetEntityId()).ifPresent(proposal -> {
                         proposal.setStatus(SubmissionStatus.REVISION_REQUESTED);

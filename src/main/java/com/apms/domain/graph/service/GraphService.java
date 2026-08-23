@@ -443,4 +443,30 @@ public class GraphService {
     public void restoreRelationship(String sourceCompanyId, String targetCompanyId, com.apms.common.enums.RelationshipType fromRelType, com.apms.common.enums.RelationshipType toRelType) {
         updateRelationship(sourceCompanyId, targetCompanyId, fromRelType, toRelType);
     }
+
+    public List<String> getTargetCompanyIdsByRelationship(String sourceCompanyId, String relType) {
+        if (!relType.matches("^[A-Z_]+$")) return List.of();
+        String cypher = String.format("MATCH (a:Company)-[:%s]->(b:Company) WHERE a.companyId = $ownerId RETURN b.companyId as targetId", relType);
+        return neo4jClient.query(cypher)
+                .bind(sourceCompanyId).to("ownerId")
+                .fetchAs(String.class)
+                .mappedBy((ts, record) -> record.get("targetId").asString())
+                .all()
+                .stream()
+                .filter(id -> !sourceCompanyId.equals(id))
+                .distinct()
+                .toList();
+    }
+
+    public List<String> getEcosystemCompanyIds(String sourceCompanyId) {
+        String cypher = "MATCH (:Company {companyId: $ownerId})-[r:PARTNER_WITH|POTENTIAL_PARTNER_OF|COMPETITOR_OF|CUSTOMER_OF|SUPPLIER_OF]-(t:Company) RETURN DISTINCT t.companyId as targetId";
+        return neo4jClient.query(cypher)
+                .bindAll(java.util.Map.of("ownerId", sourceCompanyId))
+                .fetchAs(String.class)
+                .mappedBy((ts, record) -> record.get("targetId").asString())
+                .all()
+                .stream()
+                .filter(id -> !sourceCompanyId.equals(id))
+                .toList();
+    }
 }

@@ -62,4 +62,12 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
     List<Project> findByTargetCompanyNameContainingIgnoreCase(
             @Param("companyName") String companyName,
             @Param("excludeId") Long excludeId);
+
+    @Query("""
+            SELECT p FROM Project p
+            WHERE p.targetCompanyTaxCode = :taxCode
+              AND p.status <> com.apms.common.enums.ProjectStatus.CANCELLED
+            ORDER BY p.id DESC
+            """)
+    List<Project> findActiveProjectsByTargetCompanyTaxCode(@Param("taxCode") String taxCode);
 }

@@ -94,13 +94,19 @@ public class CandidateService {
     public CandidateResponse createManualCandidate(Long projectId, Long taskId, Long creatorId) {
         LocalDateTime now = LocalDateTime.now();
 
+        com.apms.domain.project.Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new com.apms.common.exception.ResourceNotFoundException("Project not found: " + projectId));
+
         CompanyCandidate candidate = CompanyCandidate.builder()
                 .projectId(String.valueOf(projectId))
                 .taskId(taskId)
                 .status(CandidateStatus.DRAFT)
                 .revisionNumber(1)
                 .documentVersion(0L)
-                .identity(CompanyCandidate.Identity.builder().build())
+                .identity(CompanyCandidate.Identity.builder()
+                        .legalName(project.getTargetCompanyName())
+                        .taxCode(project.getTargetCompanyTaxCode())
+                        .build())
                 .business(CompanyCandidate.Business.builder()
                         .industries(new java.util.ArrayList<>())
                         .products(new java.util.ArrayList<>())
@@ -147,10 +153,13 @@ public class CandidateService {
     private CandidateResponse buildAndSaveCandidate(String projectId, String importJobId, String rawDocumentId, ExtractedCompanyData extractedData,
                                                     java.util.Map<String, ExtractionFieldResult> sourceFieldResults, Long creatorId) {
         // 2. Map extracted data to Candidate flexible embedded documents
+        com.apms.domain.project.Project project = projectRepository.findById(Long.valueOf(projectId))
+                .orElseThrow(() -> new com.apms.common.exception.ResourceNotFoundException("Project not found: " + projectId));
+
         CompanyCandidate.Identity identity = CompanyCandidate.Identity.builder()
-                .legalName(extractedData.getLegalName())
+                .legalName(project.getTargetCompanyName()) // authoritative from Project
                 .tradeName(extractedData.getTradeName())
-                .taxCode(extractedData.getTaxCode())
+                .taxCode(project.getTargetCompanyTaxCode()) // authoritative from Project
                 .build();
 
         CompanyCandidate.Business business = CompanyCandidate.Business.builder()

@@ -7,11 +7,14 @@ import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.ai.AiExtractionCache;
 import com.apms.domain.ai.dto.ExtractionQualityStatus;
 import com.apms.domain.ai.repository.mongo.AiExtractionCacheRepository;
+import com.apms.domain.audit.AuditLog;
+import com.apms.domain.audit.repository.sql.AuditLogRepository;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectTask;
 import com.apms.domain.project.dto.CreateProjectTaskRequest;
 import com.apms.domain.project.dto.ProjectTaskResponse;
+import com.apms.domain.project.dto.ProjectKeyResultResponse;
 import com.apms.domain.project.dto.UpdateProjectTaskRequest;
 import com.apms.domain.project.dto.ProjectTaskWorkbenchResponse;
 import com.apms.domain.project.dto.ProjectTaskSubmissionResponse;
@@ -69,6 +72,7 @@ public class ProjectTaskService {
     private final ProjectTaskSubmissionRepository submissionRepository;
     private final NotificationService notificationService;
     private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
+    private final AuditLogRepository auditLogRepository;
 
     @Transactional
     public ProjectTaskResponse createTask(Long projectId, CreateProjectTaskRequest request) {
@@ -94,7 +98,7 @@ public class ProjectTaskService {
                     .orElseThrow(() -> new ResourceNotFoundException("Assigned account not found"));
         }
 
-        if (request.getTaskType() == TaskType.COMPANY_NEWS_RESEARCH) {
+        if (request.getTaskType() == TaskType.COMPANY_NEWS_RESEARCH || request.getTaskType() == TaskType.PARTNER_CONTRACT_COLLECTION) {
             if (!org.springframework.util.StringUtils.hasText(request.getTargetCompanyProfileId())) {
                 // Auto-resolve from project if not explicitly provided
                 if (org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId())) {
@@ -142,7 +146,47 @@ public class ProjectTaskService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ProjectTaskResponse> getTasks(Long projectId, TaskStatus status, Long assignedToUserId, Pageable pageable) {
+    public List<com.apms.domain.project.dto.ProjectTaskActivityResponse> getTaskActivity(Long projectId, Long taskId) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
+        
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) {
+            throw new AccessDeniedException("Unauthorized");
+        }
+
+        List<AuditLog> logs = auditLogRepository.findAll((root, query, cb) -> {
+            query.orderBy(cb.desc(root.get("timestamp")));
+            return cb.and(
+                    cb.equal(root.get("entityType"), "ProjectTask"),
+                    cb.equal(root.get("entityId"), String.valueOf(taskId))
+            );
+        });
+
+        return logs.stream().map(log -> {
+            String actorName = "System";
+            if (log.getActorAccountId() != null) {
+                actorName = accountRepository.findById(log.getActorAccountId())
+                        .map(acc -> {
+                            String email = acc.getEmail();
+                            return email != null ? email.split("@")[0] : "Unknown";
+                        })
+                        .orElse("Unknown User");
+            }
+
+            return com.apms.domain.project.dto.ProjectTaskActivityResponse.builder()
+                    .id(log.getId())
+                    .actorId(log.getActorAccountId())
+                    .actorName(actorName)
+                    .action(log.getAction() != null ? log.getAction().name() : "UNKNOWN")
+                    .detail(log.getDetail())
+                    .occurredAt(log.getTimestamp())
+                    .build();
+        }).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ProjectTaskResponse> getTasks(Long projectId, TaskStatus status, Long assignedToUserId, Pageable pageable, boolean isPoolQuery) {
         Specification<ProjectTask> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.equal(root.get("project").get("id"), projectId));
@@ -150,7 +194,9 @@ public class ProjectTaskService {
             if (status != null) {
                 predicates.add(cb.equal(root.get("status"), status));
             }
-            if (assignedToUserId != null) {
+            if (isPoolQuery) {
+                predicates.add(cb.isNull(root.get("assignedToAccount")));
+            } else if (assignedToUserId != null) {
                 predicates.add(cb.equal(root.get("assignedToAccount").get("id"), assignedToUserId));
             }
 
@@ -201,6 +247,9 @@ public class ProjectTaskService {
 
         boolean statusChanged = false;
         if (request.getStatus() != null && request.getStatus() != task.getStatus()) {
+            if (request.getStatus() == TaskStatus.CANCELLED && task.getKeyResult() != null) {
+                throw new com.apms.common.exception.BusinessValidationException("OKR-generated tasks cannot be cancelled");
+            }
             if (request.getStatus() == TaskStatus.DONE) {
                 task.setCompletedAt(LocalDateTime.now());
             } else if (task.getStatus() == TaskStatus.DONE) {
@@ -236,6 +285,9 @@ public class ProjectTaskService {
             if (request.getAssignedToUserId() != null) {
                 Long currentAssignedId = task.getAssignedToAccount() != null ? task.getAssignedToAccount().getId() : null;
                 if (!request.getAssignedToUserId().equals(currentAssignedId)) {
+                    if (task.getKeyResult() != null) {
+                        throw new com.apms.common.exception.BusinessValidationException("OKR-generated tasks must be self-claimed and cannot be manually assigned");
+                    }
                     if (!projectRepository.existsByIdAndMembersAccountId(projectId, request.getAssignedToUserId())) {
                         throw new IllegalArgumentException("Assigned user must be a project member");
                     }
@@ -510,9 +562,18 @@ public class ProjectTaskService {
         boolean isManager = hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
         boolean isAdmin = hasRole(user, SystemRole.SYSTEM_ADMIN);
 
-        boolean isAssignedToMe = task.getAssignedToAccount() != null && task.getAssignedToAccount().getId().equals(user.getId());
+        boolean isAssignedToMe = task.getAssignedToAccount() != null && task.getAssignedToAccount().getId() != null && task.getAssignedToAccount().getId().equals(user.getId());
 
         if (isStaff && !isAdmin && !isManager) {
+            boolean isProjectMember = projectRepository.existsByIdAndMembersAccountId(project.getId(), user.getId());
+            if (isProjectMember) {
+                if (task.getStatus() == TaskStatus.AVAILABLE && task.getAssignedToAccount() == null) {
+                    actions.add(TaskAction.CLAIM_TASK);
+                } else if (task.getStatus() == TaskStatus.IN_PROGRESS && isAssignedToMe) {
+                    actions.add(TaskAction.RELEASE_TASK);
+                }
+            }
+
             if ((task.getStatus() == TaskStatus.TODO || task.getStatus() == TaskStatus.IN_PROGRESS) && isAssignedToMe) {
                 if (taskType == TaskType.DOCUMENT_COLLECTION) {
                     actions.add(TaskAction.VIEW_DOCUMENTS);
@@ -588,6 +649,18 @@ public class ProjectTaskService {
             assignedName = task.getAssignedToAccount().getEmail(); // fallback to email for MVP
         }
 
+        UserDetailsImpl currentUser = null;
+        try {
+            currentUser = getCurrentUser();
+        } catch (Exception e) {
+            // Ignore if no current user (e.g. system calls)
+        }
+        
+        List<TaskAction> actions = null;
+        if (currentUser != null && task.getProject() != null) {
+            actions = evaluateAvailableActions(currentUser, task, task.getProject(), task.getTaskType() != null ? task.getTaskType() : TaskType.GENERAL_TASK);
+        }
+
         return ProjectTaskResponse.builder()
                 .id(task.getId())
                 .projectId(task.getProject().getId())
@@ -603,10 +676,80 @@ public class ProjectTaskService {
                 .updatedAt(task.getUpdatedAt())
                 .completedAt(task.getCompletedAt())
                 .taskType(task.getTaskType() != null ? task.getTaskType() : TaskType.GENERAL_TASK)
+                .keyResult(task.getKeyResult() != null ? ProjectKeyResultResponse.builder()
+                        .id(task.getKeyResult().getId())
+                        .type(task.getKeyResult().getType())
+                        .name(task.getKeyResult().getName())
+                        .description(task.getKeyResult().getDescription())
+                        .weight(task.getKeyResult().getWeight())
+                        .build() : null)
                 .targetCompanyProfileId(org.springframework.util.StringUtils.hasText(task.getTargetCompanyProfileId())
                         ? task.getTargetCompanyProfileId()
                         : task.getProject().getTargetCompanyProfileId())
+                .availableActions(actions)
                 .build();
+    }
+
+    @Transactional
+    public ProjectTaskResponse claimTask(Long projectId, Long taskId) {
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
+        if (!hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_STAFF)) {
+            throw new AccessDeniedException("Only staff can claim tasks");
+        }
+        if (!projectRepository.existsByIdAndMembersAccountId(projectId, currentUser.getId())) {
+            throw new AccessDeniedException("Staff must be a member of the project to claim tasks");
+        }
+
+        ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
+
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new com.apms.common.exception.BusinessValidationException("Task does not belong to project");
+        }
+
+        Account account = accountRepository.findById(currentUser.getId()).orElseThrow();
+
+        int rows = projectTaskRepository.claimTaskAtomically(taskId, projectId, account, TaskStatus.AVAILABLE, TaskStatus.IN_PROGRESS);
+        if (rows == 0) {
+            throw new com.apms.common.exception.BusinessConflictException("Task is no longer available or already claimed.");
+        }
+
+        auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_CLAIMED, "ProjectTask", String.valueOf(taskId), "Task claimed by user " + account.getEmail());
+
+        // Re-fetch to return the updated state
+        task = projectTaskRepository.findById(taskId).orElseThrow();
+        return toResponse(task);
+    }
+
+    @Transactional
+    public ProjectTaskResponse releaseTask(Long projectId, Long taskId) {
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
+        if (!hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_STAFF)) {
+            throw new AccessDeniedException("Only staff can release tasks");
+        }
+        if (!projectRepository.existsByIdAndMembersAccountId(projectId, currentUser.getId())) {
+            throw new AccessDeniedException("Staff must be a member of the project to release tasks");
+        }
+
+        ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
+
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new com.apms.common.exception.BusinessValidationException("Task does not belong to project");
+        }
+
+        int rows = projectTaskRepository.releaseTaskAtomically(taskId, projectId, currentUser.getId(), TaskStatus.IN_PROGRESS, TaskStatus.AVAILABLE);
+        if (rows == 0) {
+            throw new com.apms.common.exception.BusinessValidationException("Task cannot be released. It must be IN_PROGRESS and assigned to you.");
+        }
+
+        auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_RELEASED, "ProjectTask", String.valueOf(taskId), "Task released by user " + currentUser.getEmail());
+
+        // Re-fetch to return the updated state
+        task = projectTaskRepository.findById(taskId).orElseThrow();
+        return toResponse(task);
     }
 
     private UserDetailsImpl getCurrentUser() {

@@ -39,7 +39,7 @@ public class ProjectTaskSubmissionController {
             @PathVariable Long taskId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
-        Pageable pageable = PageRequest.of(page, size);
+        Pageable pageable = PageRequest.of(page, size, org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt"));
         Page<ProjectTaskSubmissionResponse> pageResult = submissionService.getSubmissions(projectId, taskId, pageable);
 
         PageResponse<ProjectTaskSubmissionResponse> response = new PageResponse<>(

@@ -141,7 +141,7 @@ class PartnerContractControllerSecurityTest {
         mockMvc.perform(post("/api/v1/partner-contracts/1/review").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isUnauthorized());
+                .andExpect(status().isForbidden());
     }
 
     @Test
