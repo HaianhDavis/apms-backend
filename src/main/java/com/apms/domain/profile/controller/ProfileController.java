@@ -35,15 +35,31 @@ public class ProfileController {
             @RequestParam(required = false) String market,
             @RequestParam(required = false) String reviewStatus,
             @RequestParam(required = false) String relationshipType,
+            @RequestParam(required = false) com.apms.common.enums.ProfileVisibility visibility,
             @RequestParam(defaultValue = "false") boolean excludeOwner,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         Set<String> allowedCompanyIds = companyScope.allowedCompanyIds();
+        
+        // Enforce APPROVED and PUBLISHED for global list
+        String effectiveReviewStatus = (reviewStatus != null) ? reviewStatus : "APPROVED";
+        com.apms.common.enums.ProfileVisibility effectiveVisibility = (visibility != null) ? visibility : com.apms.common.enums.ProfileVisibility.PUBLISHED;
+
         PageResponse<ProfileResponse> response = PageResponse.of(
-                profileService.searchCompanyProfiles(keyword, industry, market, reviewStatus, relationshipType, excludeOwner, allowedCompanyIds, PageRequest.of(page, size)));
+                profileService.searchCompanyProfiles(keyword, industry, market, effectiveReviewStatus, relationshipType, excludeOwner, allowedCompanyIds, effectiveVisibility, PageRequest.of(page, size)));
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    // ─────────────────────────────────────────────
+    // GET /api/v1/company-profiles/industries (or /profiles/industries)
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
+    // ─────────────────────────────────────────────
+    @GetMapping("/industries")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<java.util.List<String>>> getDistinctIndustries() {
+        return ResponseEntity.ok(ApiResponse.success(profileService.getDistinctIndustries(), "Distinct industries retrieved"));
     }
 
     // ─────────────────────────────────────────────
@@ -80,7 +96,7 @@ public class ProfileController {
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         PageResponse<ProfileResponse> response = PageResponse.of(
-                profileService.searchProfilesByName(name, excludeOwner, PageRequest.of(page, size)));
+                profileService.searchBusinessFacingProfilesByName(name, excludeOwner, PageRequest.of(page, size)));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -135,4 +151,7 @@ public class ProfileController {
         profileService.transferResponsibility(companyId, request.getManagerId(), currentUser);
         return ResponseEntity.ok(ApiResponse.success(null, "Responsibility transferred successfully"));
     }
+
+    // ─────────────────────────────────────────────
+    // visibility mutation is now strictly governed through project-scoped endpoints
 }

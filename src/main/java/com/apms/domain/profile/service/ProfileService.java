@@ -142,9 +142,23 @@ public class ProfileService {
         String newCompanyId = UUID.randomUUID().toString();
         log.info("Creating NEW CompanyProfile with companyId: {}", newCompanyId);
 
+        CompanyProfile.Identity identity = mapIdentity(candidate.getIdentity());
+        if (identity == null) {
+            identity = CompanyProfile.Identity.builder().build();
+        }
+        
+        // Use authoritative project identity if candidate is missing it
+        if (!StringUtils.hasText(identity.getTaxCode()) && StringUtils.hasText(project.getTargetCompanyTaxCode())) {
+            identity.setTaxCode(project.getTargetCompanyTaxCode());
+            log.info("Initialized missing taxCode from Project target identity");
+        }
+        if (!StringUtils.hasText(identity.getLegalName()) && StringUtils.hasText(project.getTargetCompanyName())) {
+            identity.setLegalName(project.getTargetCompanyName());
+        }
+
         CompanyProfile profile = CompanyProfile.builder()
                 .companyId(newCompanyId)
-                .identity(mapIdentity(candidate.getIdentity()))
+                .identity(identity)
                 .business(mapBusiness(candidate.getBusiness()))
                 .companySize(mapCompanySize(candidate.getCompanySize()))
                 .contact(mapContact(candidate.getContact()))
@@ -155,6 +169,7 @@ public class ProfileService {
                 .risk(candidate.getRisk())
                 .compliance(candidate.getCompliance())
                 .reviewStatus("APPROVED")
+                .isHidden(true)
                 .metadata(CompanyProfile.Metadata.builder()
                         .createdBy("SYSTEM")
                         .createdAt(LocalDateTime.now())
@@ -191,7 +206,34 @@ public class ProfileService {
 
         // Enrich/Update data - simple overwrite for now
         // In a real system, you might merge based on confidence scores or manual review flags
-        if (candidate.getIdentity() != null) profile.setIdentity(mapIdentity(candidate.getIdentity()));
+        CompanyProfile.Identity newIdentity = candidate.getIdentity() != null ? mapIdentity(candidate.getIdentity()) : null;
+        if (newIdentity == null && profile.getIdentity() == null) {
+            newIdentity = CompanyProfile.Identity.builder().build();
+        }
+        
+        if (newIdentity != null) {
+            // Check for conflicting tax codes
+            if (StringUtils.hasText(profile.getIdentity() != null ? profile.getIdentity().getTaxCode() : null) &&
+                StringUtils.hasText(newIdentity.getTaxCode()) &&
+                !profile.getIdentity().getTaxCode().equals(newIdentity.getTaxCode())) {
+                log.warn("Conflicting nonblank tax code detected. Preserving existing profile taxCode: {}", profile.getIdentity().getTaxCode());
+                newIdentity.setTaxCode(profile.getIdentity().getTaxCode());
+            }
+            profile.setIdentity(newIdentity);
+        }
+        
+        if (profile.getIdentity() == null) {
+            profile.setIdentity(CompanyProfile.Identity.builder().build());
+        }
+        
+        // Safe propagation from Project
+        if (!StringUtils.hasText(profile.getIdentity().getTaxCode()) && StringUtils.hasText(project.getTargetCompanyTaxCode())) {
+            profile.getIdentity().setTaxCode(project.getTargetCompanyTaxCode());
+            log.info("Populated missing profile taxCode from Project target identity");
+        }
+        if (!StringUtils.hasText(profile.getIdentity().getLegalName()) && StringUtils.hasText(project.getTargetCompanyName())) {
+            profile.getIdentity().setLegalName(project.getTargetCompanyName());
+        }
         if (candidate.getBusiness() != null) profile.setBusiness(mapBusiness(candidate.getBusiness()));
         if (candidate.getCompanySize() != null) profile.setCompanySize(mapCompanySize(candidate.getCompanySize()));
         if (candidate.getContact() != null) profile.setContact(mapContact(candidate.getContact()));
@@ -202,7 +244,11 @@ public class ProfileService {
         if (candidate.getRisk() != null) profile.setRisk(candidate.getRisk());
         if (candidate.getCompliance() != null) profile.setCompliance(candidate.getCompliance());
 
+        boolean wasApproved = "APPROVED".equals(profile.getReviewStatus());
         profile.setReviewStatus("APPROVED");
+        if (!wasApproved) {
+            profile.setIsHidden(true);
+        }
         profile.incrementMinorVersion();
         profile.getMetadata().setUpdatedAt(LocalDateTime.now());
         profile.getMetadata().setLastModifiedBy("SYSTEM");
@@ -257,7 +303,7 @@ public class ProfileService {
     private Long findCanonicalManager(Project project) {
         if (project.getMembers() == null) return null;
         java.util.List<com.apms.domain.project.ProjectMember> activeManagers = project.getMembers().stream()
-                .filter(m -> m.getMemberRole() == com.apms.common.enums.MemberRole.MANAGER 
+                .filter(m -> m.getProjectRole() == com.apms.common.enums.ProjectRole.LEADER 
                         && Boolean.TRUE.equals(m.getAccount().getIsActive()))
                 .toList();
         
@@ -321,13 +367,30 @@ public class ProfileService {
         if (!"APPROVED".equals(profile.getReviewStatus())) {
             throw new com.apms.common.exception.BusinessValidationException("CompanyProfile must be approved.");
         }
+        
+        if (Boolean.TRUE.equals(profile.getIsHidden())) {
+            throw new com.apms.common.exception.BusinessValidationException("CompanyProfile is not published.");
+        }
 
         return toResponse(profile);
     }
 
     @Transactional(readOnly = true)
     public Page<ProfileResponse> searchCompanyProfiles(String keyword, String industry, String market, String reviewStatus, String relationshipType, boolean excludeOwner, Pageable pageable) {
-        return searchCompanyProfiles(keyword, industry, market, reviewStatus, relationshipType, excludeOwner, null, pageable);
+        return searchCompanyProfiles(keyword, industry, market, reviewStatus, relationshipType, excludeOwner, null, null, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ProfileResponse> searchBusinessFacingProfiles(String keyword, String industry, String market, String relationshipType, boolean excludeOwner, Pageable pageable) {
+        return searchCompanyProfiles(keyword, industry, market, "APPROVED", relationshipType, excludeOwner, null, com.apms.common.enums.ProfileVisibility.PUBLISHED, pageable);
+    }
+
+    /**
+     * Get unique industries across all profiles that are not deleted.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<String> getDistinctIndustries() {
+        return mongoTemplate.findDistinct("business.industries", CompanyProfile.class, String.class);
     }
 
     /**
@@ -336,9 +399,17 @@ public class ProfileService {
      * @param allowedCompanyIds the only companyIds the caller may see, or {@code null} for unrestricted access.
      */
     @Transactional(readOnly = true)
-    public Page<ProfileResponse> searchCompanyProfiles(String keyword, String industry, String market, String reviewStatus, String relationshipType, boolean excludeOwner, Set<String> allowedCompanyIds, Pageable pageable) {
+    public Page<ProfileResponse> searchCompanyProfiles(String keyword, String industry, String market, String reviewStatus, String relationshipType, boolean excludeOwner, Set<String> allowedCompanyIds, com.apms.common.enums.ProfileVisibility visibility, Pageable pageable) {
         Pageable effectivePageable = newestFirst(pageable);
         Criteria criteria = Criteria.where("isDeleted").ne(true);
+
+        if (visibility != null) {
+            if (visibility == com.apms.common.enums.ProfileVisibility.HIDDEN) {
+                criteria.and("isHidden").is(true);
+            } else {
+                criteria.and("isHidden").ne(true);
+            }
+        }
 
         if (StringUtils.hasText(keyword)) {
             criteria.orOperator(
@@ -356,6 +427,8 @@ public class ProfileService {
             criteria.and("reviewStatus").is(reviewStatus);
         }
 
+        String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+
         List<String> neo4jCompanyIds = null;
         if (StringUtils.hasText(relationshipType)) {
             // 1. Validate relationshipType
@@ -364,8 +437,8 @@ public class ProfileService {
                 return Page.empty(pageable);
             }
 
-            // 2. Query Neo4j
-            String cypher = String.format("MATCH (c:CompanyNode)-[:%s]-(:CompanyNode) RETURN DISTINCT c.companyId AS companyId", relationshipType);
+            // 2. Query Neo4j for relationships with the owner company
+            String cypher = String.format("MATCH (:Company {companyId: '%s'})-[:%s]->(c:Company) RETURN DISTINCT c.companyId AS companyId", ownerCompanyId, relationshipType);
             neo4jCompanyIds = new java.util.ArrayList<>(neo4jClient.query(cypher)
                     .fetchAs(String.class)
                     .mappedBy((typeSystem, record) -> record.get("companyId").asString())
@@ -376,7 +449,6 @@ public class ProfileService {
             }
         }
 
-        String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
 
         if (allowedCompanyIds != null) {
             // Scoped caller (Staff): intersect the allowed set with any other companyId filter.
@@ -416,7 +488,12 @@ public class ProfileService {
 
     @Transactional(readOnly = true)
     public Page<ProfileResponse> searchProfilesByName(String name, boolean excludeOwner, Pageable pageable) {
-        return searchProfilesByName(name, excludeOwner, null, pageable);
+        return searchProfilesByName(name, excludeOwner, null, null, null, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ProfileResponse> searchBusinessFacingProfilesByName(String name, boolean excludeOwner, Pageable pageable) {
+        return searchProfilesByName(name, excludeOwner, null, "APPROVED", com.apms.common.enums.ProfileVisibility.PUBLISHED, pageable);
     }
 
     /**
@@ -425,9 +502,21 @@ public class ProfileService {
      * @param allowedCompanyIds the only companyIds the caller may see, or {@code null} for unrestricted access.
      */
     @Transactional(readOnly = true)
-    public Page<ProfileResponse> searchProfilesByName(String name, boolean excludeOwner, Set<String> allowedCompanyIds, Pageable pageable) {
+    public Page<ProfileResponse> searchProfilesByName(String name, boolean excludeOwner, Set<String> allowedCompanyIds, String reviewStatus, com.apms.common.enums.ProfileVisibility visibility, Pageable pageable) {
         Pageable effectivePageable = newestFirst(pageable);
         Criteria criteria = Criteria.where("isDeleted").ne(true);
+
+        if (StringUtils.hasText(reviewStatus)) {
+            criteria.and("reviewStatus").is(reviewStatus);
+        }
+
+        if (visibility != null) {
+            if (visibility == com.apms.common.enums.ProfileVisibility.HIDDEN) {
+                criteria.and("isHidden").is(true);
+            } else {
+                criteria.and("isHidden").ne(true);
+            }
+        }
 
         if (StringUtils.hasText(name)) {
             criteria.orOperator(
@@ -525,6 +614,29 @@ public class ProfileService {
         if (currentUserId != null) {
             auditLogService.log(currentUserId, AuditAction.COMPANY_PROFILE_UPDATED, "CompanyProfile", companyId, "Profile updated manually");
         }
+
+        return toResponse(profile);
+    }
+
+    public ProfileResponse updateVisibility(String companyId, com.apms.domain.profile.dto.UpdateProfileVisibilityRequest request, Long actorId) {
+        CompanyProfile profile = profileRepository.findByCompanyId(companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Company profile not found"));
+
+        if (!"APPROVED".equals(profile.getReviewStatus())) {
+            throw new com.apms.common.exception.BusinessValidationException("Only APPROVED profiles can have their visibility changed.");
+        }
+
+        boolean newIsHidden = request.getVisibility() == com.apms.common.enums.ProfileVisibility.HIDDEN;
+        
+        if (Boolean.valueOf(newIsHidden).equals(profile.getIsHidden())) {
+            return toResponse(profile);
+        }
+
+        profile.setIsHidden(newIsHidden);
+        profile = profileRepository.save(profile);
+
+        AuditAction action = newIsHidden ? AuditAction.COMPANY_PROFILE_HIDDEN : AuditAction.COMPANY_PROFILE_PUBLISHED;
+        auditLogService.log(actorId, action, "CompanyProfile", companyId, "Profile visibility updated to " + request.getVisibility());
 
         return toResponse(profile);
     }
@@ -803,6 +915,11 @@ public class ProfileService {
     // ─────────────────────────────────────────────
 
     private ProfileResponse toResponse(CompanyProfile p) {
+        com.apms.common.enums.ProfileVisibility visibility = com.apms.common.enums.ProfileVisibility.HIDDEN;
+        if ("APPROVED".equals(p.getReviewStatus())) {
+            visibility = Boolean.TRUE.equals(p.getIsHidden()) ? com.apms.common.enums.ProfileVisibility.HIDDEN : com.apms.common.enums.ProfileVisibility.PUBLISHED;
+        }
+        
         return ProfileResponse.builder()
                 .id(p.getId())
                 .companyId(p.getCompanyId())
@@ -818,6 +935,7 @@ public class ProfileService {
                 .compliance(p.getCompliance())
                 .companyMembers(p.getCompanyMembers())
                 .reviewStatus(p.getReviewStatus())
+                .visibility(visibility)
                 .relationshipType(resolveRelationshipType(p.getCompanyId()))
                 .tags(p.getTags())
                 .metadata(p.getMetadata())

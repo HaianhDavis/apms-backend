@@ -1,6 +1,7 @@
 package com.apms.domain.profile.dto;
 
 import com.apms.domain.profile.CompanyProfile;
+import com.apms.common.enums.ProfileVisibility;
 import lombok.Builder;
 import lombok.Data;
 
@@ -26,6 +27,7 @@ public class ProfileResponse {
     private List<CompanyProfile.CompanyMember> companyMembers;
 
     private String reviewStatus;
+    private ProfileVisibility visibility;
     private String relationshipType;
     private List<String> tags;
     private CompanyProfile.Metadata metadata;

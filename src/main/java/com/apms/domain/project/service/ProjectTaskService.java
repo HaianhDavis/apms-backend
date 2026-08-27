@@ -73,6 +73,7 @@ public class ProjectTaskService {
     private final NotificationService notificationService;
     private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
     private final AuditLogRepository auditLogRepository;
+    private final com.apms.domain.project.repository.sql.ProjectMemberRepository projectMemberRepository;
 
     @Transactional
     public ProjectTaskResponse createTask(Long projectId, CreateProjectTaskRequest request) {
@@ -150,20 +151,45 @@ public class ProjectTaskService {
         Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
         
+        ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
+
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new com.apms.common.exception.BusinessValidationException("Task does not belong to the specified project");
+        }
+
         UserDetailsImpl currentUser = getCurrentUser();
         if (currentUser == null) {
             throw new AccessDeniedException("Unauthorized");
         }
 
+        List<ProjectTaskSubmission> submissions = submissionRepository.findByProjectTask_Id(taskId);
+        List<String> submissionIds = submissions.stream().map(s -> String.valueOf(s.getId())).toList();
+
         List<AuditLog> logs = auditLogRepository.findAll((root, query, cb) -> {
             query.orderBy(cb.desc(root.get("timestamp")));
-            return cb.and(
+            Predicate taskPredicate = cb.and(
                     cb.equal(root.get("entityType"), "ProjectTask"),
                     cb.equal(root.get("entityId"), String.valueOf(taskId))
             );
+            
+            if (submissionIds.isEmpty()) {
+                return taskPredicate;
+            }
+            
+            Predicate submissionPredicate = cb.and(
+                    cb.equal(root.get("entityType"), "ProjectTaskSubmission"),
+                    root.get("entityId").in(submissionIds)
+            );
+            
+            return cb.or(taskPredicate, submissionPredicate);
         });
 
-        return logs.stream().map(log -> {
+        
+        boolean hasGeneratedEvent = logs.stream().anyMatch(l -> 
+                l.getAction() != null && l.getAction() == com.apms.common.enums.AuditAction.PROJECT_TASK_CREATED);
+                
+        List<com.apms.domain.project.dto.ProjectTaskActivityResponse> responseLogs = new ArrayList<>(logs.stream().map(log -> {
             String actorName = "System";
             if (log.getActorAccountId() != null) {
                 actorName = accountRepository.findById(log.getActorAccountId())
@@ -182,7 +208,35 @@ public class ProjectTaskService {
                     .detail(log.getDetail())
                     .occurredAt(log.getTimestamp())
                     .build();
-        }).toList();
+        }).toList());
+
+        if (!hasGeneratedEvent) {
+            String detail = "Task generated";
+            if (task.getKeyResult() != null) {
+                detail = "Task generated from " + task.getKeyResult().getName();
+            }
+            responseLogs.add(com.apms.domain.project.dto.ProjectTaskActivityResponse.builder()
+                    .id(-1L)
+                    .actorId(null)
+                    .actorName("System")
+                    .action(com.apms.common.enums.AuditAction.PROJECT_TASK_CREATED.name())
+                    .detail(detail)
+                    .occurredAt(task.getCreatedAt())
+                    .build());
+        }
+
+        // Sort descending by occurredAt
+        responseLogs.sort((a, b) -> {
+            LocalDateTime aTime = a.getOccurredAt() != null ? a.getOccurredAt() : LocalDateTime.MIN;
+            LocalDateTime bTime = b.getOccurredAt() != null ? b.getOccurredAt() : LocalDateTime.MIN;
+            int timeCompare = bTime.compareTo(aTime);
+            if (timeCompare == 0) {
+                return b.getId().compareTo(a.getId());
+            }
+            return timeCompare;
+        });
+
+        return responseLogs;
     }
 
     @Transactional(readOnly = true)
@@ -556,8 +610,37 @@ public class ProjectTaskService {
         return String.join(", ", candidate.getBusiness().getIndustries());
     }
 
+    private boolean canReviewTask(ProjectTask task, UserDetailsImpl user, Project project) {
+        if (task.getStatus() != TaskStatus.IN_REVIEW) return false;
+
+        Long userId = user.getId();
+        if (task.getAssignedToAccount() != null && userId.equals(task.getAssignedToAccount().getId())) {
+            return false; // self-review protection (assignee)
+        }
+
+        java.util.List<ProjectTaskSubmission> taskSubmissions = submissionRepository.findByProjectTask_Id(task.getId());
+        ProjectTaskSubmission latestSubmission = taskSubmissions.stream()
+                .max(Comparator.comparing(ProjectTaskSubmission::getId))
+                .orElse(null);
+        if (latestSubmission != null && latestSubmission.getSubmittedByAccount() != null && userId.equals(latestSubmission.getSubmittedByAccount().getId())) {
+            return false; // self-review protection (submitter)
+        }
+
+        java.util.Optional<com.apms.domain.project.ProjectMember> memberOpt =
+                projectMemberRepository.findByProject_IdAndAccount_Id(project.getId(), userId);
+        if (memberOpt.isPresent()) {
+            com.apms.common.enums.ProjectRole role = memberOpt.get().getProjectRole();
+            return role == com.apms.common.enums.ProjectRole.LEADER || role == com.apms.common.enums.ProjectRole.DEPUTY;
+        }
+        return false;
+    }
+
     private List<TaskAction> evaluateAvailableActions(UserDetailsImpl user, ProjectTask task, Project project, TaskType taskType) {
         List<TaskAction> actions = new ArrayList<>();
+        if (project.getStatus() == ProjectStatus.CLOSED || project.getStatus() == ProjectStatus.COMPLETED) {
+            return actions;
+        }
+
         boolean isStaff = hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_STAFF);
         boolean isManager = hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
         boolean isAdmin = hasRole(user, SystemRole.SYSTEM_ADMIN);
@@ -629,14 +712,41 @@ public class ProjectTaskService {
             } else if (taskType == TaskType.COMPANY_NEWS_RESEARCH) {
                 actions.add(TaskAction.VIEW_NEWS_DRAFTS);
             }
-            if (task.getStatus() == TaskStatus.IN_REVIEW) {
+            if (task.getStatus() == TaskStatus.IN_REVIEW || task.getStatus() == TaskStatus.DONE || task.getStatus() == TaskStatus.CANCELLED) {
                 actions.add(TaskAction.VIEW_SUBMISSIONS);
+            }
+        }
+        
+        if (task.getStatus() == TaskStatus.IN_REVIEW) {
+            boolean isGlobalManager = isManager || isAdmin;
+            boolean canReview = canReviewTask(task, user, project);
+            
+            // Check self-review for global manager if they aren't covered by canReviewTask
+            if (isGlobalManager && !canReview) {
+                Long userId = user.getId();
+                boolean isSelfReview = false;
+                if (task.getAssignedToAccount() != null && userId.equals(task.getAssignedToAccount().getId())) {
+                    isSelfReview = true;
+                } else {
+                    java.util.List<ProjectTaskSubmission> taskSubmissions = submissionRepository.findByProjectTask_Id(task.getId());
+                    ProjectTaskSubmission latestSubmission = taskSubmissions.stream()
+                            .max(Comparator.comparing(ProjectTaskSubmission::getId))
+                            .orElse(null);
+                    if (latestSubmission != null && latestSubmission.getSubmittedByAccount() != null && userId.equals(latestSubmission.getSubmittedByAccount().getId())) {
+                        isSelfReview = true;
+                    }
+                }
+                if (!isSelfReview) canReview = true;
+            }
+
+            if (canReview) {
+                if (!actions.contains(TaskAction.VIEW_SUBMISSIONS)) {
+                    actions.add(TaskAction.VIEW_SUBMISSIONS);
+                }
                 actions.add(TaskAction.REVIEW_SUBMISSION);
                 actions.add(TaskAction.APPROVE_SUBMISSION);
                 actions.add(TaskAction.REQUEST_REVISION);
                 actions.add(TaskAction.REJECT_SUBMISSION);
-            } else if (task.getStatus() == TaskStatus.DONE || task.getStatus() == TaskStatus.CANCELLED) {
-                actions.add(TaskAction.VIEW_SUBMISSIONS);
             }
         }
 
@@ -704,6 +814,10 @@ public class ProjectTaskService {
         ProjectTask task = projectTaskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
 
+        if (task.getProject().getStatus() == ProjectStatus.CLOSED || task.getProject().getStatus() == ProjectStatus.COMPLETED) {
+            throw new com.apms.common.exception.BusinessValidationException("Project is " + task.getProject().getStatus() + " and tasks cannot be modified.");
+        }
+
         if (!task.getProject().getId().equals(projectId)) {
             throw new com.apms.common.exception.BusinessValidationException("Task does not belong to project");
         }
@@ -735,6 +849,10 @@ public class ProjectTaskService {
 
         ProjectTask task = projectTaskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
+
+        if (task.getProject().getStatus() == ProjectStatus.CLOSED || task.getProject().getStatus() == ProjectStatus.COMPLETED) {
+            throw new com.apms.common.exception.BusinessValidationException("Project is " + task.getProject().getStatus() + " and tasks cannot be modified.");
+        }
 
         if (!task.getProject().getId().equals(projectId)) {
             throw new com.apms.common.exception.BusinessValidationException("Task does not belong to project");

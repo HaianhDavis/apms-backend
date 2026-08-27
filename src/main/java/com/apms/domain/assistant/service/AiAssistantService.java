@@ -884,7 +884,9 @@ public class AiAssistantService {
             intent == ManagerIntent.COMPANY_SEARCH || intent == ManagerIntent.NEXT_MANAGEMENT_ACTION) {
 
             if (StringUtils.hasText(request.getCompanyProfileId())) {
-                CompanyProfile p = companyProfileRepository.findById(request.getCompanyProfileId()).orElse(null);
+                CompanyProfile p = companyProfileRepository.findById(request.getCompanyProfileId())
+                        .filter(profile -> "APPROVED".equals(profile.getReviewStatus()) && !Boolean.TRUE.equals(profile.getIsHidden()))
+                        .orElse(null);
                 if (p != null && "APPROVED".equals(p.getReviewStatus())) {
                     resolvedProfiles.add(p);
                 }

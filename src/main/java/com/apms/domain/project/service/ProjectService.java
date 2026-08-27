@@ -1,6 +1,6 @@
 package com.apms.domain.project.service;
 
-import com.apms.common.enums.MemberRole;
+import com.apms.common.enums.ProjectRole;
 import com.apms.common.enums.ProjectStatus;
 import com.apms.common.enums.ProjectType;
 import com.apms.common.exception.BusinessValidationException;
@@ -62,6 +62,7 @@ public class ProjectService {
     private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
     private final NotificationService notificationService;
     private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
+    private final ProjectTargetProfileResolver projectTargetProfileResolver;
 
     // ─────────────────────────────────────────────
     // CREATE
@@ -155,23 +156,8 @@ public class ProjectService {
 
         project = projectRepository.save(project);
         
-        if (request.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY && !org.springframework.util.StringUtils.hasText(request.getTargetCompanyProfileId())) {
-            com.apms.domain.profile.CompanyProfile newProfile = new com.apms.domain.profile.CompanyProfile();
-            newProfile.setCompanyId(java.util.UUID.randomUUID().toString());
-            newProfile.setReviewStatus("PENDING_RESEARCH");
-            
-            com.apms.domain.profile.CompanyProfile.Identity identity = new com.apms.domain.profile.CompanyProfile.Identity();
-            identity.setLegalName(request.getTargetCompanyName());
-            newProfile.setIdentity(identity);
-            
-            com.apms.domain.profile.CompanyProfile.SourceRefs refs = new com.apms.domain.profile.CompanyProfile.SourceRefs();
-            refs.setProjectIds(new java.util.HashSet<>(java.util.List.of(String.valueOf(project.getId()))));
-            newProfile.setSourceRefs(refs);
-            
-            newProfile = companyProfileRepository.save(newProfile);
-            
-            project.setTargetCompanyProfileId(newProfile.getCompanyId());
-            project = projectRepository.save(project);
+        if (org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId())) {
+            syncTargetIdentity(project.getTargetCompanyProfileId(), project.getTargetCompanyTaxCode());
         }
         
         final Project finalProject = project;
@@ -193,7 +179,7 @@ public class ProjectService {
         ProjectMember creator = ProjectMember.builder()
                 .project(project)
                 .account(accountRepository.getReferenceById(creatorAccountId))
-                .memberRole(MemberRole.MANAGER)
+                .projectRole(ProjectRole.LEADER)
                 .build();
         projectMemberRepository.save(creator);
 
@@ -260,6 +246,7 @@ public class ProjectService {
     @Transactional
     public ProjectResponse updateProject(Long id, UpdateProjectRequest request) {
         Project project = findProjectOrThrow(id);
+        validateProjectNotClosedOrCompleted(project);
 
         if (StringUtils.hasText(request.getProjectName())) {
             project.setProjectName(request.getProjectName());
@@ -280,14 +267,146 @@ public class ProjectService {
             }
             project.setPlannedEndDate(request.getPlannedEndDate());
         }
+
+        // Structural Edits for DRAFT Projects
+        if (project.getStatus() == ProjectStatus.DRAFT) {
+            if (request.getTargetCompanyName() != null) {
+                project.setTargetCompanyName(request.getTargetCompanyName());
+            }
+            if (request.getTargetCompanyTaxCode() != null) {
+                if (org.springframework.util.StringUtils.hasText(request.getTargetCompanyTaxCode()) && 
+                    !request.getTargetCompanyTaxCode().equals(project.getTargetCompanyTaxCode())) {
+                    com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse duplicateCheck = checkDuplicateTaxCode(request.getTargetCompanyTaxCode());
+                    if (duplicateCheck.isExists()) {
+                        throw new BusinessValidationException("Duplicate tax code found: " + duplicateCheck.getMatchType());
+                    }
+                }
+                project.setTargetCompanyTaxCode(request.getTargetCompanyTaxCode());
+            }
+            if (request.getTargetCompanyProfileId() != null) {
+                project.setTargetCompanyProfileId(request.getTargetCompanyProfileId());
+            }
+            
+            if (org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId())) {
+                syncTargetIdentity(project.getTargetCompanyProfileId(), project.getTargetCompanyTaxCode());
+            }
+
+            if (request.getKeyResults() != null && !request.getKeyResults().isEmpty()) {
+                int totalWeight = request.getKeyResults().stream().mapToInt(com.apms.domain.project.dto.CreateProjectKeyResultRequest::getWeight).sum();
+                if (totalWeight != 100) {
+                    throw new com.apms.common.exception.BusinessValidationException("KR_WEIGHT_TOTAL_MUST_EQUAL_100", "Total weight of Key Results must be exactly 100.");
+                }
+                if (request.getKeyResults().stream().anyMatch(kr -> kr.getWeight() <= 0)) {
+                    throw new com.apms.common.exception.BusinessValidationException("KR_WEIGHT_MUST_BE_POSITIVE", "Key Result weight must be greater than 0.");
+                }
+                long uniqueTypesCount = request.getKeyResults().stream().map(com.apms.domain.project.dto.CreateProjectKeyResultRequest::getType).distinct().count();
+                if (uniqueTypesCount != request.getKeyResults().size()) {
+                    throw new com.apms.common.exception.BusinessValidationException("KR_DUPLICATE_TYPE", "Duplicate Key Result type found.");
+                }
+                if (request.getKeyResults().stream().anyMatch(kr -> kr.getType() == com.apms.common.enums.ProjectKeyResultType.CONTRACT_INFORMATION)) {
+                    com.apms.common.enums.RelationshipType rel = project.getTargetRelationshipType();
+                    if (rel != com.apms.common.enums.RelationshipType.PARTNER_WITH &&
+                        rel != com.apms.common.enums.RelationshipType.CUSTOMER_OF &&
+                        rel != com.apms.common.enums.RelationshipType.SUPPLIER_OF) {
+                        throw new com.apms.common.exception.BusinessValidationException("KR_CONTRACT_INFORMATION_UNSUPPORTED_RELATIONSHIP", "CONTRACT_INFORMATION key result is only supported for PARTNER, CUSTOMER, or SUPPLIER relationships.");
+                    }
+                }
+
+                // Delete existing KRs and Tasks
+                projectTaskRepository.deleteByProjectId(id);
+                projectKeyResultRepository.deleteByProjectId(id);
+
+                final Project lambdaProject = project;
+                List<ProjectKeyResult> keyResultsToSave = request.getKeyResults().stream().map(krReq -> ProjectKeyResult.builder()
+                    .project(lambdaProject)
+                    .type(krReq.getType())
+                    .name(krReq.getType().getDisplayName())
+                    .description(krReq.getType().getDescription())
+                    .weight(krReq.getWeight())
+                    .build()
+                ).collect(Collectors.toList());
+                List<ProjectKeyResult> savedKrs = projectKeyResultRepository.saveAll(keyResultsToSave);
+
+                // Regenerate Tasks
+                // Assume creatorAccountId is the one who created the project (fallback to 1L if null, but this shouldn't happen)
+                Long creatorId = project.getCreatedByAccount() != null ? project.getCreatedByAccount().getId() : 1L;
+                taskGeneratorService.generateTasksForProject(savedKrs, creatorId);
+            }
+        } else {
+            // Validate ACTIVE projects don't structurally modify KR configuration
+            if (request.getKeyResults() != null && !request.getKeyResults().isEmpty()) {
+                throw new com.apms.common.exception.BusinessValidationException("Cannot modify Key Results configuration after project is ACTIVE.");
+            }
+        }
+
         project = projectRepository.save(project);
         List<ProjectMember> members = projectMemberRepository.findByProject_Id(id);
+        return toResponse(project, members);
+    }
+
+    private void validateProjectNotClosedOrCompleted(Project project) {
+        if (project.getStatus() == ProjectStatus.CLOSED || project.getStatus() == ProjectStatus.COMPLETED) {
+            throw new BusinessValidationException("Project is " + project.getStatus() + " and cannot be modified.");
+        }
+    }
+
+    @Transactional
+    public ProjectResponse closeProject(Long id, CloseProjectRequest request, Long actorId) {
+        Project project = findProjectOrThrow(id);
+        
+        if (project.getStatus() != ProjectStatus.ACTIVE) {
+            throw new BusinessValidationException("Only ACTIVE projects can be closed.");
+        }
+        
+        ProjectMember actor = getProjectMember(id, actorId);
+        if (actor.getProjectRole() != ProjectRole.LEADER) {
+            throw new BusinessValidationException("Only the project Leader can close the project.");
+        }
+
+        List<ProjectMember> members = projectMemberRepository.findByProject_Id(id);
+        ProjectTaskRepository.ProjectTaskStats stats = projectTaskRepository.getProjectTaskStatsIn(
+                List.of(id), TaskStatus.DONE, TaskStatus.CANCELLED)
+                .stream().findFirst().orElse(null);
+
+        int totalTasks = stats != null && stats.getTotalTasks() != null ? stats.getTotalTasks().intValue() : 0;
+        int completedTasks = stats != null && stats.getCompletedTasks() != null ? stats.getCompletedTasks().intValue() : 0;
+        int progressPercentage = totalTasks == 0 ? 0 : Math.min(100, (completedTasks * 100) / totalTasks);
+
+        List<ProjectKeyResult> krs = projectKeyResultRepository.findByProject_Id(project.getId());
+        if (krs != null && !krs.isEmpty()) {
+            int totalOkrProgress = calculateOkrProgress(id, krs);
+            progressPercentage = Math.min(100, totalOkrProgress);
+        }
+
+        ProjectStatus newStatus;
+        AuditAction action;
+        if (progressPercentage < 100) {
+            if (request.getReason() == null || request.getReason().trim().isEmpty()) {
+                throw new BusinessValidationException("A reason is required to close a project before it is 100% completed.");
+            }
+            newStatus = ProjectStatus.CLOSED;
+            action = AuditAction.PROJECT_CLOSED;
+        } else {
+            newStatus = ProjectStatus.COMPLETED;
+            action = AuditAction.PROJECT_COMPLETED;
+        }
+
+        project.setStatus(newStatus);
+        project.setClosedAt(LocalDateTime.now());
+        project.setCloseReason(request.getReason());
+        project.setClosedByAccount(accountRepository.findById(actorId).orElse(null));
+        project = projectRepository.save(project);
+
+        String detail = String.format("Project %s. Reason: %s", newStatus, request.getReason() != null ? request.getReason() : "None");
+        auditLogService.log(actorId, action, "Project", String.valueOf(project.getId()), detail);
+
         return toResponse(project, members);
     }
 
     @Transactional
     public ProjectResponse updateProjectStatus(Long id, UpdateProjectStatusRequest request, Long actorId) {
         Project project = findProjectOrThrow(id);
+        validateProjectNotClosedOrCompleted(project);
         ProjectStatus oldStatus = project.getStatus();
         ProjectStatus newStatus = request.getStatus();
 
@@ -378,7 +497,10 @@ public class ProjectService {
 
     @Transactional
     public ProjectMemberResponse addMember(Long projectId, AddMemberRequest request, Long actorId) {
-        findProjectOrThrow(projectId);
+        Project project = findProjectOrThrow(projectId);
+        validateProjectNotClosedOrCompleted(project);
+        authorizeLeaderOrDeputy(projectId, actorId);
+
 
         Account account = resolveMemberAccount(request);
         Long accountId = account.getId();
@@ -391,24 +513,22 @@ public class ProjectService {
             throw new BusinessValidationException("Account " + accountId + " is already a member of project " + projectId);
         }
 
-        Project project = findProjectOrThrow(projectId);
         ProjectMember member = ProjectMember.builder()
                 .project(project)
                 .account(account)
-                .memberRole(request.getMemberRole())
+                .projectRole(ProjectRole.MEMBER)
                 .build();
 
         member = projectMemberRepository.save(member);
-        if (request.getMemberRole() == MemberRole.STAFF) {
-            Account sender = actorId != null ? accountRepository.findById(actorId).orElse(null) : null;
-            notificationService.notifyProjectMemberAdded(project, account, sender);
-            
-            // Phase 6: Notify available tasks
-            if (projectTaskRepository.countByProjectIdAndStatusIn(projectId, java.util.List.of(com.apms.common.enums.TaskStatus.AVAILABLE)) > 0) {
-                notificationService.notifyTasksAvailable(project, account, sender);
-            }
+        
+        Account sender = actorId != null ? accountRepository.findById(actorId).orElse(null) : null;
+        notificationService.notifyProjectMemberAdded(project, account, sender);
+        
+        if (projectTaskRepository.countByProjectIdAndStatusIn(projectId, java.util.List.of(com.apms.common.enums.TaskStatus.AVAILABLE)) > 0) {
+            notificationService.notifyTasksAvailable(project, account, sender);
         }
-        log.info("Member added: projectId={}, accountId={}, email={}, role={}", projectId, accountId, account.getEmail(), request.getMemberRole());
+        
+        log.info("Member added: projectId={}, accountId={}, email={}, role=MEMBER", projectId, accountId, account.getEmail());
         return toMemberResponse(member);
     }
 
@@ -428,22 +548,26 @@ public class ProjectService {
     }
 
     @Transactional
-    public void removeMember(Long projectId, Long accountId) {
-        findProjectOrThrow(projectId);
+    public void removeMember(Long projectId, Long accountId, Long actorId) {
+        Project project = findProjectOrThrow(projectId);
+        validateProjectNotClosedOrCompleted(project);
 
         if (!projectMemberRepository.existsByProject_IdAndAccount_Id(projectId, accountId)) {
             throw new ResourceNotFoundException("Account " + accountId + " is not a member of project " + projectId);
         }
 
-        // Prevent removing the last MANAGER
-        List<ProjectMember> members = projectMemberRepository.findByProject_Id(projectId);
-        long managerCount = members.stream()
-                .filter(m -> m.getMemberRole() == MemberRole.MANAGER)
-                .count();
+        ProjectMember actor = getProjectMember(projectId, actorId);
         ProjectMember toRemove = projectMemberRepository.findByProject_IdAndAccount_Id(projectId, accountId)
                 .orElseThrow();
-        if (toRemove.getMemberRole() == MemberRole.MANAGER && managerCount <= 1) {
-            throw new BusinessValidationException("Cannot remove the last MANAGER from a project.");
+        
+        if (actor.getProjectRole() == ProjectRole.MEMBER) {
+            throw new BusinessValidationException("You do not have permission to remove members.");
+        }
+        if (toRemove.getProjectRole() == ProjectRole.LEADER) {
+            throw new BusinessValidationException("The project leader cannot be removed. Transfer leadership first.");
+        }
+        if (actor.getProjectRole() == ProjectRole.DEPUTY && toRemove.getProjectRole() == ProjectRole.DEPUTY) {
+            throw new BusinessValidationException("Deputies cannot remove other deputies.");
         }
 
         // Prevent removing staff if they have active or in-progress tasks assigned
@@ -457,7 +581,6 @@ public class ProjectService {
         log.info("Member removed: projectId={}, accountId={}", projectId, accountId);
 
         try {
-            Project project = findProjectOrThrow(projectId);
             Account removedAccount = accountRepository.findById(accountId).orElse(null);
             org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
             Account sender = null;
@@ -469,6 +592,99 @@ public class ProjectService {
             }
         } catch (Exception e) {
             log.warn("Failed to send project member removed notification: {}", e.getMessage());
+        }
+    }
+
+    @Transactional
+    public ProjectMemberResponse updateMemberRole(Long projectId, Long targetAccountId, ProjectRole newRole, Long actorId) {
+        Project project = findProjectOrThrow(projectId);
+        validateProjectNotClosedOrCompleted(project);
+        ProjectMember actor = getProjectMember(projectId, actorId);
+        
+        if (actor.getProjectRole() != ProjectRole.LEADER) {
+            throw new BusinessValidationException("Only the project Leader can perform this action.");
+        }
+        
+        if (newRole == ProjectRole.LEADER) {
+            throw new BusinessValidationException("Use the transfer leadership flow to change the project leader.");
+        }
+
+        ProjectMember targetMember = projectMemberRepository.findByProject_IdAndAccount_Id(projectId, targetAccountId)
+                .orElseThrow(() -> new ResourceNotFoundException("Target member not found in project."));
+                
+        if (targetMember.getProjectRole() == ProjectRole.LEADER) {
+            throw new BusinessValidationException("Cannot change the role of the project leader.");
+        }
+        
+        targetMember.setProjectRole(newRole);
+        targetMember = projectMemberRepository.save(targetMember);
+        return toMemberResponse(targetMember);
+    }
+
+    @Transactional
+    public void transferLeadership(Long projectId, Long newLeaderAccountId, boolean leaveProject, Long actorId) {
+        Project project = findProjectOrThrow(projectId);
+        validateProjectNotClosedOrCompleted(project);
+        ProjectMember currentLeader = getProjectMember(projectId, actorId);
+        
+        if (currentLeader.getProjectRole() != ProjectRole.LEADER) {
+            throw new BusinessValidationException("Only the project Leader can transfer leadership.");
+        }
+        
+        if (currentLeader.getAccountId().equals(newLeaderAccountId)) {
+            throw new BusinessValidationException("Cannot transfer leadership to yourself.");
+        }
+
+        ProjectMember newLeader = projectMemberRepository.findByProject_IdAndAccount_Id(projectId, newLeaderAccountId)
+                .orElseThrow(() -> new ResourceNotFoundException("Target member not found in project."));
+
+        newLeader.setProjectRole(ProjectRole.LEADER);
+        projectMemberRepository.save(newLeader);
+
+        if (leaveProject) {
+            boolean hasActiveTasks = projectTaskRepository.existsByProjectIdAndAssignedToAccountIdAndStatusNotIn(
+                    projectId, actorId, List.of(TaskStatus.DONE, TaskStatus.CANCELLED));
+            if (hasActiveTasks) {
+                throw new BusinessValidationException("Cannot leave project because you have active or in-progress tasks assigned. All assigned tasks must be completed before leaving.");
+            }
+            projectMemberRepository.deleteByProject_IdAndAccount_Id(projectId, actorId);
+        } else {
+            currentLeader.setProjectRole(ProjectRole.MEMBER);
+            projectMemberRepository.save(currentLeader);
+        }
+    }
+
+    @Transactional
+    public void leaveProject(Long projectId, Long actorId) {
+        findProjectOrThrow(projectId);
+        ProjectMember member = getProjectMember(projectId, actorId);
+        
+        if (member.getProjectRole() == ProjectRole.LEADER) {
+            long totalMembers = projectMemberRepository.findByProject_Id(projectId).size();
+            if (totalMembers <= 1) {
+                throw new BusinessValidationException("You must invite another member before leaving the project.");
+            }
+            throw new BusinessValidationException("The project leader cannot leave directly. Transfer leadership first.");
+        }
+        
+        boolean hasActiveTasks = projectTaskRepository.existsByProjectIdAndAssignedToAccountIdAndStatusNotIn(
+                projectId, actorId, List.of(TaskStatus.DONE, TaskStatus.CANCELLED));
+        if (hasActiveTasks) {
+            throw new BusinessValidationException("Cannot leave project because you have active or in-progress tasks assigned. All assigned tasks must be completed before leaving.");
+        }
+        
+        projectMemberRepository.deleteByProject_IdAndAccount_Id(projectId, actorId);
+    }
+
+    private ProjectMember getProjectMember(Long projectId, Long accountId) {
+        return projectMemberRepository.findByProject_IdAndAccount_Id(projectId, accountId)
+                .orElseThrow(() -> new BusinessValidationException("You are not a member of this project."));
+    }
+
+    private void authorizeLeaderOrDeputy(Long projectId, Long actorId) {
+        ProjectMember m = getProjectMember(projectId, actorId);
+        if (m.getProjectRole() != ProjectRole.LEADER && m.getProjectRole() != ProjectRole.DEPUTY) {
+            throw new BusinessValidationException("Only a project Leader or Deputy can perform this action.");
         }
     }
 
@@ -550,6 +766,35 @@ public class ProjectService {
                 .orElseThrow(() -> new ResourceNotFoundException("Project not found with id: " + id));
     }
 
+    @Transactional
+    public String validateAndRepairProjectProfileGovernance(Long projectId, String companyId, Long actorId) {
+        Project project = findProjectOrThrow(projectId);
+
+        // 1. Validate authorization: must be LEADER of this project
+        ProjectMember member = projectMemberRepository.findByProject_IdAndAccount_Id(projectId, actorId)
+                .orElseThrow(() -> new BusinessValidationException("You are not a member of this project"));
+        
+        if (member.getProjectRole() != ProjectRole.LEADER) {
+            throw new BusinessValidationException("Only the Project Leader can govern profile visibility");
+        }
+
+        // 2. Validate association
+        String resolvedId = projectTargetProfileResolver.resolveTargetProfileId(project);
+        String normalizedInputId = projectTargetProfileResolver.normalizeExistingProfileId(companyId).orElse(companyId);
+
+        if (resolvedId == null || !resolvedId.equals(normalizedInputId)) {
+            throw new BusinessValidationException("The requested profile does not belong to this project");
+        }
+
+        // 3. Repair stale/missing linkage safely if necessary
+        if (!normalizedInputId.equals(project.getTargetCompanyProfileId())) {
+            project.setTargetCompanyProfileId(normalizedInputId);
+            projectRepository.save(project);
+        }
+        
+        return normalizedInputId;
+    }
+
     private ProjectResponse toResponse(Project project, List<ProjectMember> members) {
         ProjectTaskRepository.ProjectTaskStats stats = projectTaskRepository.getProjectTaskStatsIn(
                 List.of(project.getId()), TaskStatus.DONE, TaskStatus.CANCELLED)
@@ -563,7 +808,7 @@ public class ProjectService {
         int progressPercentage = totalTasks == 0 ? 0 : Math.min(100, (completedTasks * 100) / totalTasks);
 
         boolean isOverdue = false;
-        if (project.getPlannedEndDate() != null && progressPercentage < 100) {
+        if (project.getStatus() == com.apms.common.enums.ProjectStatus.ACTIVE && project.getPlannedEndDate() != null && progressPercentage < 100) {
             if (LocalDate.now().isAfter(project.getPlannedEndDate())) {
                 isOverdue = true;
             }
@@ -576,7 +821,7 @@ public class ProjectService {
         Long managerId = null;
         String managerName = null;
         List<ProjectMemberResponse> managers = memberResponses.stream()
-                .filter(m -> m.getMemberRole() == com.apms.common.enums.MemberRole.MANAGER)
+                .filter(m -> m.getProjectRole() == com.apms.common.enums.ProjectRole.LEADER)
                 .collect(Collectors.toList());
         
         if (!managers.isEmpty()) {
@@ -617,7 +862,7 @@ public class ProjectService {
             
             // Re-evaluate overdue based on the newly calculated OKR progress
             isOverdue = false;
-            if (project.getPlannedEndDate() != null && progressPercentage < 100) {
+            if (project.getStatus() == com.apms.common.enums.ProjectStatus.ACTIVE && project.getPlannedEndDate() != null && progressPercentage < 100) {
                 if (LocalDate.now().isAfter(project.getPlannedEndDate())) {
                     isOverdue = true;
                 }
@@ -647,6 +892,9 @@ public class ProjectService {
                 .progressPercentage(progressPercentage)
                 .isOverdue(isOverdue)
                 .members(memberResponses)
+                .closedAt(project.getClosedAt())
+                .closeReason(project.getCloseReason())
+                .closedBy(project.getClosedByAccount() != null ? project.getClosedByAccount().getId() : null)
                 .build();
     }
 
@@ -664,7 +912,8 @@ public class ProjectService {
                 .accountId(accountId)
                 .email(email)
                 .fullName(fullName)
-                .memberRole(m.getMemberRole())
+                .accountRole(account != null && account.getRoles() != null && !account.getRoles().isEmpty() ? account.getRoles().iterator().next() : null)
+                .projectRole(m.getProjectRole())
                 .joinedAt(m.getJoinedAt())
                 .build();
     }
@@ -733,5 +982,27 @@ public class ProjectService {
         return com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse.builder()
                 .exists(false)
                 .build();
+    }
+
+    private void syncTargetIdentity(String profileId, String targetTaxCode) {
+        if (!org.springframework.util.StringUtils.hasText(targetTaxCode)) {
+            return;
+        }
+        java.util.Optional<com.apms.domain.profile.CompanyProfile> profileOpt = companyProfileRepository.findByCompanyId(profileId)
+            .or(() -> companyProfileRepository.findById(profileId));
+            
+        if (profileOpt.isPresent()) {
+            com.apms.domain.profile.CompanyProfile profile = profileOpt.get();
+            if (profile.getIdentity() == null) {
+                profile.setIdentity(new com.apms.domain.profile.CompanyProfile.Identity());
+            }
+            String existingTaxCode = profile.getIdentity().getTaxCode();
+            if (!org.springframework.util.StringUtils.hasText(existingTaxCode)) {
+                profile.getIdentity().setTaxCode(targetTaxCode);
+                companyProfileRepository.save(profile);
+            } else if (!existingTaxCode.trim().equalsIgnoreCase(targetTaxCode.trim())) {
+                throw new com.apms.common.exception.BusinessValidationException("TAX_CODE_CONFLICT", "Project tax code (" + targetTaxCode + ") conflicts with existing profile tax code (" + existingTaxCode + "). Please review company identity.");
+            }
+        }
     }
 }

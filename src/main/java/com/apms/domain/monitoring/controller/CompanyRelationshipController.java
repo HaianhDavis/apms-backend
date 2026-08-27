@@ -56,10 +56,10 @@ public class CompanyRelationshipController {
         return ResponseEntity.ok(relationshipService.rejectProposal(id, request, currentUser.getId()));
     }
 
-//    @GetMapping("/company-profiles/{companyProfileId}/relationship-history")
-//    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'SYSTEM_ADMIN')")
-//    public ResponseEntity<List<RelationshipHistoryResponse>> getRelationshipHistory(
-//            @PathVariable String companyProfileId) {
-//        return ResponseEntity.ok(relationshipService.getRelationshipHistory(companyProfileId));
-//    }
+    @GetMapping("/company-profiles/{companyProfileId}/relationship-history")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'SYSTEM_ADMIN')")
+    public ResponseEntity<List<RelationshipHistoryResponse>> getRelationshipHistory(
+            @PathVariable String companyProfileId) {
+        return ResponseEntity.ok(relationshipService.getRelationshipHistory(companyProfileId));
+    }
 }

@@ -1,6 +1,7 @@
 package com.apms.domain.project.dto;
 
-import com.apms.common.enums.MemberRole;
+import com.apms.common.enums.ProjectRole;
+import com.apms.common.enums.SystemRole;
 import lombok.Builder;
 import lombok.Data;
 
@@ -14,6 +15,7 @@ public class ProjectMemberResponse {
     private Long accountId;
     private String email;
     private String fullName;
-    private MemberRole memberRole;
+    private SystemRole accountRole;
+    private ProjectRole projectRole;
     private LocalDateTime joinedAt;
 }

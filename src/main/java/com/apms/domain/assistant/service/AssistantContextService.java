@@ -55,8 +55,9 @@ public class AssistantContextService {
         List<String> formattedRelationships = new ArrayList<>();
 
         if (StringUtils.hasText(companyProfileId)) {
-            // ── 1. Load CompanyProfile (PRIMARY approved source) ──────────────────
-            profile = companyProfileRepository.findById(companyProfileId).orElse(null);
+            profile = companyProfileRepository.findById(companyProfileId)
+                    .filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()))
+                    .orElse(null);
 
             if (profile == null) {
                 log.warn("CompanyProfile not found: {}", companyProfileId);

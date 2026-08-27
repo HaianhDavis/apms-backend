@@ -43,7 +43,9 @@ public class DashboardService {
         List<String> targetBusinessCompanyIds = getTargetBusinessCompanyIds(ownerCompanyId);
         long totalRelatedCompanies = targetBusinessCompanyIds.stream().distinct().count();
 
-        List<CompanyProfile> targetProfiles = targetBusinessCompanyIds.isEmpty() ? List.of() : profileRepository.findByCompanyIdIn(targetBusinessCompanyIds);
+        List<CompanyProfile> targetProfiles = targetBusinessCompanyIds.isEmpty() ? List.of() : profileRepository.findByCompanyIdIn(targetBusinessCompanyIds)
+                .stream().filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()))
+                .collect(Collectors.toList());
         
         Set<String> targetCompanyProfileIds = targetProfiles.stream().map(CompanyProfile::getId).collect(Collectors.toSet());
 
@@ -73,6 +75,7 @@ public class DashboardService {
 
         List<CompanyProfile> allExceptOwner = profileRepository.findAll().stream()
             .filter(p -> !ownerCompanyId.equals(p.getCompanyId()))
+            .filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()))
             .collect(Collectors.toList());
 
         long verifiedCompanyCount = allExceptOwner.stream()
