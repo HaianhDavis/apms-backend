@@ -3,7 +3,9 @@ package com.apms.domain.ai.service;
 import com.apms.domain.ai.dto.ExtractionFieldResult;
 import com.apms.domain.ai.dto.ExtractionQualityMetrics;
 import com.apms.domain.ai.dto.ExtractionQualityStatus;
+import com.apms.domain.ai.dto.ExtractionReviewStatus;
 import com.apms.domain.ai.dto.ExtractionValidationStatus;
+import com.apms.domain.ai.dto.StaffFieldReviewStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -25,6 +27,14 @@ public class AiExtractionQualityService {
     }
 
     private void validateField(String fieldName, ExtractionFieldResult result) {
+        if (isProjectProvidedIdentityField(fieldName, result)) {
+            result.setValidationStatus(ExtractionValidationStatus.PASS);
+            if (!StringUtils.hasText(result.getValidationMessages())) {
+                result.setValidationMessages("Provided by manager at project creation.");
+            }
+            return;
+        }
+
         if (result == null || result.getValue() == null) {
             result.setValidationStatus(ExtractionValidationStatus.PASS);
             result.setValidationMessages("Field is empty.");
@@ -111,9 +121,10 @@ public class AiExtractionQualityService {
 
         for (ExtractionFieldResult res : fieldResults.values()) {
             boolean hasVal = res.getValue() != null && StringUtils.hasText(res.getValue().toString()) && !res.getValue().toString().equals("[]");
+            boolean isProjectProvided = isProjectProvidedIdentityField(res.getFieldName(), res);
             if (hasVal) {
                 withValue++;
-                if (StringUtils.hasText(res.getEvidenceText())) {
+                if (StringUtils.hasText(res.getEvidenceText()) || isProjectProvided) {
                     withEvidence++;
                 } else {
                     hallucinationRisk++;
@@ -160,6 +171,16 @@ public class AiExtractionQualityService {
 
     private boolean hasValue(ExtractionFieldResult r) {
         return r != null && r.getValue() != null && StringUtils.hasText(r.getValue().toString()) && !r.getValue().toString().equals("[]");
+    }
+
+    private boolean isProjectProvidedIdentityField(String fieldName, ExtractionFieldResult result) {
+        if (result == null || !isCriticalIdentityField(fieldName)) {
+            return false;
+        }
+        return result.getStaffReviewStatus() == StaffFieldReviewStatus.CONFIRMED
+                && result.getManagerReviewStatus() == ExtractionReviewStatus.ACCEPTED
+                && StringUtils.hasText(result.getValidationMessages())
+                && result.getValidationMessages().startsWith("Provided by manager");
     }
 
     public ExtractionQualityStatus determineOverallStatus(ExtractionQualityMetrics metrics) {

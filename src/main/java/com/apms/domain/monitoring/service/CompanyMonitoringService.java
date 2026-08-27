@@ -206,11 +206,12 @@ public class CompanyMonitoringService {
     }
 
     @Transactional(readOnly = true)
-    public CompanyMonitoringAssignmentResponse getAssignmentByCompany(String companyProfileId) {
-        CompanyMonitoringAssignment assignment = assignmentRepository.findByCompanyProfileId(companyProfileId)
-                .orElseThrow(() -> new com.apms.common.exception.ResourceNotFoundException("Assignment not found for company"));
-        CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId()).orElse(null);
-        return mapToResponse(assignment, companyProfile);
+    public Optional<CompanyMonitoringAssignmentResponse> getAssignmentByCompany(String companyProfileId) {
+        return assignmentRepository.findByCompanyProfileId(companyProfileId)
+                .map(assignment -> {
+                    CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId()).orElse(null);
+                    return mapToResponse(assignment, companyProfile);
+                });
     }
 
     @Transactional(readOnly = true)

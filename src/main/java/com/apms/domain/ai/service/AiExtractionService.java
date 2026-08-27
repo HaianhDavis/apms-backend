@@ -13,6 +13,8 @@ import com.apms.domain.document.ImportJob;
 import com.apms.domain.document.RawDocument;
 import com.apms.domain.document.repository.mongo.RawDocumentRepository;
 import com.apms.domain.document.repository.sql.ImportJobRepository;
+import com.apms.domain.project.Project;
+import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
@@ -41,6 +43,7 @@ public class AiExtractionService {
     private final GeminiExtractionProvider geminiProvider;
     private final OpenAiExtractionProvider openAiProvider;
     private final AiExtractionQualityService qualityService;
+    private final ProjectRepository projectRepository;
     private final ObjectMapper objectMapper;
 
     @Value("${app.ai.provider:gemini}")
@@ -65,6 +68,7 @@ public class AiExtractionService {
                                GeminiExtractionProvider geminiProvider,
                                OpenAiExtractionProvider openAiProvider,
                                AiExtractionQualityService qualityService,
+                               ProjectRepository projectRepository,
                                ObjectMapper objectMapper) {
         this.importJobRepository = importJobRepository;
         this.rawDocumentRepository = rawDocumentRepository;
@@ -73,6 +77,7 @@ public class AiExtractionService {
         this.geminiProvider = geminiProvider;
         this.openAiProvider = openAiProvider;
         this.qualityService = qualityService;
+        this.projectRepository = projectRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -119,6 +124,13 @@ public class AiExtractionService {
                 usedModel = geminiModel;
             }
         }
+
+        Project project = null;
+        if (importJob.getProjectId() != null) {
+            project = projectRepository.findById(importJob.getProjectId()).orElse(null);
+        }
+        applyProjectControlledIdentity(rawOutputObj, project);
+        removeAnalysisExtractionFields(rawOutputObj);
 
         // Apply Quality Validation
         qualityService.validateExtraction(rawOutputObj.getFieldResults());
@@ -294,6 +306,60 @@ public class AiExtractionService {
             return "dummy-key".equals(openAiApiKey) || !StringUtils.hasText(openAiApiKey);
         }
         return true;
+    }
+
+    private void applyProjectControlledIdentity(com.apms.domain.ai.dto.RawExtractionOutput output, Project project) {
+        if (output == null || project == null) return;
+
+        if (output.getExtractedData() == null) {
+            output.setExtractedData(new ExtractedCompanyData());
+        }
+        output.getExtractedData().setLegalName(project.getTargetCompanyName());
+        output.getExtractedData().setTaxCode(project.getTargetCompanyTaxCode());
+
+        if (output.getFieldResults() == null) {
+            output.setFieldResults(new java.util.HashMap<>());
+        }
+        output.getFieldResults().put("legalName", projectControlledField("legalName", project.getTargetCompanyName()));
+        output.getFieldResults().put("taxCode", projectControlledField("taxCode", project.getTargetCompanyTaxCode()));
+    }
+
+    private com.apms.domain.ai.dto.ExtractionFieldResult projectControlledField(String fieldName, Object value) {
+        return com.apms.domain.ai.dto.ExtractionFieldResult.builder()
+                .fieldName(fieldName)
+                .value(value)
+                .normalizedValue(value)
+                .confidence(1.0)
+                .validationStatus(com.apms.domain.ai.dto.ExtractionValidationStatus.PASS)
+                .validationMessages("Provided by manager at project creation.")
+                .staffReviewStatus(com.apms.domain.ai.dto.StaffFieldReviewStatus.CONFIRMED)
+                .staffReviewedValue(value)
+                .managerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED)
+                .build();
+    }
+
+    private void removeAnalysisExtractionFields(com.apms.domain.ai.dto.RawExtractionOutput output) {
+        if (output == null) return;
+
+        if (output.getExtractedData() != null) {
+            output.getExtractedData().setStrengths(null);
+            output.getExtractedData().setWeaknesses(null);
+            output.getExtractedData().setOpportunities(null);
+            output.getExtractedData().setThreats(null);
+            output.getExtractedData().setFinancial(null);
+            output.getExtractedData().setInnovation(null);
+            output.getExtractedData().setMarket(null);
+            output.getExtractedData().setRisk(null);
+            output.getExtractedData().setCompliance(null);
+        }
+
+        if (output.getFieldResults() != null) {
+            for (String field : java.util.List.of(
+                    "strengths", "weaknesses", "opportunities", "threats",
+                    "financial", "innovation", "market", "risk", "compliance")) {
+                output.getFieldResults().remove(field);
+            }
+        }
     }
 
     private void saveToCache(Long importJobId, String rawDocumentId,

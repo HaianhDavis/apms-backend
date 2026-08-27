@@ -339,8 +339,7 @@ public class GeminiExtractionProvider implements ExtractionProvider {
         }
 
         List<String> stringListFields = List.of(
-                "industries", "markets", "targetCustomers", "email", "phone",
-                "strengths", "weaknesses", "opportunities", "threats"
+                "industries", "markets", "targetCustomers", "email", "phone"
         );
         for (String field : stringListFields) {
             properties.put(field, stringListFieldSchema);
@@ -348,19 +347,12 @@ public class GeminiExtractionProvider implements ExtractionProvider {
 
         properties.put("products", productSchema);
         properties.put("employeeCount", integerFieldSchema);
-        
-        properties.put("financial", financialSchema);
-        properties.put("market", marketSchema);
-        properties.put("innovation", innovationSchema);
-        properties.put("risk", riskSchema);
-        properties.put("compliance", complianceSchema);
 
         List<String> allRequiredFields = new java.util.ArrayList<>();
         allRequiredFields.addAll(stringFields);
         allRequiredFields.addAll(stringListFields);
         allRequiredFields.add("products");
         allRequiredFields.add("employeeCount");
-        allRequiredFields.addAll(List.of("financial", "market", "innovation", "risk", "compliance"));
 
         return Map.of(
                 "type", "OBJECT",

@@ -37,6 +37,7 @@ class ExtractionMergeServiceGuardTest {
     @Mock private CompanyCandidateRepository candidateRepository;
     @Mock private CompanyProfileRepository companyProfileRepository;
     @Mock private CompanyProfileUpdateProposalRepository proposalRepository;
+    @Mock private com.apms.domain.project.repository.sql.ProjectRepository projectRepository;
     @Mock private AuditLogService auditLogService;
 
     private ExtractionMergeService mergeService;
@@ -46,7 +47,7 @@ class ExtractionMergeServiceGuardTest {
         mergeService = new ExtractionMergeService(
                 extractionCacheRepository, importJobRepository,
                 candidateRepository, companyProfileRepository,
-                proposalRepository, auditLogService);
+                proposalRepository, projectRepository, auditLogService);
     }
 
     private AiExtractionCache buildExtraction(String id, ExtractionQualityStatus status) {

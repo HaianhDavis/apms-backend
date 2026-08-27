@@ -78,6 +78,7 @@ class CompanyMonitoringServiceTest {
 
         companyProfile = new CompanyProfile();
         companyProfile.setId("profile-1");
+        companyProfile.setCompanyId("profile-1");
         companyProfile.setIdentity(new CompanyProfile.Identity());
         companyProfile.setResponsibleManagerId(1L);
 
@@ -176,5 +177,29 @@ class CompanyMonitoringServiceTest {
         assertEquals("proposal-1", response.getUpdateProposalId());
 
         verify(auditLogService).log(eq(2L), eq(AuditAction.MONITORING_UPDATE_PROPOSED), eq("CompanyMonitoringAssignment"), eq("100"), anyString());
+    }
+
+    @Test
+    void getAssignmentByCompany_NotAssigned_ReturnsEmpty() {
+        when(assignmentRepository.findByCompanyProfileId("profile-1")).thenReturn(Optional.empty());
+
+        Optional<CompanyMonitoringAssignmentResponse> response = service.getAssignmentByCompany("profile-1");
+
+        assertTrue(response.isEmpty());
+        verifyNoInteractions(companyProfileRepository);
+    }
+
+    @Test
+    void getAssignmentByCompany_Assigned_ReturnsAssignment() {
+        when(assignmentRepository.findByCompanyProfileId("profile-1")).thenReturn(Optional.of(assignment));
+        when(companyProfileRepository.findById("profile-1")).thenReturn(Optional.of(companyProfile));
+        when(proposalRepository.findTopByCompanyProfileIdAndOriginOrderByCreatedAtDesc(eq("profile-1"), any()))
+                .thenReturn(Optional.empty());
+
+        Optional<CompanyMonitoringAssignmentResponse> response = service.getAssignmentByCompany("profile-1");
+
+        assertTrue(response.isPresent());
+        assertEquals(100L, response.get().getId());
+        assertEquals("profile-1", response.get().getCompanyProfileId());
     }
 }

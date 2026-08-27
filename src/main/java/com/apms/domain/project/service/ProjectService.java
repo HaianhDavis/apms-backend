@@ -70,6 +70,7 @@ public class ProjectService {
     @Transactional
     public ProjectResponse createProject(CreateProjectRequest request, Long creatorAccountId) {
         com.apms.common.enums.RelationshipType resolvedRelationshipType = request.getTargetRelationshipType();
+        String resolvedTargetCompanyTaxCode = request.getTargetCompanyTaxCode();
 
         if (request.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY && resolvedRelationshipType == null) {
             String cypher = """
@@ -100,9 +101,19 @@ public class ProjectService {
             }
         }
 
+        if (request.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY
+                && !StringUtils.hasText(resolvedTargetCompanyTaxCode)
+                && StringUtils.hasText(request.getTargetCompanyProfileId())) {
+            resolvedTargetCompanyTaxCode = companyProfileRepository.findByCompanyId(request.getTargetCompanyProfileId())
+                    .or(() -> companyProfileRepository.findById(request.getTargetCompanyProfileId()))
+                    .map(com.apms.domain.profile.CompanyProfile::getIdentity)
+                    .map(com.apms.domain.profile.CompanyProfile.Identity::getTaxCode)
+                    .orElse(null);
+        }
+
         if (request.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY) {
-            if (org.springframework.util.StringUtils.hasText(request.getTargetCompanyTaxCode())) {
-                com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse duplicateCheck = checkDuplicateTaxCode(request.getTargetCompanyTaxCode());
+            if (org.springframework.util.StringUtils.hasText(resolvedTargetCompanyTaxCode)) {
+                com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse duplicateCheck = checkDuplicateTaxCode(resolvedTargetCompanyTaxCode);
                 if (duplicateCheck.isExists()) {
                     throw new BusinessValidationException("Duplicate tax code found: " + duplicateCheck.getMatchType());
                 }
@@ -144,7 +155,7 @@ public class ProjectService {
                 .projectType(request.getProjectType())
                 .targetCompanyProfileId(request.getTargetCompanyProfileId())
                 .targetCompanyName(request.getTargetCompanyName())
-                .targetCompanyTaxCode(request.getTargetCompanyTaxCode())
+                .targetCompanyTaxCode(resolvedTargetCompanyTaxCode)
                 .targetRelationshipType(resolvedRelationshipType)
                 .description(request.getDescription())
                 .objective(request.getObjective())
@@ -162,6 +173,7 @@ public class ProjectService {
             
             com.apms.domain.profile.CompanyProfile.Identity identity = new com.apms.domain.profile.CompanyProfile.Identity();
             identity.setLegalName(request.getTargetCompanyName());
+            identity.setTaxCode(resolvedTargetCompanyTaxCode);
             newProfile.setIdentity(identity);
             
             com.apms.domain.profile.CompanyProfile.SourceRefs refs = new com.apms.domain.profile.CompanyProfile.SourceRefs();

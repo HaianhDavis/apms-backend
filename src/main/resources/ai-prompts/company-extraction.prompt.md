@@ -35,15 +35,6 @@ Return exactly these fields:
 - revenueTier
 - employeeTier
 - employeeCount
-- strengths
-- opportunities
-- weaknesses
-- threats
-- financial
-- innovation
-- market
-- risk
-- compliance
 
 Field rules:
 - legalName: official registered company name.
@@ -61,12 +52,6 @@ Field rules:
 - employeeTier: normalized tier, e.g. "1-10", "11-50", "51-200", "201-500", "501-1,000", "1,001-5,000", "5,001-10,000", "10,000+" or "100,000+".
 - employeeCount: integer only. Use the most specific employee count available.
 - revenueTier: normalized revenue tier if derivable; otherwise null.
-- strengths, opportunities, weaknesses, threats: arrays of business insights grounded in document evidence. Do not invent.
-- financial: object with fields revenue, revenueCurrency, revenueGrowth, profitMargin, debtRatio, fundingStage, profitability.
-- innovation: object with fields patents, rdInvestmentPercent, techStack, technologyCapabilities, techMaturityLevel, productInnovationRate.
-- market: object with fields marketShare, brandRank, clientCount, mainMarkets.
-- risk: object with fields overallRiskLevel, financialRisk, legalRisk, reputationRisk, securityRisk, supplyInterruptionRisk, dependencyRisk.
-- compliance: object with fields status, qualityCertifications, securityCertifications, antiCorruptionPolicy, laborCompliance, environmentalPolicy.
 
 Extraction rules:
 - Extract all explicitly supported details, especially for industries, products, markets, and targetCustomers.
@@ -80,6 +65,8 @@ Extraction rules:
 - Do NOT invent tax code, phone number, email, website, address, products, markets, or contact details.
 - Do NOT classify relationship type such as partner, competitor, supplier, or customer unless the field specifically asks for it.
 - Do NOT include fields outside the required field list.
+- Do NOT extract SWOT fields (strengths, weaknesses, opportunities, threats).
+- Do NOT extract analysis fields: financial, innovation, market analysis, risk, or compliance.
 - Evidence must be traceable to the original file, sourceDocumentId, and page.
 - Confidence must reflect both evidence quality and extraction certainty:
     - 0.95-1.00: directly stated by an authoritative source.
@@ -151,19 +138,47 @@ TAX CODE ABSOLUTE RULE:
 - evidenceText must be an exact quote from the uploaded document.
 - If the document contains only registration certificate number, business license number, insurance license number, securities code, or stock code, taxCode.value must be "N/A".
 - Never return an unsupported taxCode with low confidence. Unsupported taxCode must be "N/A".
+- Extract the company's official tax code / enterprise code / business code only.
+- If no valid code is found, return "N/A".
+- For Vietnamese companies, accept a value as taxCode when it is a 10-digit or 13-digit numeric code appearing near one of these labels:
+  "Mã số thuế", "MST", "Mã số doanh nghiệp", "Mã doanh nghiệp",
+  "Giấy chứng nhận đăng ký doanh nghiệp ... mã số",
+  "Giấy CNĐKDN ... mã số".
+- For English Vietnamese annual reports, accept a value as taxCode when it is a 10-digit or 13-digit numeric code appearing near one of these labels:
+  "Tax Code", "Tax ID", "Tax Identification Number", "Tax Number",
+  "Business code", "Enterprise code", "Enterprise Registration Code".
+- Extract only the code of the target company, not subsidiaries, associates, shareholders, customers, suppliers, or partners.
+- Prefer the company overview/general information section over financial note sections when both exist.
+- Do NOT use "TIN" as a valid label in Vietnamese documents because it may be part of "THÔNG TIN".
+- Do NOT treat license/certificate numbers as taxCode when they contain letters, slashes, or license patterns, for example:
+  "67-GP/KDBH", "GP/KDBH", "Giấy phép", "Số giấy phép", "Insurance Business License",
+  "License Number", "Permit Number", "Securities code", "Stock code".
+- Do NOT extract old Business Registration Certificate numbers if a separate "Business code" or "Mã số doanh nghiệp" is present.
+- The taxCode value must appear verbatim in evidenceText.
+- evidenceText must be an exact quote from the uploaded document.
+- If the code is not a 10-digit or 13-digit numeric code, return "N/A".
+- Unsupported taxCode must be "N/A", not a guessed value with low confidence.
 
-FINAL VALIDATION BEFORE OUTPUT:
-  For taxCode, website, email, phone, and address:
-1. Check whether the returned value appears verbatim in evidenceText.
-2. Check whether evidenceText is an exact quote from the uploaded documents.
-3. For taxCode only, check whether the evidence includes both the exact code and a nearby official registration/tax label.
+FINAL TAX CODE VALIDATION:
+Before output:
+1. If taxCode.value is "N/A", keep it.
+2. If taxCode.value is not "N/A", it must match:
+    - 10 digits, or
+    - 13 digits, or
+    - 10 digits + "-" + 3 digits.
+3. evidenceText must contain the exact value.
+4. evidenceText must contain or directly neighbor a valid label:
+   "Mã số thuế", "MST", "Mã số doanh nghiệp", "Mã doanh nghiệp",
+   "Giấy chứng nhận đăng ký doanh nghiệp ... mã số",
+   "Giấy CNĐKDN ... mã số",
+   "Tax Code", "Tax ID", "Tax Identification Number", "Business code",
+   "Enterprise code", "Enterprise Registration Code".
+5. evidenceText must refer to the target company, not a subsidiary or related company.
 
-If any check fails, overwrite that field with:
+If any check fails, overwrite taxCode as:
 {
-"value": null,
+"value": "N/A",
 "confidence": 0,
 "evidenceText": "",
 "sourceDocumentIds": []
 }
-
-Do not show invalid values. Do not keep values marked as validation issues.

@@ -155,26 +155,6 @@ public class AiExtractionResponseMapper {
             return normalizeProducts(value);
         }
 
-        if ("financial".equals(fieldName)) {
-            return normalizeFinancial(value);
-        }
-
-        if ("market".equals(fieldName)) {
-            return normalizeMarket(value);
-        }
-
-        if ("innovation".equals(fieldName)) {
-            return normalizeInnovation(value);
-        }
-
-        if ("risk".equals(fieldName)) {
-            return normalizeStringObject(value, RISK_STRING_FIELDS, Set.of());
-        }
-
-        if ("compliance".equals(fieldName)) {
-            return normalizeStringObject(value, COMPLIANCE_STRING_FIELDS, COMPLIANCE_STRING_LIST_FIELDS);
-        }
-
         return value;
     }
 
@@ -438,11 +418,7 @@ public class AiExtractionResponseMapper {
             "markets",
             "targetCustomers",
             "email",
-            "phone",
-            "strengths",
-            "weaknesses",
-            "opportunities",
-            "threats"
+            "phone"
     );
 
     private static final Set<String> ALLOWED_FIELDS = Set.of(
@@ -461,16 +437,7 @@ public class AiExtractionResponseMapper {
             "email",
             "phone",
             "address",
-            "companySize",
-            "strengths",
-            "weaknesses",
-            "opportunities",
-            "threats",
-            "financial",
-            "market",
-            "innovation",
-            "risk",
-            "compliance"
+            "companySize"
     );
 
     private static final Set<String> RISK_STRING_FIELDS = Set.of(

@@ -92,6 +92,6 @@ public class CompanyMonitoringController {
     @GetMapping("/company/{companyProfileId}")
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_OWNER')")
     public ResponseEntity<CompanyMonitoringAssignmentResponse> getAssignmentByCompany(@PathVariable String companyProfileId) {
-        return ResponseEntity.ok(service.getAssignmentByCompany(companyProfileId));
+        return ResponseEntity.ok(service.getAssignmentByCompany(companyProfileId).orElse(null));
     }
 }

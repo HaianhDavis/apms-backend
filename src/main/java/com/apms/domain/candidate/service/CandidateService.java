@@ -63,9 +63,7 @@ public class CandidateService {
         "identity.legalName", "identity.tradeName", "identity.taxCode",
         "contact.address", "contact.website", "contact.emails", "contact.phones",
         "business.businessModel", "business.industries", "business.markets", "business.targetCustomers", "business.products",
-        "companySize.employeeTier", "companySize.employeeCount", "companySize.revenueTier",
-        "insights.strengths", "insights.weaknesses", "insights.opportunities", "insights.threats",
-        "financial", "innovation", "market", "risk", "compliance"
+        "companySize.employeeTier", "companySize.employeeCount", "companySize.revenueTier"
     );
 
     @Transactional
@@ -226,13 +224,13 @@ public class CandidateService {
                 .business(business)
                 .companySize(size)
                 .contact(contact)
-                .insights(insights)
+                .insights(null)
                 .keyPeople(extractedData.getKeyPeople())
-                .financial(extractedData.getFinancial())
-                .market(extractedData.getMarket())
-                .innovation(extractedData.getInnovation())
-                .risk(extractedData.getRisk())
-                .compliance(extractedData.getCompliance())
+                .financial(null)
+                .market(null)
+                .innovation(null)
+                .risk(null)
+                .compliance(null)
                 .lifecycle(lifecycle)
                 .metadata(metadata)
                 .build();
@@ -1033,27 +1031,56 @@ public class CandidateService {
 
                 ExtractionFieldResult copy = objectMapper.convertValue(source, ExtractionFieldResult.class);
                 copy.setFieldName(fieldPath);
-                if (copy.getValue() == null) {
+                if (isProjectControlledIdentityField(fieldPath)) {
+                    applyProjectControlledFieldDefaults(copy, readEmbeddedField(candidate, fieldPath));
+                } else if (copy.getValue() == null) {
                     copy.setValue(readEmbeddedField(candidate, fieldPath));
                 }
-                copy.setStaffReviewedValue(null);
-                copy.setStaffReviewStatus(com.apms.domain.ai.dto.StaffFieldReviewStatus.PENDING);
-                copy.setManagerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING);
+                if (!isProjectControlledIdentityField(fieldPath)) {
+                    copy.setStaffReviewedValue(null);
+                    copy.setStaffReviewStatus(com.apms.domain.ai.dto.StaffFieldReviewStatus.PENDING);
+                    copy.setManagerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING);
+                }
                 initialized.put(com.apms.domain.ai.service.FieldKeyCodec.encode(fieldPath), copy);
             });
         }
 
         for (String fieldPath : STAFF_REVIEWABLE_FIELDS) {
             String mapKey = com.apms.domain.ai.service.FieldKeyCodec.encode(fieldPath);
-            initialized.computeIfAbsent(mapKey, ignored -> ExtractionFieldResult.builder()
-                    .fieldName(fieldPath)
-                    .value(readEmbeddedField(candidate, fieldPath))
-                    .staffReviewStatus(com.apms.domain.ai.dto.StaffFieldReviewStatus.PENDING)
-                    .managerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING)
-                    .build());
+            initialized.computeIfAbsent(mapKey, ignored -> {
+                Object value = readEmbeddedField(candidate, fieldPath);
+                ExtractionFieldResult result = ExtractionFieldResult.builder()
+                        .fieldName(fieldPath)
+                        .value(value)
+                        .staffReviewStatus(com.apms.domain.ai.dto.StaffFieldReviewStatus.PENDING)
+                        .managerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING)
+                        .build();
+                if (isProjectControlledIdentityField(fieldPath)) {
+                    applyProjectControlledFieldDefaults(result, value);
+                }
+                return result;
+            });
         }
 
         return initialized;
+    }
+
+    private boolean isProjectControlledIdentityField(String fieldPath) {
+        return "identity.legalName".equals(fieldPath) || "identity.taxCode".equals(fieldPath);
+    }
+
+    private void applyProjectControlledFieldDefaults(ExtractionFieldResult result, Object value) {
+        result.setValue(value);
+        result.setNormalizedValue(value);
+        result.setConfidence(1.0);
+        result.setEvidenceText(null);
+        result.setSourceDocumentIds(null);
+        result.setPageNumber(null);
+        result.setValidationStatus(com.apms.domain.ai.dto.ExtractionValidationStatus.PASS);
+        result.setValidationMessages("Provided by manager at project creation.");
+        result.setStaffReviewedValue(value);
+        result.setStaffReviewStatus(com.apms.domain.ai.dto.StaffFieldReviewStatus.CONFIRMED);
+        result.setManagerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED);
     }
 
     private Object readEmbeddedField(CompanyCandidate candidate, String fieldName) {
@@ -1267,6 +1294,7 @@ public class CandidateService {
             }
         }
         decodedFieldResults = applyFieldApprovalsToDecodedResults(c, decodedFieldResults);
+        applyProjectControlledIdentityToResponse(c, decodedFieldResults);
 
         return CandidateResponse.builder()
                 .id(c.getId())
@@ -1307,6 +1335,38 @@ public class CandidateService {
                 .aiMetadata(c.getAiMetadata())
                 .metadata(c.getMetadata())
                 .build();
+    }
+
+    private void applyProjectControlledIdentityToResponse(
+            CompanyCandidate candidate,
+            java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> decodedFieldResults) {
+        if (candidate == null || candidate.getProjectId() == null || decodedFieldResults == null) {
+            return;
+        }
+        try {
+            Long projectId = Long.valueOf(candidate.getProjectId());
+            projectRepository.findById(projectId).ifPresent(project -> {
+                if (candidate.getIdentity() == null) {
+                    candidate.setIdentity(CompanyCandidate.Identity.builder().build());
+                }
+                candidate.getIdentity().setLegalName(project.getTargetCompanyName());
+                candidate.getIdentity().setTaxCode(project.getTargetCompanyTaxCode());
+
+                applyProjectControlledFieldDefaults(
+                        decodedFieldResults.computeIfAbsent("identity.legalName", key -> ExtractionFieldResult.builder()
+                                .fieldName("identity.legalName")
+                                .build()),
+                        project.getTargetCompanyName());
+                applyProjectControlledFieldDefaults(
+                        decodedFieldResults.computeIfAbsent("identity.taxCode", key -> ExtractionFieldResult.builder()
+                                .fieldName("identity.taxCode")
+                                .build()),
+                        project.getTargetCompanyTaxCode());
+            });
+        } catch (NumberFormatException ex) {
+            log.warn("Cannot resolve project-controlled identity for candidateId={}, projectId={}",
+                    candidate.getId(), candidate.getProjectId());
+        }
     }
 
     private java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> applyFieldApprovalsToDecodedResults(

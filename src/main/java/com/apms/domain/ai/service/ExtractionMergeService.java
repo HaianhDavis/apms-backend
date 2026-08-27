@@ -24,6 +24,8 @@ import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.profile.repository.mongo.CompanyProfileUpdateProposalRepository;
+import com.apms.domain.project.Project;
+import com.apms.domain.project.repository.sql.ProjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -44,6 +46,7 @@ public class ExtractionMergeService {
     private final CompanyCandidateRepository candidateRepository;
     private final CompanyProfileRepository companyProfileRepository;
     private final CompanyProfileUpdateProposalRepository proposalRepository;
+    private final ProjectRepository projectRepository;
     private final AuditLogService auditLogService;
 
     // ─────────────────────────────────────────────
@@ -79,6 +82,9 @@ public class ExtractionMergeService {
         // 3. Build merged data and field evidence
         List<FieldEvidence> fieldEvidence = new ArrayList<>();
         MergedCandidateData merged = mergeCandidateFields(extractions, extractionIds, sourceDocIds, importJobIds, fieldEvidence);
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + projectId));
+        applyProjectControlledIdentity(merged.identity, project);
 
         // 4. Count conflicts
         long conflictCount = fieldEvidence.stream().filter(fe -> Boolean.TRUE.equals(fe.getConflict())).count();
@@ -107,13 +113,13 @@ public class ExtractionMergeService {
                 .business(merged.business)
                 .companySize(merged.companySize)
                 .contact(merged.contact)
-                .insights(merged.insights)
+                .insights(null)
                 .keyPeople(merged.keyPeople)
-                .financial(merged.financial)
-                .market(merged.market)
-                .innovation(merged.innovation)
-                .risk(merged.risk)
-                .compliance(merged.compliance)
+                .financial(null)
+                .market(null)
+                .innovation(null)
+                .risk(null)
+                .compliance(null)
                 .lifecycle(CompanyCandidate.Lifecycle.builder().status(CandidateStatus.DRAFT).build())
                 .extractionSource(CompanyCandidate.ExtractionSource.builder()
                         .extractionMethod("MULTI_DOCUMENT_MERGE").build())
@@ -135,13 +141,13 @@ public class ExtractionMergeService {
                 .business(sectionToMap(merged.business))
                 .companySize(sectionToMap(merged.companySize))
                 .contact(sectionToMap(merged.contact))
-                .insights(sectionToMap(merged.insights))
+                .insights(Collections.emptyMap())
                 .keyPeople(merged.keyPeople)
-                .financial(sectionToMap(merged.financial))
-                .market(sectionToMap(merged.market))
-                .innovation(sectionToMap(merged.innovation))
-                .risk(sectionToMap(merged.risk))
-                .compliance(sectionToMap(merged.compliance))
+                .financial(Collections.emptyMap())
+                .market(Collections.emptyMap())
+                .innovation(Collections.emptyMap())
+                .risk(Collections.emptyMap())
+                .compliance(Collections.emptyMap())
                 .fieldEvidence(fieldEvidence)
                 .hasConflicts(hasConflicts)
                 .conflictCount((int) conflictCount)
@@ -264,22 +270,45 @@ public class ExtractionMergeService {
             "identity.legalName", "identity.tradeName", "identity.taxCode",
             "contact.address", "contact.website", "contact.emails", "contact.phones",
             "business.businessModel", "business.industries", "business.markets", "business.targetCustomers", "business.products",
-            "companySize.employeeTier", "companySize.employeeCount", "companySize.revenueTier",
-            "insights.strengths", "insights.weaknesses", "insights.opportunities", "insights.threats",
-            "financial", "innovation", "market", "risk", "compliance"
+            "companySize.employeeTier", "companySize.employeeCount", "companySize.revenueTier"
     );
 
     private Map<String, ExtractionFieldResult> initializeCandidateFieldResults(CompanyCandidate candidate) {
         Map<String, ExtractionFieldResult> results = new HashMap<>();
         for (String fieldPath : STAFF_REVIEWABLE_FIELDS) {
-            results.put(FieldKeyCodec.encode(fieldPath), ExtractionFieldResult.builder()
+            ExtractionFieldResult result = ExtractionFieldResult.builder()
                     .fieldName(fieldPath)
                     .value(readEmbeddedField(candidate, fieldPath))
                     .staffReviewStatus(StaffFieldReviewStatus.PENDING)
                     .managerReviewStatus(ExtractionReviewStatus.PENDING)
-                    .build());
+                    .build();
+            if (isProjectControlledIdentityField(fieldPath)) {
+                applyProjectControlledFieldDefaults(result, readEmbeddedField(candidate, fieldPath));
+            }
+            results.put(FieldKeyCodec.encode(fieldPath), result);
         }
         return results;
+    }
+
+    private void applyProjectControlledIdentity(CompanyCandidate.Identity identity, Project project) {
+        if (identity == null || project == null) return;
+        identity.setLegalName(project.getTargetCompanyName());
+        identity.setTaxCode(project.getTargetCompanyTaxCode());
+    }
+
+    private boolean isProjectControlledIdentityField(String fieldPath) {
+        return "identity.legalName".equals(fieldPath) || "identity.taxCode".equals(fieldPath);
+    }
+
+    private void applyProjectControlledFieldDefaults(ExtractionFieldResult result, Object value) {
+        result.setValue(value);
+        result.setNormalizedValue(value);
+        result.setConfidence(1.0);
+        result.setValidationStatus(ExtractionValidationStatus.PASS);
+        result.setValidationMessages("Provided by manager at project creation.");
+        result.setStaffReviewedValue(value);
+        result.setStaffReviewStatus(StaffFieldReviewStatus.CONFIRMED);
+        result.setManagerReviewStatus(ExtractionReviewStatus.ACCEPTED);
     }
 
     private Object readEmbeddedField(CompanyCandidate candidate, String fieldName) {

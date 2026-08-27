@@ -17,6 +17,8 @@ import com.apms.common.enums.AiExtractionJobStatus;
 import com.apms.common.enums.AiExtractionJobStage;
 import com.apms.domain.document.RawDocument;
 import com.apms.domain.document.repository.mongo.RawDocumentRepository;
+import com.apms.domain.project.Project;
+import com.apms.domain.project.repository.sql.ProjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
@@ -52,6 +54,7 @@ public class TaskExtractionOrchestrator {
     private final AiExtractionJobRepository jobRepository;
     private final AiExtractionQualityService qualityService;
     private final com.apms.domain.project.repository.sql.ProjectTaskRepository projectTaskRepository;
+    private final ProjectRepository projectRepository;
     private final DocumentCompanyConsistencyValidator companyConsistencyValidator;
     private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
 
@@ -194,6 +197,10 @@ public class TaskExtractionOrchestrator {
 
             // 2. Call Gemini
             RawExtractionOutput output = geminiProvider.extract(combinedText.toString());
+            Project project = projectRepository.findById(projectId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + projectId));
+            applyProjectControlledIdentity(output, project);
+            removeAnalysisExtractionFields(output);
 
             job.setStage(AiExtractionJobStage.MERGING);
             job.setProgress(70);
@@ -260,16 +267,16 @@ public class TaskExtractionOrchestrator {
                     .taskId(taskId)
                     .sourceDocumentIds(rawDocumentIds)
                     .status(CandidateStatus.DRAFT)
-                    .identity(mapIdentity(output.getExtractedData()))
+                    .identity(mapIdentity(output.getExtractedData(), project))
                     .business(mapBusiness(output.getExtractedData()))
                     .contact(mapContact(output.getExtractedData()))
                     .companySize(mapCompanySize(output.getExtractedData()))
-                    .insights(mapInsights(output.getExtractedData()))
-                    .financial(output.getExtractedData().getFinancial())
-                    .market(output.getExtractedData().getMarket())
-                    .innovation(output.getExtractedData().getInnovation())
-                    .risk(output.getExtractedData().getRisk())
-                    .compliance(output.getExtractedData().getCompliance())
+                    .insights(null)
+                    .financial(null)
+                    .market(null)
+                    .innovation(null)
+                    .risk(null)
+                    .compliance(null)
                     .fieldEvidence(encodeFieldEvidence(fieldEvidence))
                     .fieldResults(encodeFieldResults(output.getFieldResults()))
                     .qualityStatus(qualityStatus)
@@ -385,6 +392,62 @@ public class TaskExtractionOrchestrator {
         return encoded;
     }
 
+    private void applyProjectControlledIdentity(RawExtractionOutput output, Project project) {
+        if (output == null || project == null) return;
+
+        if (output.getExtractedData() == null) {
+            output.setExtractedData(new com.apms.domain.ai.dto.ExtractedCompanyData());
+        }
+        output.getExtractedData().setLegalName(project.getTargetCompanyName());
+        output.getExtractedData().setTaxCode(project.getTargetCompanyTaxCode());
+
+        if (output.getFieldResults() == null) {
+            output.setFieldResults(new java.util.HashMap<>());
+        }
+        output.getFieldResults().put("legalName",
+                projectControlledField("legalName", project.getTargetCompanyName()));
+        output.getFieldResults().put("taxCode",
+                projectControlledField("taxCode", project.getTargetCompanyTaxCode()));
+    }
+
+    private com.apms.domain.ai.dto.ExtractionFieldResult projectControlledField(String fieldName, Object value) {
+        return com.apms.domain.ai.dto.ExtractionFieldResult.builder()
+                .fieldName(fieldName)
+                .value(value)
+                .normalizedValue(value)
+                .confidence(1.0)
+                .validationStatus(com.apms.domain.ai.dto.ExtractionValidationStatus.PASS)
+                .validationMessages("Provided by manager at project creation.")
+                .staffReviewStatus(com.apms.domain.ai.dto.StaffFieldReviewStatus.CONFIRMED)
+                .staffReviewedValue(value)
+                .managerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED)
+                .build();
+    }
+
+    private void removeAnalysisExtractionFields(RawExtractionOutput output) {
+        if (output == null) return;
+
+        if (output.getExtractedData() != null) {
+            output.getExtractedData().setStrengths(null);
+            output.getExtractedData().setWeaknesses(null);
+            output.getExtractedData().setOpportunities(null);
+            output.getExtractedData().setThreats(null);
+            output.getExtractedData().setFinancial(null);
+            output.getExtractedData().setInnovation(null);
+            output.getExtractedData().setMarket(null);
+            output.getExtractedData().setRisk(null);
+            output.getExtractedData().setCompliance(null);
+        }
+
+        if (output.getFieldResults() != null) {
+            for (String field : java.util.List.of(
+                    "strengths", "weaknesses", "opportunities", "threats",
+                    "financial", "innovation", "market", "risk", "compliance")) {
+                output.getFieldResults().remove(field);
+            }
+        }
+    }
+
     private String extractTextFromDocument(RawDocument rawDocument) {
         String mimeType = rawDocument.getStorage() != null ? rawDocument.getStorage().getMimeType() : null;
         if (!"application/pdf".equals(mimeType)) {
@@ -418,12 +481,19 @@ public class TaskExtractionOrchestrator {
         }
     }
 
-    private CompanyCandidate.Identity mapIdentity(com.apms.domain.ai.dto.ExtractedCompanyData d) {
-        if (d == null) return null;
+    private CompanyCandidate.Identity mapIdentity(com.apms.domain.ai.dto.ExtractedCompanyData d, Project project) {
+        String legalName = project != null ? project.getTargetCompanyName() : null;
+        String taxCode = project != null ? project.getTargetCompanyTaxCode() : null;
+        if (d == null) {
+            return CompanyCandidate.Identity.builder()
+                    .legalName(legalName)
+                    .taxCode(taxCode)
+                    .build();
+        }
         return CompanyCandidate.Identity.builder()
-                .legalName(d.getLegalName())
+                .legalName(legalName)
                 .tradeName(d.getTradeName())
-                .taxCode(d.getTaxCode())
+                .taxCode(taxCode)
                 .build();
     }
 
