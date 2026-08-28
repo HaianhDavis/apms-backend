@@ -36,14 +36,16 @@ public class DashboardService {
     private final ExternalDataRepository externalDataRepository;
 
     @Transactional(readOnly = true)
-    public DashboardSummaryDto getSummary() {
+    public DashboardSummaryDto getSummary(Long managerId) {
         String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
         String ownerCompanyProfileId = ownerOrganizationService.getOwnerCompanyProfileId();
 
         List<String> targetBusinessCompanyIds = getTargetBusinessCompanyIds(ownerCompanyId);
         long totalRelatedCompanies = targetBusinessCompanyIds.stream().distinct().count();
 
-        List<CompanyProfile> targetProfiles = targetBusinessCompanyIds.isEmpty() ? List.of() : profileRepository.findByCompanyIdIn(targetBusinessCompanyIds);
+        List<CompanyProfile> targetProfiles = targetBusinessCompanyIds.isEmpty() ? List.of() : profileRepository.findByCompanyIdIn(targetBusinessCompanyIds)
+                .stream().filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()))
+                .collect(Collectors.toList());
         
         Set<String> targetCompanyProfileIds = targetProfiles.stream().map(CompanyProfile::getId).collect(Collectors.toSet());
 
@@ -55,11 +57,42 @@ public class DashboardService {
         SignalOverviewDto riskOverview = buildSignalOverview(ExternalDataCategory.RISK, ecosystemBusinessIds, targetProfiles);
         SignalOverviewDto opportunityOverview = buildSignalOverview(ExternalDataCategory.OPPORTUNITY, ecosystemBusinessIds, targetProfiles);
 
-        long partnerCount = countNeo4jRelationship("PARTNER_WITH", ownerCompanyId);
-        long competitorCount = countNeo4jRelationship("COMPETITOR_OF", ownerCompanyId);
-        long supplierCount = countNeo4jRelationship("SUPPLIER_OF", ownerCompanyId);
-        long customerCount = countNeo4jRelationship("CUSTOMER_OF", ownerCompanyId);
-        long potentialPartnerCount = countNeo4jRelationship("POTENTIAL_PARTNER_OF", ownerCompanyId);
+        List<CompanyProfile> allExceptOwner = profileRepository.findAll().stream()
+            .filter(p -> !ownerCompanyId.equals(p.getCompanyId()))
+            .filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()))
+            .filter(p -> {
+                if (managerId == null) return true;
+                boolean isCreator = p.getMetadata() != null && managerId.toString().equals(p.getMetadata().getCreatedBy());
+                boolean isManager = managerId.equals(p.getResponsibleManagerId());
+                return isCreator || isManager;
+            })
+            .collect(Collectors.toList());
+
+        long partnerCount = 0;
+        long competitorCount = 0;
+        long supplierCount = 0;
+        long customerCount = 0;
+        long potentialPartnerCount = 0;
+
+        if (managerId == null) {
+            partnerCount = countNeo4jRelationship("PARTNER_WITH", ownerCompanyId);
+            competitorCount = countNeo4jRelationship("COMPETITOR_OF", ownerCompanyId);
+            supplierCount = countNeo4jRelationship("SUPPLIER_OF", ownerCompanyId);
+            customerCount = countNeo4jRelationship("CUSTOMER_OF", ownerCompanyId);
+            potentialPartnerCount = countNeo4jRelationship("POTENTIAL_PARTNER_OF", ownerCompanyId);
+        } else {
+            // For a specific manager, count relationships based on their companies' Neo4j links, or just use the filtered list's relationships if we map them.
+            // But doing graph traversal for specific nodes is hard here without restructuring. 
+            // We can approximate by querying neo4j for relationships to companies in allExceptOwner.
+            Set<String> myCompanyIds = allExceptOwner.stream().map(CompanyProfile::getCompanyId).collect(Collectors.toSet());
+            if (!myCompanyIds.isEmpty()) {
+                partnerCount = countNeo4jRelationshipFilterByTargets("PARTNER_WITH", ownerCompanyId, myCompanyIds);
+                competitorCount = countNeo4jRelationshipFilterByTargets("COMPETITOR_OF", ownerCompanyId, myCompanyIds);
+                supplierCount = countNeo4jRelationshipFilterByTargets("SUPPLIER_OF", ownerCompanyId, myCompanyIds);
+                customerCount = countNeo4jRelationshipFilterByTargets("CUSTOMER_OF", ownerCompanyId, myCompanyIds);
+                potentialPartnerCount = countNeo4jRelationshipFilterByTargets("POTENTIAL_PARTNER_OF", ownerCompanyId, myCompanyIds);
+            }
+        }
 
         List<RelationshipCompositionDto> relationshipComposition = List.of(
             new RelationshipCompositionDto("PARTNER", partnerCount),
@@ -70,10 +103,6 @@ public class DashboardService {
         );
 
         List<RecentActivityDto> recentActivities = buildRecentActivities(ecosystemBusinessIds, targetProfiles);
-
-        List<CompanyProfile> allExceptOwner = profileRepository.findAll().stream()
-            .filter(p -> !ownerCompanyId.equals(p.getCompanyId()))
-            .collect(Collectors.toList());
 
         long verifiedCompanyCount = allExceptOwner.stream()
             .filter(p -> "APPROVED".equals(p.getReviewStatus()) || "VERIFIED".equals(p.getReviewStatus()))
@@ -113,6 +142,16 @@ public class DashboardService {
         String cypher = String.format("MATCH (:Company {companyId: $ownerId})-[r:%s]->() RETURN count(r) as cnt", relType);
         return neo4jClient.query(cypher)
                 .bindAll(Map.of("ownerId", ownerCompanyId))
+                .fetchAs(Long.class)
+                .mappedBy((ts, record) -> record.get("cnt").asLong())
+                .one()
+                .orElse(0L);
+    }
+
+    private long countNeo4jRelationshipFilterByTargets(String relType, String ownerCompanyId, Set<String> targetIds) {
+        String cypher = String.format("MATCH (:Company {companyId: $ownerId})-[r:%s]->(t:Company) WHERE t.companyId IN $targetIds RETURN count(r) as cnt", relType);
+        return neo4jClient.query(cypher)
+                .bindAll(Map.of("ownerId", ownerCompanyId, "targetIds", targetIds))
                 .fetchAs(Long.class)
                 .mappedBy((ts, record) -> record.get("cnt").asLong())
                 .one()

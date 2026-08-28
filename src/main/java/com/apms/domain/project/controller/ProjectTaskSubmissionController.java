@@ -54,7 +54,7 @@ public class ProjectTaskSubmissionController {
     }
 
     @PostMapping("/{submissionId}/review")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ProjectTaskSubmissionResponse> reviewSubmission(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
@@ -64,7 +64,7 @@ public class ProjectTaskSubmissionController {
     }
 
     @GetMapping("/{submissionId}/field-review-summary")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<com.apms.domain.project.dto.ReviewSummaryResponse> getReviewSummary(
             @PathVariable Long projectId,
             @PathVariable Long taskId,

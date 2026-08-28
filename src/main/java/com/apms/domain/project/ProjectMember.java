@@ -1,6 +1,6 @@
 package com.apms.domain.project;
 
-import com.apms.common.enums.MemberRole;
+import com.apms.common.enums.ProjectRole;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -44,7 +44,7 @@ public class ProjectMember {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private MemberRole memberRole;
+    private ProjectRole projectRole;
 
     @CreationTimestamp
     @Column(updatable = false)

@@ -6,4 +6,5 @@ import java.util.List;
 
 public interface ProjectKeyResultRepository extends JpaRepository<ProjectKeyResult, Long> {
     List<ProjectKeyResult> findByProject_Id(Long projectId);
+    void deleteByProjectId(Long projectId);
 }

@@ -4,12 +4,15 @@ import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.MonitoringFrequency;
 import com.apms.common.enums.MonitoringReviewResult;
 import com.apms.common.enums.MonitoringStatus;
+import com.apms.common.enums.ProposalOrigin;
+import com.apms.common.enums.SubmissionStatus;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.monitoring.dto.*;
 import com.apms.domain.monitoring.model.CompanyMonitoringAssignment;
 import com.apms.domain.monitoring.model.CompanyMonitoringReview;
 import com.apms.domain.monitoring.repository.CompanyMonitoringAssignmentRepository;
 import com.apms.domain.monitoring.repository.CompanyMonitoringReviewRepository;
+import com.apms.domain.monitoring.repository.CompanyRelationshipChangeProposalRepository;
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
@@ -19,12 +22,22 @@ import com.apms.domain.user.repository.sql.AccountRepository;
 import com.apms.common.enums.SystemRole;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -35,6 +48,7 @@ public class CompanyMonitoringService {
     private final CompanyProfileRepository companyProfileRepository;
     private final AccountRepository accountRepository;
     private final CompanyProfileUpdateProposalRepository proposalRepository;
+    private final CompanyRelationshipChangeProposalRepository relationshipChangeProposalRepository;
     private final AuditLogService auditLogService;
 
     @Transactional
@@ -149,6 +163,7 @@ public class CompanyMonitoringService {
                 .orElseThrow(() -> new IllegalArgumentException("Staff account not found"));
 
         LocalDateTime now = LocalDateTime.now();
+        String submittedUpdateProposalStatus = null;
 
         if (request.getResult() == MonitoringReviewResult.UPDATE_PROPOSED) {
             if (request.getUpdateProposalId() == null) {
@@ -161,6 +176,19 @@ public class CompanyMonitoringService {
             if (!proposal.getCompanyProfileId().equals(assignment.getCompanyProfileId())) {
                 throw new IllegalArgumentException("Update proposal does not target the assigned company");
             }
+
+            if (proposal.getOrigin() != ProposalOrigin.MONITORING) {
+                throw new IllegalArgumentException("Update proposal must come from company monitoring");
+            }
+
+            proposal.setStatus(SubmissionStatus.SUBMITTED);
+            proposal.setLastSubmittedAt(now);
+            proposal.setLastSubmittedByAccountId(currentStaffId);
+            if (proposal.getSubmittedBy() == null) {
+                proposal.setSubmittedBy(currentStaffId);
+            }
+            proposalRepository.save(proposal);
+            submittedUpdateProposalStatus = proposal.getStatus().name();
 
             // Note: Official profile remains unchanged here
         }
@@ -184,17 +212,48 @@ public class CompanyMonitoringService {
         AuditAction action = request.getResult() == MonitoringReviewResult.NO_CHANGE ? AuditAction.MONITORING_REVIEW_COMPLETED : AuditAction.MONITORING_UPDATE_PROPOSED;
         auditLogService.log(staff.getId(), action, "CompanyMonitoringAssignment", assignment.getId().toString(), "Submitted review for assignment " + assignmentId);
 
-        return CompanyMonitoringReviewResponse.builder()
-                .id(review.getId())
-                .monitoringAssignmentId(assignment.getId())
-                .companyProfileId(review.getCompanyProfileId())
-                .reviewedById(staff.getId())
-                .reviewedByName(staff.getEmail()) // Assuming email acts as name for now
-                .reviewedAt(review.getReviewedAt())
-                .result(review.getResult())
-                .updateProposalId(review.getUpdateProposalId())
-                .note(review.getNote())
-                .build();
+        CompanyProfile companyProfile = companyProfileRepository.findById(review.getCompanyProfileId()).orElse(null);
+        Map<String, CompanyProfile> profilesByKey = companyProfile != null ? profileKeyMap(List.of(companyProfile)) : Map.of();
+        Map<String, String> updateProposalStatuses = StringUtils.hasText(review.getUpdateProposalId()) && submittedUpdateProposalStatus != null
+                ? Map.of(review.getUpdateProposalId(), submittedUpdateProposalStatus)
+                : loadUpdateProposalStatuses(List.of(review));
+        Map<Long, String> relationshipProposalStatuses = loadRelationshipProposalStatuses(List.of(review));
+        return mapReviewToResponse(review, profilesByKey, updateProposalStatuses, relationshipProposalStatuses);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<CompanyMonitoringReviewResponse> getMonitoringHistory(Long currentUserId, Pageable pageable) {
+        Account currentUser = accountRepository.findById(currentUserId)
+                .orElseThrow(() -> new IllegalArgumentException("Account not found"));
+        Pageable effectivePageable = newestReviewsFirst(pageable);
+
+        Page<CompanyMonitoringReview> reviews;
+        if (currentUser.getRoles().contains(SystemRole.SYSTEM_ADMIN)) {
+            reviews = reviewRepository.findAll(effectivePageable);
+        } else {
+            List<CompanyProfile> managedProfiles = companyProfileRepository.findByResponsibleManagerId(currentUserId);
+            Set<String> managedCompanyKeys = managedProfiles.stream()
+                    .flatMap(profile -> java.util.stream.Stream.of(profile.getId(), profile.getCompanyId()))
+                    .filter(StringUtils::hasText)
+                    .collect(Collectors.toSet());
+
+            if (managedCompanyKeys.isEmpty()) {
+                return Page.empty(effectivePageable);
+            }
+
+            reviews = reviewRepository.findByCompanyProfileIdIn(managedCompanyKeys, effectivePageable);
+        }
+
+        Map<String, CompanyProfile> profilesByKey = loadProfilesByReviewCompanyKeys(reviews.getContent());
+        Map<String, String> updateProposalStatuses = loadUpdateProposalStatuses(reviews.getContent());
+        Map<Long, String> relationshipProposalStatuses = loadRelationshipProposalStatuses(reviews.getContent());
+
+        return reviews.map(review -> mapReviewToResponse(
+                review,
+                profilesByKey,
+                updateProposalStatuses,
+                relationshipProposalStatuses
+        ));
     }
 
     @Transactional(readOnly = true)
@@ -258,14 +317,22 @@ public class CompanyMonitoringService {
 
         String displayStatus = calculateDisplayStatus(assignment);
         
+        String latestReviewResult = null;
         String latestProposalStatus = null;
         String latestProposalId = null;
-        if (companyProfile != null) {
-            java.util.Optional<com.apms.domain.profile.CompanyProfileUpdateProposal> latestProposalOpt = 
-                proposalRepository.findTopByCompanyProfileIdAndOriginOrderByCreatedAtDesc(companyProfile.getCompanyId(), com.apms.common.enums.ProposalOrigin.MONITORING);
-            if (latestProposalOpt.isPresent()) {
-                latestProposalStatus = latestProposalOpt.get().getStatus().name();
-                latestProposalId = latestProposalOpt.get().getId();
+
+        java.util.Optional<CompanyMonitoringReview> latestReviewOpt = reviewRepository.findTopByAssignmentIdOrderByReviewedAtDesc(assignment.getId());
+        
+        if (latestReviewOpt.isPresent()) {
+            CompanyMonitoringReview latestReview = latestReviewOpt.get();
+            latestReviewResult = latestReview.getResult() != null ? latestReview.getResult().name() : null;
+            
+            if (latestReview.getUpdateProposalId() != null) {
+                latestProposalId = latestReview.getUpdateProposalId();
+                java.util.Optional<CompanyProfileUpdateProposal> proposalOpt = proposalRepository.findById(latestProposalId);
+                if (proposalOpt.isPresent()) {
+                    latestProposalStatus = proposalOpt.get().getStatus().name();
+                }
             }
         }
 
@@ -280,6 +347,7 @@ public class CompanyMonitoringService {
                 .frequency(assignment.getFrequency())
                 .assignmentStatus(assignment.getStatus())
                 .displayStatus(displayStatus)
+                .latestReviewResult(latestReviewResult)
                 .latestProposalStatus(latestProposalStatus)
                 .latestProposalId(latestProposalId)
                 .lastReviewedAt(assignment.getLastReviewedAt())
@@ -287,6 +355,137 @@ public class CompanyMonitoringService {
                 .createdAt(assignment.getCreatedAt())
                 .updatedAt(assignment.getUpdatedAt())
                 .build();
+    }
+
+    private CompanyMonitoringReviewResponse mapReviewToResponse(
+            CompanyMonitoringReview review,
+            Map<String, CompanyProfile> profilesByKey,
+            Map<String, String> updateProposalStatuses,
+            Map<Long, String> relationshipProposalStatuses) {
+        CompanyProfile companyProfile = profilesByKey.get(review.getCompanyProfileId());
+        String proposalStatus = null;
+        if (StringUtils.hasText(review.getUpdateProposalId())) {
+            proposalStatus = updateProposalStatuses.get(review.getUpdateProposalId());
+        } else if (review.getRelationshipChangeProposalId() != null) {
+            proposalStatus = relationshipProposalStatuses.get(review.getRelationshipChangeProposalId());
+        }
+
+        return CompanyMonitoringReviewResponse.builder()
+                .id(review.getId())
+                .monitoringAssignmentId(review.getAssignment().getId())
+                .companyProfileId(review.getCompanyProfileId())
+                .companyName(resolveCompanyName(companyProfile))
+                .reviewedById(review.getReviewedBy().getId())
+                .reviewedByName(review.getReviewedBy().getEmail())
+                .reviewedByEmail(review.getReviewedBy().getEmail())
+                .reviewedAt(review.getReviewedAt())
+                .result(review.getResult())
+                .updateProposalId(review.getUpdateProposalId())
+                .relationshipChangeProposalId(review.getRelationshipChangeProposalId())
+                .proposalStatus(proposalStatus)
+                .note(review.getNote())
+                .build();
+    }
+
+    private Pageable newestReviewsFirst(Pageable pageable) {
+        Sort sort = Sort.by(Sort.Direction.DESC, "reviewedAt");
+        if (pageable == null || pageable.isUnpaged()) {
+            return PageRequest.of(0, 20, sort);
+        }
+        if (pageable.getSort().isSorted()) {
+            return pageable;
+        }
+        return PageRequest.of(pageable.getPageNumber(), pageable.getPageSize(), sort);
+    }
+
+    private Map<String, CompanyProfile> loadProfilesByReviewCompanyKeys(List<CompanyMonitoringReview> reviews) {
+        Set<String> companyKeys = reviews.stream()
+                .map(CompanyMonitoringReview::getCompanyProfileId)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toSet());
+        if (companyKeys.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<String, CompanyProfile> profilesByKey = new HashMap<>();
+        profilesByKey.putAll(profileKeyMap(companyProfileRepository.findAllById(companyKeys)));
+
+        Set<String> unresolvedKeys = companyKeys.stream()
+                .filter(key -> !profilesByKey.containsKey(key))
+                .collect(Collectors.toSet());
+        if (!unresolvedKeys.isEmpty()) {
+            profilesByKey.putAll(profileKeyMap(companyProfileRepository.findByCompanyIdIn(unresolvedKeys)));
+        }
+
+        return profilesByKey;
+    }
+
+    private Map<String, CompanyProfile> profileKeyMap(Collection<CompanyProfile> profiles) {
+        Map<String, CompanyProfile> profilesByKey = new HashMap<>();
+        for (CompanyProfile profile : profiles) {
+            if (StringUtils.hasText(profile.getId())) {
+                profilesByKey.put(profile.getId(), profile);
+            }
+            if (StringUtils.hasText(profile.getCompanyId())) {
+                profilesByKey.put(profile.getCompanyId(), profile);
+            }
+        }
+        return profilesByKey;
+    }
+
+    private Map<String, String> loadUpdateProposalStatuses(List<CompanyMonitoringReview> reviews) {
+        List<String> proposalIds = reviews.stream()
+                .map(CompanyMonitoringReview::getUpdateProposalId)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
+        if (proposalIds.isEmpty()) {
+            return Map.of();
+        }
+
+        return proposalRepository.findAllById(proposalIds).stream()
+                .filter(proposal -> StringUtils.hasText(proposal.getId()))
+                .filter(proposal -> proposal.getStatus() != null)
+                .collect(Collectors.toMap(
+                        CompanyProfileUpdateProposal::getId,
+                        proposal -> proposal.getStatus().name(),
+                        (left, right) -> left
+                ));
+    }
+
+    private Map<Long, String> loadRelationshipProposalStatuses(List<CompanyMonitoringReview> reviews) {
+        List<Long> proposalIds = reviews.stream()
+                .map(CompanyMonitoringReview::getRelationshipChangeProposalId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (proposalIds.isEmpty()) {
+            return Map.of();
+        }
+
+        return relationshipChangeProposalRepository.findAllById(proposalIds).stream()
+                .filter(proposal -> proposal.getId() != null)
+                .filter(proposal -> proposal.getStatus() != null)
+                .collect(Collectors.toMap(
+                        proposal -> proposal.getId(),
+                        proposal -> proposal.getStatus().name(),
+                        (left, right) -> left
+                ));
+    }
+
+    private String resolveCompanyName(CompanyProfile companyProfile) {
+        if (companyProfile != null && companyProfile.getIdentity() != null) {
+            if (StringUtils.hasText(companyProfile.getIdentity().getTradeName())) {
+                return companyProfile.getIdentity().getTradeName();
+            }
+            if (StringUtils.hasText(companyProfile.getIdentity().getLegalName())) {
+                return companyProfile.getIdentity().getLegalName();
+            }
+        }
+        if (companyProfile != null && StringUtils.hasText(companyProfile.getCompanyId())) {
+            return companyProfile.getCompanyId();
+        }
+        return "Unknown Company";
     }
 
     private String calculateDisplayStatus(CompanyMonitoringAssignment assignment) {

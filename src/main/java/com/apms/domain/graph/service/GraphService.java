@@ -244,7 +244,14 @@ public class GraphService {
     // READ OPERATIONS
     // ─────────────────────────────────────────────
 
+    private boolean isVisible(String companyId) {
+        return profileRepository.findByCompanyId(companyId)
+                .map(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()))
+                .orElse(false);
+    }
+
     public GraphCompanyDto getCompanyNodeWithRelationships(String companyId) {
+        if (!isVisible(companyId)) return null;
         CompanyNode node = companyNodeRepository.findByCompanyId(companyId)
                 .orElse(null);
         if (node == null) return null;
@@ -263,6 +270,7 @@ public class GraphService {
 
     public List<GraphCompanyDto> getNetwork() {
         return companyNodeRepository.findAllNodes().stream()
+                .filter(node -> isVisible(node.getCompanyId()))
                 .map(node -> GraphCompanyDto.builder()
                         .companyId(node.getCompanyId())
                         .name(node.getName())
@@ -274,6 +282,8 @@ public class GraphService {
     }
 
     public List<CompanyRelationshipDto> getPairRelationships(String companyIdA, String companyIdB) {
+        if (!isVisible(companyIdA) || !isVisible(companyIdB)) return List.of();
+        
         String cypher = """
             MATCH (c1:Company {companyId: $companyIdA})-[r]-(c2:Company {companyId: $companyIdB})
             RETURN type(r) as relType, startNode(r).companyId as sourceCompanyId, endNode(r).companyId as targetCompanyId,
@@ -341,6 +351,7 @@ public class GraphService {
                         .name(node.getName())
                         .industry(node.getIndustry())
                         .build())
+                .filter(dto -> isVisible(dto.getCompanyId()))
                 .toList();
     }
 
@@ -386,6 +397,7 @@ public class GraphService {
                         .metadata(parsedMetadata)
                         .build();
                 })
+                .filter(rel -> isVisible(rel.getTargetCompanyId()))
                 .toList();
     }
 
@@ -454,6 +466,7 @@ public class GraphService {
                 .all()
                 .stream()
                 .filter(id -> !sourceCompanyId.equals(id))
+                .filter(this::isVisible)
                 .distinct()
                 .toList();
     }

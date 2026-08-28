@@ -37,4 +37,8 @@ public class ProjectResponse {
     private Integer progressPercentage;
     private Boolean isOverdue;
     private List<ProjectMemberResponse> members;
+
+    private LocalDateTime closedAt;
+    private String closeReason;
+    private Long closedBy;
 }

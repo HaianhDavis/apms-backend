@@ -63,6 +63,14 @@ public class CompanyMonitoringController {
         return ResponseEntity.ok(service.submitReview(id, request, currentUser.getId()));
     }
 
+    @GetMapping("/reviews")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<Page<CompanyMonitoringReviewResponse>> getMonitoringHistory(
+            @AuthenticationPrincipal UserDetailsImpl currentUser,
+            Pageable pageable) {
+        return ResponseEntity.ok(service.getMonitoringHistory(currentUser.getId(), pageable));
+    }
+
     @GetMapping
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<Page<CompanyMonitoringAssignmentResponse>> getAllAssignments(Pageable pageable) {

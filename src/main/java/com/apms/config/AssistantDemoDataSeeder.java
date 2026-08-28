@@ -1,6 +1,6 @@
 package com.apms.config;
 
-import com.apms.common.enums.MemberRole;
+import com.apms.common.enums.ProjectRole;
 import com.apms.common.enums.ProjectStatus;
 import com.apms.common.enums.ProjectType;
 import com.apms.domain.profile.CompanyProfile;
@@ -126,7 +126,7 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
     // ============================================================
 
 
-    private void ensureMembership(Project project, String email, MemberRole role) {
+    private void ensureMembership(Project project, String email, ProjectRole role) {
         accountRepository.findByEmail(email).ifPresent(account -> {
             boolean exists = projectMemberRepository
                     .existsByProject_IdAndAccount_Id(project.getId(), account.getId());
@@ -136,7 +136,7 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
                         ProjectMember.builder()
                                 .project(project)
                                 .account(account)
-                                .memberRole(role)
+                                .projectRole(role)
                                 .build()
                 );
             }

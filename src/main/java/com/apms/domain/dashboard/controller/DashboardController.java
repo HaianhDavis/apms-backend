@@ -23,8 +23,11 @@ public class DashboardController {
 
     @GetMapping("/summary")
     @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
-    public ResponseEntity<ApiResponse<DashboardSummaryDto>> getSummary() {
-        return ResponseEntity.ok(ApiResponse.success(dashboardService.getSummary()));
+    public ResponseEntity<ApiResponse<DashboardSummaryDto>> getSummary(
+            @org.springframework.web.bind.annotation.RequestParam(required = false) Boolean createdByMe,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
+        Long managerId = (createdByMe != null && createdByMe) ? currentUser.getId() : null;
+        return ResponseEntity.ok(ApiResponse.success(dashboardService.getSummary(managerId)));
     }
 
     @GetMapping("/partners")

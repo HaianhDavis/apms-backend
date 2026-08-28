@@ -29,6 +29,7 @@ import java.util.Map;
 public class ProjectController {
 
     private final ProjectService projectService;
+    private final com.apms.domain.profile.service.ProfileService profileService;
 
     // ─────────────────────────────────────────────
     // POST /api/v1/projects
@@ -138,6 +139,21 @@ public class ProjectController {
     }
 
     // ─────────────────────────────────────────────
+    // POST /api/v1/projects/{id}/close
+    // Role: BUSINESS_DEVELOPMENT_MANAGER
+    // ─────────────────────────────────────────────
+    @PostMapping("/{id}/close")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#id))")
+    public ResponseEntity<ApiResponse<ProjectResponse>> closeProject(
+            @PathVariable Long id,
+            @RequestBody CloseProjectRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        
+        return ResponseEntity.ok(ApiResponse.success(
+                projectService.closeProject(id, request, currentUser.getId()), "Project closed successfully"));
+    }
+
+    // ─────────────────────────────────────────────
     // PATCH /api/v1/projects/{id}/status
     // Role: SYSTEM_ADMIN, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
@@ -179,7 +195,7 @@ public class ProjectController {
     // Role: BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @PostMapping("/{id}/members")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#id)")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMember(#id)")
     public ResponseEntity<ApiResponse<ProjectMemberResponse>> addMember(
             @PathVariable Long id,
             @Valid @RequestBody AddMemberRequest request,
@@ -193,14 +209,68 @@ public class ProjectController {
     // ─────────────────────────────────────────────
     // DELETE /api/v1/projects/{id}/members/{userId}
     // Role: BUSINESS_DEVELOPMENT_MANAGER
-    // ─────────────────────────────────────────────
     @DeleteMapping("/{id}/members/{userId}")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#id)")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMember(#id)")
     public ResponseEntity<ApiResponse<Void>> removeMember(
             @PathVariable Long id,
-            @PathVariable Long userId) {
-
-        projectService.removeMember(id, userId);
+            @PathVariable Long userId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        projectService.removeMember(id, userId, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(null, "Member removed successfully"));
+    }
+
+    @PutMapping("/{id}/members/{userId}/role")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMember(#id)")
+    public ResponseEntity<ApiResponse<ProjectMemberResponse>> updateMemberRole(
+            @PathVariable Long id,
+            @PathVariable Long userId,
+            @Valid @RequestBody com.apms.domain.project.dto.UpdateMemberRoleRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        return ResponseEntity.ok(ApiResponse.success(
+                projectService.updateMemberRole(id, userId, request.getProjectRole(), currentUser.getId()), "Member role updated successfully"));
+    }
+
+    @PostMapping("/{id}/members/transfer-leadership")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMember(#id)")
+    public ResponseEntity<ApiResponse<Void>> transferLeadership(
+            @PathVariable Long id,
+            @Valid @RequestBody com.apms.domain.project.dto.TransferLeadershipRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        projectService.transferLeadership(id, request.getNewLeaderAccountId(), request.isLeaveProject(), currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(null, "Leadership transferred successfully"));
+    }
+
+    @PostMapping("/{id}/members/leave")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMember(#id)")
+    public ResponseEntity<ApiResponse<Void>> leaveProject(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        projectService.leaveProject(id, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(null, "Left project successfully"));
+    }
+
+    // ─────────────────────────────────────────────
+    // PATCH /api/v1/projects/{projectId}/company-profiles/{companyId}/visibility
+    // Role: BUSINESS_DEVELOPMENT_MANAGER (must also be LEADER of project)
+    // ─────────────────────────────────────────────
+    @PatchMapping("/{projectId}/company-profiles/{companyId}/visibility")
+    @Operation(summary = "Update company profile visibility strictly through project governance")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<ApiResponse<com.apms.domain.profile.dto.ProfileResponse>> updateVisibility(
+            @PathVariable Long projectId,
+            @PathVariable String companyId,
+            @Valid @RequestBody com.apms.domain.profile.dto.UpdateProfileVisibilityRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        String canonicalCompanyId = projectService.validateAndRepairProjectProfileGovernance(projectId, companyId, currentUser.getId());
+
+        // We delegate to profileService to actually mutate and save the profile
+        // using the resolved canonical ID to avoid 'Company profile not found' errors.
+        com.apms.domain.profile.dto.ProfileResponse response = profileService.updateVisibility(canonicalCompanyId, request, currentUser.getId());
+        
+        return ResponseEntity.ok(ApiResponse.success(response, "Visibility updated successfully via project governance"));
     }
 }

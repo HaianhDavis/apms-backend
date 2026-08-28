@@ -71,6 +71,14 @@ public class ProjectTargetProfileResolver {
         return resolved;
     }
 
+    public String resolveTargetProfileId(Project project) {
+        String resolved = normalizeExistingProfileId(project.getTargetCompanyProfileId()).orElse(null);
+        if (!StringUtils.hasText(resolved)) {
+            resolved = resolveFromApprovedCandidate(project).orElse(null);
+        }
+        return resolved;
+    }
+
     @Transactional
     public void backfillPartnerContractTasks(Project project, String targetCompanyProfileId) {
         String resolved = normalizeExistingProfileId(targetCompanyProfileId)
@@ -95,7 +103,7 @@ public class ProjectTargetProfileResolver {
                 : java.util.Optional.empty();
     }
 
-    private java.util.Optional<String> normalizeExistingProfileId(String profileIdOrCompanyId) {
+    public java.util.Optional<String> normalizeExistingProfileId(String profileIdOrCompanyId) {
         if (!StringUtils.hasText(profileIdOrCompanyId)) {
             return java.util.Optional.empty();
         }

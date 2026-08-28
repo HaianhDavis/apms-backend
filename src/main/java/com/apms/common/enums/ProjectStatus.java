@@ -4,6 +4,7 @@ public enum ProjectStatus {
     DRAFT,
     ACTIVE,
     COMPLETED,
+    CLOSED,
     CANCELLED,
     ARCHIVED
 }

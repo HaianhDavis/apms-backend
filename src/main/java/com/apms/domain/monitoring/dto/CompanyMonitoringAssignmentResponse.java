@@ -23,7 +23,8 @@ public class CompanyMonitoringAssignmentResponse {
     private MonitoringFrequency frequency;
     private MonitoringStatus assignmentStatus;
     private String displayStatus; // UP_TO_DATE, DUE, OVERDUE, PAUSED
-
+    
+    private String latestReviewResult;
     private String latestProposalStatus;
     private String latestProposalId;
 

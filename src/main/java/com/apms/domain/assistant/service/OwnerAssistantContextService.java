@@ -69,7 +69,9 @@ public class OwnerAssistantContextService {
 
         CompanyProfile pageContextTarget = null;
         if (StringUtils.hasText(companyProfileId)) {
-            pageContextTarget = companyProfileRepository.findById(companyProfileId).orElse(null);
+            pageContextTarget = companyProfileRepository.findById(companyProfileId)
+                    .filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()))
+                    .orElse(null);
         }
 
         CompanyProfile targetProfile = null;
@@ -162,7 +164,7 @@ public class OwnerAssistantContextService {
             }
             navigationActions.add(buildNavigationAction(targetProfile));
         } else if (intent == OwnerIntent.ECOSYSTEM_OVERVIEW) {
-            var summary = dashboardService.getSummary();
+            var summary = dashboardService.getSummary(null);
             directAnswer = "Business Ecosystem Overview\n\n" +
                            "Total Related Companies: " + summary.getTotalRelatedCompanies() + "\n\n" +
                            "Partners: " + summary.getPartnerCount() + "\n" +
@@ -332,7 +334,8 @@ public class OwnerAssistantContextService {
                     String relType = rel.getRelationshipType();
                     if (List.of("PARTNER_WITH", "POTENTIAL_PARTNER_OF", "COMPETITOR_OF", "CUSTOMER_OF", "SUPPLIER_OF").contains(relType)) {
                         String targetId = rel.getTargetCompanyId();
-                        var targetOpt = companyProfileRepository.findByCompanyId(targetId);
+                        var targetOpt = companyProfileRepository.findByCompanyId(targetId)
+                                .filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()));
                         if (targetOpt.isEmpty()) continue;
                         CompanyProfile tp = targetOpt.get();
                         
@@ -370,7 +373,8 @@ public class OwnerAssistantContextService {
                 for (var rel : gc.getRelationships()) {
                     if ("PARTNER_WITH".equals(rel.getRelationshipType())) {
                         String targetId = rel.getTargetCompanyId();
-                        var targetOpt = companyProfileRepository.findByCompanyId(targetId);
+                        var targetOpt = companyProfileRepository.findByCompanyId(targetId)
+                                .filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()));
                         if (targetOpt.isEmpty()) continue;
                         CompanyProfile tp = targetOpt.get();
                         
@@ -483,7 +487,8 @@ public class OwnerAssistantContextService {
                     String relType = rel.getRelationshipType();
                     if (List.of("PARTNER_WITH", "POTENTIAL_PARTNER_OF", "COMPETITOR_OF", "CUSTOMER_OF", "SUPPLIER_OF").contains(relType)) {
                         String targetId = rel.getTargetCompanyId();
-                        var targetOpt = companyProfileRepository.findByCompanyId(targetId);
+                        var targetOpt = companyProfileRepository.findByCompanyId(targetId)
+                                .filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()));
                         if (targetOpt.isEmpty()) continue;
                         CompanyProfile tp = targetOpt.get();
                         
@@ -552,7 +557,8 @@ public class OwnerAssistantContextService {
                     String relType = rel.getRelationshipType();
                     if (List.of("PARTNER_WITH", "POTENTIAL_PARTNER_OF").contains(relType)) {
                         String targetId = rel.getTargetCompanyId();
-                        var targetOpt = companyProfileRepository.findByCompanyId(targetId);
+                        var targetOpt = companyProfileRepository.findByCompanyId(targetId)
+                                .filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()));
                         if (targetOpt.isEmpty()) continue;
                         CompanyProfile tp = targetOpt.get();
                         
@@ -827,7 +833,9 @@ public class OwnerAssistantContextService {
         if (relatedCompanyIds.isEmpty()) return List.of();
         List<CompanyProfile> profiles = new ArrayList<>();
         for (String companyId : relatedCompanyIds) {
-            companyProfileRepository.findByCompanyId(companyId).ifPresent(profiles::add);
+            companyProfileRepository.findByCompanyId(companyId)
+                    .filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()))
+                    .ifPresent(profiles::add);
         }
         return profiles;
     }
@@ -910,7 +918,7 @@ public class OwnerAssistantContextService {
         // Use page request to get potential matches
         org.springframework.data.domain.Page<CompanyProfile> page = companyProfileRepository.searchByName(keyword, org.springframework.data.domain.PageRequest.of(0, 10));
         if (page == null) return null;
-        List<CompanyProfile> candidates = page.stream().filter(p -> "APPROVED".equals(p.getReviewStatus())).toList();
+        List<CompanyProfile> candidates = page.stream().filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden())).toList();
         
         if (candidates.isEmpty()) return null;
         if (candidates.size() == 1) return candidates.get(0);

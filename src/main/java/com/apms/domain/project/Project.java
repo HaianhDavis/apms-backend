@@ -98,4 +98,16 @@ public class Project {
 
     @UpdateTimestamp
     private LocalDateTime updatedAt;
+
+    @Column(name = "closed_at")
+    private LocalDateTime closedAt;
+
+    @Column(name = "close_reason", columnDefinition = "NVARCHAR(MAX)")
+    private String closeReason;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "closed_by", nullable = true)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private com.apms.domain.user.Account closedByAccount;
 }

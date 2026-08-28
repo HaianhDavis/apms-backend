@@ -12,12 +12,16 @@ public class CompanyMonitoringReviewResponse {
     private Long id;
     private Long monitoringAssignmentId;
     private String companyProfileId;
+    private String companyName;
 
     private Long reviewedById;
     private String reviewedByName;
+    private String reviewedByEmail;
 
     private LocalDateTime reviewedAt;
     private MonitoringReviewResult result;
     private String updateProposalId;
+    private Long relationshipChangeProposalId;
+    private String proposalStatus;
     private String note;
 }
