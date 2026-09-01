@@ -33,7 +33,7 @@ public class DebugMongoAiOutput {
                 System.out.println(candidate.getRawAiOutput());
                 System.out.println("===========================");
             }
-            System.exit(0);
+            // System.exit(0);
         };
     }
 }

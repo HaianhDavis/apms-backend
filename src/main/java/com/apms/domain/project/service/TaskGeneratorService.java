@@ -56,7 +56,7 @@ public class TaskGeneratorService {
             case FINANCIAL_INFORMATION:
                 title = "Research Financial Information";
                 description = "Collect and verify available financial information for the target company.";
-                taskType = TaskType.COMPANY_DATA_PREPARATION;
+                taskType = TaskType.FINANCIAL_RESEARCH;
                 break;
             case MANAGEMENT_MEMBERS:
                 title = "Research Company Management Members";

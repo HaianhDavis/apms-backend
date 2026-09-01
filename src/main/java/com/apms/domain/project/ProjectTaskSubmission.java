@@ -57,6 +57,22 @@ public class ProjectTaskSubmission {
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String note;
 
+    @Column(name = "target_item_ids", columnDefinition = "NVARCHAR(MAX)")
+    private String targetItemIds;
+
+    public java.util.List<String> getTargetItemIdList() {
+        if (targetItemIds == null || targetItemIds.isEmpty()) return new java.util.ArrayList<>();
+        return java.util.Arrays.asList(targetItemIds.split(","));
+    }
+
+    public void setTargetItemIdList(java.util.List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            this.targetItemIds = null;
+        } else {
+            this.targetItemIds = String.join(",", ids);
+        }
+    }
+
     @Column(nullable = false)
     private LocalDateTime submittedAt;
 

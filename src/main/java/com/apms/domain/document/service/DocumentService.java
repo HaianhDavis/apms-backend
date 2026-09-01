@@ -146,6 +146,18 @@ public class DocumentService {
     }
 
     @Transactional(readOnly = true)
+    public DocumentDownload getRawDocumentDownload(String rawDocumentId) {
+        RawDocument rawDocument = rawDocumentRepository.findById(rawDocumentId)
+                .orElseThrow(() -> new ResourceNotFoundException("RawDocument not found"));
+
+        if (isPartnerContractRawDocument(rawDocument)) {
+            throw new AccessDeniedException("PARTNER_CONTRACT_DOCUMENT_REQUIRES_TASK_OR_PROFILE_CONTEXT");
+        }
+
+        return toDocumentDownload(rawDocument);
+    }
+
+    @Transactional(readOnly = true)
     public DocumentDownload getPartnerContractTaskDocumentDownload(Long projectId, Long taskId, String rawDocumentId) {
         ProjectTask task = projectTaskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + taskId));
@@ -541,8 +553,9 @@ public class DocumentService {
             throw new com.apms.common.exception.BusinessValidationException("Task does not belong to the specified project");
         }
 
-        if (task.getTaskType() != com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION) {
-            throw new com.apms.common.exception.BusinessValidationException("Task-linked document uploads are only supported for COMPANY_DATA_PREPARATION via this endpoint.");
+        if (task.getTaskType() != com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION
+                && task.getTaskType() != com.apms.common.enums.TaskType.FINANCIAL_RESEARCH) {
+            throw new com.apms.common.exception.BusinessValidationException("Task-linked document uploads are only supported for COMPANY_DATA_PREPARATION or FINANCIAL_RESEARCH via this endpoint.");
         }
 
         com.apms.common.enums.TaskStatus status = task.getStatus();

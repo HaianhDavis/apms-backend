@@ -23,6 +23,8 @@ import com.apms.domain.project.dto.CandidateDraftSummary;
 import com.apms.domain.project.dto.ProposalDraftSummary;
 import com.apms.domain.document.service.DocumentService;
 import com.apms.domain.document.dto.ImportJobResponse;
+import com.apms.domain.financial.dto.FinancialResearchResponse;
+import com.apms.domain.financial.service.FinancialResearchService;
 import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
 import com.apms.domain.profile.repository.mongo.CompanyProfileUpdateProposalRepository;
 import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
@@ -74,6 +76,7 @@ public class ProjectTaskService {
     private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
     private final AuditLogRepository auditLogRepository;
     private final com.apms.domain.project.repository.sql.ProjectMemberRepository projectMemberRepository;
+    private final FinancialResearchService financialResearchService;
 
     @Transactional
     public ProjectTaskResponse createTask(Long projectId, CreateProjectTaskRequest request) {
@@ -427,6 +430,8 @@ public class ProjectTaskService {
         List<ImportJobResponse> rawDocuments;
         if (tType == TaskType.COMPANY_DATA_PREPARATION) {
             rawDocuments = documentService.getTaskImportJobs(projectId, taskId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
+        } else if (tType == TaskType.FINANCIAL_RESEARCH) {
+            rawDocuments = documentService.getTaskImportJobs(projectId, taskId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
         } else if (tType == TaskType.PARTNER_CONTRACT_COLLECTION) {
             rawDocuments = documentService.getPartnerContractTaskDocuments(projectId, taskId, false, org.springframework.data.domain.Pageable.unpaged()).getContent();
         } else {
@@ -489,6 +494,10 @@ public class ProjectTaskService {
 
         // 4. Fetch submissions (needed for both display and draft-linking)
         List<ProjectTaskSubmission> submissionsEntities = submissionRepository.findByProjectTask_Id(taskId);
+        FinancialResearchResponse financialResearch = null;
+        if (tType == TaskType.FINANCIAL_RESEARCH) {
+            financialResearch = financialResearchService.getResearch(projectId, taskId).orElse(null);
+        }
 
         if (tType == TaskType.COMPANY_DATA_PREPARATION) {
             List<CompanyCandidate> candidates = candidateRepository.findByTaskId(taskId);
@@ -575,6 +584,7 @@ public class ProjectTaskService {
                 .candidateDrafts(candidateSummaries)
                 .profileUpdateProposalDrafts(proposalSummaries)
                 .submissions(submissions)
+                .financialResearch(financialResearch)
                 .build();
     }
 
@@ -689,6 +699,14 @@ public class ProjectTaskService {
                     actions.add(TaskAction.EDIT_NEWS_DRAFT);
                     actions.add(TaskAction.UPLOAD_NEWS_IMAGE);
                     actions.add(TaskAction.SUBMIT_NEWS_DRAFTS);
+                } else if (taskType == TaskType.FINANCIAL_RESEARCH) {
+                    actions.add(TaskAction.VIEW_DOCUMENTS);
+                    actions.add(TaskAction.UPLOAD_DOCUMENT);
+                    actions.add(TaskAction.RUN_FINANCIAL_EXTRACTION);
+                    actions.add(TaskAction.VIEW_FINANCIAL_RESEARCH);
+                    actions.add(TaskAction.EDIT_FINANCIAL_RESEARCH);
+                    actions.add(TaskAction.SUBMIT_FINANCIAL_RESEARCH);
+                    actions.add(TaskAction.VERIFY_FINANCIAL_METRIC);
                 } else {
                     // GENERAL_TASK
                     actions.add(TaskAction.SUBMIT_WORK);

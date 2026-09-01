@@ -4,6 +4,8 @@ import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.MonitoringFrequency;
 import com.apms.common.enums.MonitoringReviewResult;
 import com.apms.common.enums.MonitoringStatus;
+import com.apms.common.enums.ProposalOrigin;
+import com.apms.common.enums.SubmissionStatus;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.monitoring.dto.CompanyMonitoringAssignmentRequest;
 import com.apms.domain.monitoring.dto.CompanyMonitoringAssignmentResponse;
@@ -13,6 +15,7 @@ import com.apms.domain.monitoring.model.CompanyMonitoringAssignment;
 import com.apms.domain.monitoring.model.CompanyMonitoringReview;
 import com.apms.domain.monitoring.repository.CompanyMonitoringAssignmentRepository;
 import com.apms.domain.monitoring.repository.CompanyMonitoringReviewRepository;
+import com.apms.domain.monitoring.repository.CompanyRelationshipChangeProposalRepository;
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
@@ -26,8 +29,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -52,6 +59,9 @@ class CompanyMonitoringServiceTest {
 
     @Mock
     private CompanyProfileUpdateProposalRepository proposalRepository;
+
+    @Mock
+    private CompanyRelationshipChangeProposalRepository relationshipChangeProposalRepository;
 
     @Mock
     private AuditLogService auditLogService;
@@ -158,6 +168,7 @@ class CompanyMonitoringServiceTest {
         CompanyProfileUpdateProposal proposal = CompanyProfileUpdateProposal.builder()
                 .id("proposal-1")
                 .companyProfileId("profile-1")
+                .origin(ProposalOrigin.MONITORING)
                 .build();
 
         when(assignmentRepository.findById(100L)).thenReturn(Optional.of(assignment));
@@ -175,8 +186,56 @@ class CompanyMonitoringServiceTest {
         assertEquals(201L, response.getId());
         assertEquals(MonitoringReviewResult.UPDATE_PROPOSED, response.getResult());
         assertEquals("proposal-1", response.getUpdateProposalId());
+        assertEquals(SubmissionStatus.SUBMITTED.name(), response.getProposalStatus());
 
+        verify(proposalRepository).save(proposal);
         verify(auditLogService).log(eq(2L), eq(AuditAction.MONITORING_UPDATE_PROPOSED), eq("CompanyMonitoringAssignment"), eq("100"), anyString());
+    }
+
+    @Test
+    void getMonitoringHistory_ManagerScope_IncludesNoChangeAndMapsProposalStatus() {
+        CompanyMonitoringReview noChange = CompanyMonitoringReview.builder()
+                .id(200L)
+                .assignment(assignment)
+                .companyProfileId("profile-1")
+                .reviewedBy(staff)
+                .reviewedAt(LocalDateTime.now().minusDays(1))
+                .result(MonitoringReviewResult.NO_CHANGE)
+                .note("No changes found")
+                .build();
+
+        CompanyMonitoringReview updateProposed = CompanyMonitoringReview.builder()
+                .id(201L)
+                .assignment(assignment)
+                .companyProfileId("profile-1")
+                .reviewedBy(staff)
+                .reviewedAt(LocalDateTime.now())
+                .result(MonitoringReviewResult.UPDATE_PROPOSED)
+                .updateProposalId("proposal-1")
+                .note("Update proposed")
+                .build();
+
+        CompanyProfileUpdateProposal approvedProposal = CompanyProfileUpdateProposal.builder()
+                .id("proposal-1")
+                .companyProfileId("profile-1")
+                .status(SubmissionStatus.APPROVED)
+                .build();
+
+        when(accountRepository.findById(1L)).thenReturn(Optional.of(manager));
+        when(companyProfileRepository.findByResponsibleManagerId(1L)).thenReturn(List.of(companyProfile));
+        when(reviewRepository.findByCompanyProfileIdIn(eq(Set.of("profile-1")), any(PageRequest.class)))
+                .thenReturn(new PageImpl<>(List.of(updateProposed, noChange), PageRequest.of(0, 10), 2));
+        when(companyProfileRepository.findAllById(Set.of("profile-1"))).thenReturn(List.of(companyProfile));
+        when(proposalRepository.findAllById(List.of("proposal-1"))).thenReturn(List.of(approvedProposal));
+
+        Page<CompanyMonitoringReviewResponse> response = service.getMonitoringHistory(1L, PageRequest.of(0, 10));
+
+        assertEquals(2, response.getTotalElements());
+        assertEquals(MonitoringReviewResult.UPDATE_PROPOSED, response.getContent().get(0).getResult());
+        assertEquals(SubmissionStatus.APPROVED.name(), response.getContent().get(0).getProposalStatus());
+        assertEquals(MonitoringReviewResult.NO_CHANGE, response.getContent().get(1).getResult());
+        assertNull(response.getContent().get(1).getProposalStatus());
+        verify(reviewRepository).findByCompanyProfileIdIn(eq(Set.of("profile-1")), any(PageRequest.class));
     }
 
     @Test

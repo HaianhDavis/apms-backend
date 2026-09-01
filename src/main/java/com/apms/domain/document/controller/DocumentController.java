@@ -92,13 +92,30 @@ public class DocumentController {
     }
 
     @GetMapping("/projects/{projectId}/documents/{rawDocumentId}/download")
-    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_OWNER') or (hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER'))")
     public ResponseEntity<Resource> downloadDocument(
             @PathVariable Long projectId,
             @PathVariable String rawDocumentId,
             @RequestParam(defaultValue = "false") boolean download) {
 
         DocumentService.DocumentDownload file = documentService.getDocumentDownload(projectId, rawDocumentId);
+        ContentDisposition disposition = (download ? ContentDisposition.attachment() : ContentDisposition.inline())
+                .filename(file.fileName())
+                .build();
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(file.mimeType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
+                .body(file.resource());
+    }
+
+    @GetMapping("/documents/{rawDocumentId}/download")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_OWNER') or hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<Resource> downloadRawDocument(
+            @PathVariable String rawDocumentId,
+            @RequestParam(defaultValue = "false") boolean download) {
+
+        DocumentService.DocumentDownload file = documentService.getRawDocumentDownload(rawDocumentId);
         ContentDisposition disposition = (download ? ContentDisposition.attachment() : ContentDisposition.inline())
                 .filename(file.fileName())
                 .build();

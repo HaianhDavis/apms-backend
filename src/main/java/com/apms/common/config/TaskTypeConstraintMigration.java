@@ -36,7 +36,7 @@ public class TaskTypeConstraintMigration implements CommandLineRunner {
                 jdbcTemplate.execute("ALTER TABLE project_tasks DROP CONSTRAINT [" + constraintName + "]");
             }
 
-            // Re-create with all task types including COMPANY_NEWS_RESEARCH
+            // Re-create with all task types including FINANCIAL_RESEARCH
             String newConstraint =
                 "ALTER TABLE project_tasks ADD CONSTRAINT CK_project_tasks_task_type " +
                 "CHECK (task_type IN (" +
@@ -46,10 +46,20 @@ public class TaskTypeConstraintMigration implements CommandLineRunner {
                 "'ROLE_EVALUATION'," +
                 "'COMPANY_MEMBER_RESEARCH'," +
                 "'COMPANY_NEWS_RESEARCH'," +
+                "'FINANCIAL_RESEARCH'," +
                 "'PARTNER_CONTRACT_COLLECTION'" +
                 "))";
             jdbcTemplate.execute(newConstraint);
-            log.info("Successfully re-created CHECK constraint CK_project_tasks_task_type with COMPANY_NEWS_RESEARCH");
+            log.info("Successfully re-created CHECK constraint CK_project_tasks_task_type with FINANCIAL_RESEARCH");
+
+            // Migrate existing tasks
+            int updated = jdbcTemplate.update(
+                "UPDATE project_tasks SET task_type = 'FINANCIAL_RESEARCH' " +
+                "WHERE task_type = 'COMPANY_DATA_PREPARATION' AND title = 'Research Financial Information'"
+            );
+            if (updated > 0) {
+                log.info("Migrated {} existing financial research tasks to FINANCIAL_RESEARCH type", updated);
+            }
 
         } catch (Exception e) {
             log.warn("TaskType constraint migration skipped or failed: {}", e.getMessage());

@@ -17,6 +17,16 @@ public interface ProjectTaskRepository extends JpaRepository<ProjectTask, Long>,
     
     int countByProjectIdAndStatusIn(Long projectId, java.util.Collection<com.apms.common.enums.TaskStatus> statuses);
     java.util.List<ProjectTask> findByProjectIdAndTaskTypeAndTargetCompanyProfileIdIsNull(Long projectId, com.apms.common.enums.TaskType taskType);
+    
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"project"})
+    java.util.Optional<ProjectTask> findWithProjectById(Long id);
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"project"})
+    java.util.List<ProjectTask> findByTargetCompanyProfileId(String targetCompanyProfileId);
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"project"})
+    java.util.List<ProjectTask> findByProject_TargetCompanyProfileId(String targetCompanyProfileId);
+
     boolean existsByProjectIdAndAssignedToAccountIdAndStatusNotIn(Long projectId, Long assignedToAccountId, java.util.Collection<com.apms.common.enums.TaskStatus> statuses);
 
     void deleteByProjectId(Long projectId);

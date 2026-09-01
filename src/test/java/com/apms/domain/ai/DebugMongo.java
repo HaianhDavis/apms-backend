@@ -49,7 +49,7 @@ public class DebugMongo {
                     System.out.println("industries NOT IN FieldResults!");
                 }
             }
-            System.exit(0);
+            // System.exit(0);
         };
     }
 }

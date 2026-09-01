@@ -74,6 +74,10 @@ public class ProjectTaskSubmissionService {
     @org.springframework.context.annotation.Lazy
     private com.apms.domain.profile.service.CompanyProfileUpdateProposalService proposalService;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.apms.domain.financial.service.FinancialResearchService financialResearchService;
+
     @Transactional
     public ProjectTaskSubmissionResponse submitTask(Long projectId, Long taskId, CreateProjectTaskSubmissionRequest request) {
         Project project = projectRepository.findById(projectId)
@@ -133,6 +137,9 @@ public class ProjectTaskSubmissionService {
             } else if ("CompanyProfileUpdateProposal".equals(request.getTargetEntityType())) {
                 com.apms.domain.profile.dto.CompanyProfileUpdateProposalResponse draft = proposalService.submitProposal(request.getTargetEntityId(), submitter.getId());
                 revision = draft.getRevisionNumber();
+            } else if ("FinancialResearch".equals(request.getTargetEntityType())) {
+                financialResearchService.submitForReview(projectId, taskId, submitter.getId(), request.getTargetItemIds());
+                revision = null; // FinancialResearch does not use revision numbers
             }
         }
 
@@ -169,8 +176,8 @@ public class ProjectTaskSubmissionService {
                 .note(request.getNote())
                 .submittedAt(now)
                 .submittedRevisionNumber(revision)
-                .submittedAt(LocalDateTime.now())
                 .build();
+        submission.setTargetItemIdList(request.getTargetItemIds());
 
         ProjectTaskSubmission finalSubmission = submission;
         final Integer finalRevision = revision;
@@ -677,6 +684,7 @@ public class ProjectTaskSubmissionService {
                 .submissionType(sub.getSubmissionType())
                 .targetEntityType(sub.getTargetEntityType())
                 .targetEntityId(sub.getTargetEntityId())
+                .targetItemIds(sub.getTargetItemIdList())
                 .status(sub.getStatus())
                 .note(sub.getNote())
                 .submittedAt(sub.getSubmittedAt())
