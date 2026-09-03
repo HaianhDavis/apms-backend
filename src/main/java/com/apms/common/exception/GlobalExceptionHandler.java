@@ -23,6 +23,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.error(ex.getMessage()));
     }
 
+    @ExceptionHandler(BusinessConflictException.class)
+    public ResponseEntity<ApiResponse<Void>> handleBusinessConflict(BusinessConflictException ex) {
+        log.warn("Business conflict error: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(ApiResponse.error(ex.getMessage()));
+    }
+
     @ExceptionHandler(BusinessValidationException.class)
     public ResponseEntity<java.util.Map<String, Object>> handleBusinessValidation(BusinessValidationException ex) {
         log.warn("Business validation error: [{}] {}", ex.getErrorCode(), ex.getMessage());

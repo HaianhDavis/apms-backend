@@ -29,6 +29,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.HashMap;
@@ -181,6 +182,16 @@ public class CompanyMonitoringService {
                 throw new IllegalArgumentException("Update proposal must come from company monitoring");
             }
 
+            List<CompanyProfileUpdateProposal> existingSubmitted = proposalRepository.findByCompanyProfileIdAndStatusIn(
+                    assignment.getCompanyProfileId(),
+                    List.of(SubmissionStatus.SUBMITTED, SubmissionStatus.IN_REVIEW)
+            );
+            boolean hasOtherSubmitted = existingSubmitted.stream()
+                    .anyMatch(p -> p.getOrigin() == ProposalOrigin.MONITORING && !p.getId().equals(request.getUpdateProposalId()));
+            if (hasOtherSubmitted) {
+                throw new com.apms.common.exception.BusinessConflictException("A monitoring proposal is already awaiting manager review. Cancel the current proposal before submitting a new one.");
+            }
+
             proposal.setStatus(SubmissionStatus.SUBMITTED);
             proposal.setLastSubmittedAt(now);
             proposal.setLastSubmittedByAccountId(currentStaffId);
@@ -230,6 +241,8 @@ public class CompanyMonitoringService {
         Page<CompanyMonitoringReview> reviews;
         if (currentUser.getRoles().contains(SystemRole.SYSTEM_ADMIN)) {
             reviews = reviewRepository.findAll(effectivePageable);
+        } else if (currentUser.getRoles().contains(SystemRole.BUSINESS_DEVELOPMENT_STAFF)) {
+            reviews = reviewRepository.findByReviewedById(currentUserId, effectivePageable);
         } else {
             List<CompanyProfile> managedProfiles = companyProfileRepository.findByResponsibleManagerId(currentUserId);
             Set<String> managedCompanyKeys = managedProfiles.stream()
@@ -488,18 +501,26 @@ public class CompanyMonitoringService {
         return "Unknown Company";
     }
 
-    private String calculateDisplayStatus(CompanyMonitoringAssignment assignment) {
+    String calculateDisplayStatus(CompanyMonitoringAssignment assignment) {
+        if (assignment == null) {
+            return "ON_SCHEDULE";
+        }
         if (assignment.getStatus() == MonitoringStatus.PAUSED) {
             return "PAUSED";
         }
-        LocalDateTime now = LocalDateTime.now();
-        if (now.isAfter(assignment.getNextReviewAt())) {
-            return "OVERDUE";
-        } else if (now.toLocalDate().isEqual(assignment.getNextReviewAt().toLocalDate())) {
-            return "DUE";
-        } else {
-            return "UP_TO_DATE";
+        if (assignment.getNextReviewAt() == null) {
+            return "ON_SCHEDULE";
         }
+        LocalDate today = LocalDate.now();
+        LocalDate nextReviewDate = assignment.getNextReviewAt().toLocalDate();
+
+        if (today.isAfter(nextReviewDate)) {
+            return "OVERDUE";
+        }
+        if (today.isEqual(nextReviewDate)) {
+            return "DUE";
+        }
+        return "ON_SCHEDULE";
     }
 
     public void enforceResponsibleManager(CompanyProfile profile, Account manager) {

@@ -2,13 +2,17 @@ package com.apms.domain.profile.dto;
 
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.common.enums.ProfileVisibility;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.util.List;
 
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class ProfileResponse {
     private String id;
     private String companyId;
@@ -32,5 +36,9 @@ public class ProfileResponse {
     private List<String> tags;
     private CompanyProfile.Metadata metadata;
     private String version;
+    private Integer majorVersion;
+    private Integer revision;
+    private String versionLabel;
     private Long responsibleManagerId;
+    private Boolean canEditProfile;
 }

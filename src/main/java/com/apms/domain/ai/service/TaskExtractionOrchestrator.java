@@ -262,9 +262,14 @@ public class TaskExtractionOrchestrator {
 
             // 4. Create Candidate (flat keys stored in MongoDB — frontend handles key mapping)
             LocalDateTime now = LocalDateTime.now();
+            int nextSeq = candidateService.getNextDraftSequence(taskId);
+            String draftName = "Draft " + nextSeq;
+
             CompanyCandidate candidate = CompanyCandidate.builder()
                     .projectId(String.valueOf(projectId))
                     .taskId(taskId)
+                    .draftName(draftName)
+                    .draftSequence(nextSeq)
                     .sourceDocumentIds(rawDocumentIds)
                     .status(CandidateStatus.DRAFT)
                     .identity(mapIdentity(output.getExtractedData(), project))

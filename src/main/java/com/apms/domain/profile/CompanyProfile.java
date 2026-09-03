@@ -119,8 +119,12 @@ public class CompanyProfile {
 
     private Metadata metadata;
 
+    private Integer majorVersion;
+
+    private Integer revision;
+
     @Builder.Default
-    private String version = "1.0";
+    private String version = "1.00";
 
     // ─────────────────────────────────────────────────────────────
     // Nested Classes (mirrors or extends Candidate data structures)
@@ -248,26 +252,15 @@ public class CompanyProfile {
     }
 
     public void incrementMinorVersion() {
-        if (this.version == null) this.version = "1.0";
-        try {
-            String[] parts = this.version.split("\\.");
-            int major = Integer.parseInt(parts[0]);
-            int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
-            this.version = major + "." + (minor + 1);
-        } catch (Exception e) {
-            this.version = this.version + ".1";
-        }
+        com.apms.domain.profile.service.CompanyProfileVersionHelper.applyNextRevision(this);
     }
 
     public void incrementMajorVersion() {
-        if (this.version == null) this.version = "1.0";
-        try {
-            String[] parts = this.version.split("\\.");
-            int major = Integer.parseInt(parts[0]);
-            this.version = (major + 1) + ".0";
-        } catch (Exception e) {
-            this.version = "2.0";
-        }
+        com.apms.domain.profile.service.CompanyProfileVersionHelper.applyNextMajor(this);
+    }
+
+    public String getVersionLabel() {
+        return com.apms.domain.profile.service.CompanyProfileVersionHelper.getVersionLabel(this);
     }
 
 

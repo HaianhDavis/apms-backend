@@ -227,6 +227,96 @@ public class ProjectTaskSubmissionService {
         return toResponse(submission);
     }
 
+    @Transactional
+    public void cancelSubmission(Long projectId, Long taskId, Long submissionId) {
+        ProjectTask task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
+
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new IllegalArgumentException("Task does not belong to project");
+        }
+
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
+
+        boolean isStaff = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        boolean isAdmin = hasRole(currentUser, SystemRole.SYSTEM_ADMIN);
+
+        // Ownership check: staff must be assigned to the task (or system admin)
+        if (isStaff && !isAdmin) {
+            if (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(currentUser.getId())) {
+                throw new AccessDeniedException("Staff can only cancel submissions for tasks assigned to them");
+            }
+        }
+
+        // Find target submission
+        ProjectTaskSubmission submission;
+        if (submissionId != null) {
+            submission = submissionRepository.findById(submissionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Submission not found"));
+            if (!submission.getProjectTask().getId().equals(taskId)) {
+                throw new IllegalArgumentException("Submission does not belong to specified task");
+            }
+        } else {
+            submission = submissionRepository.findByProjectTask_Id(taskId).stream()
+                    .filter(s -> s.getStatus() == SubmissionStatus.IN_REVIEW)
+                    .findFirst()
+                    .orElseThrow(() -> new ResourceNotFoundException("No active pending submission found for this task"));
+        }
+
+        // Only submitting staff (or admin) can cancel
+        if (isStaff && !isAdmin && !submission.getSubmittedByAccount().getId().equals(currentUser.getId())) {
+            throw new AccessDeniedException("Only the submitting staff member can cancel this submission");
+        }
+
+        // Race condition check: If Manager already reviewed it (Approved, Rejected, or Revision Requested)
+        if (submission.getStatus() == SubmissionStatus.APPROVED
+                || submission.getStatus() == SubmissionStatus.REJECTED
+                || submission.getStatus() == SubmissionStatus.REVISION_REQUESTED
+                || submission.getStatus() == SubmissionStatus.CHANGES_REQUESTED
+                || task.getStatus() == TaskStatus.DONE) {
+            throw new com.apms.common.exception.BusinessConflictException(
+                    "This submission has already been reviewed by the Manager and can no longer be cancelled.");
+        }
+
+        if (task.getStatus() != TaskStatus.IN_REVIEW || submission.getStatus() != SubmissionStatus.IN_REVIEW) {
+            throw new com.apms.common.exception.BusinessConflictException(
+                    "Only pending submissions waiting for Manager review can be cancelled.");
+        }
+
+        // Restore target entity status so Staff can continue editing
+        if ("CompanyCandidate".equals(submission.getTargetEntityType()) && StringUtils.hasText(submission.getTargetEntityId())) {
+            candidateService.cancelCandidateSubmission(submission.getTargetEntityId());
+        } else if ("CompanyProfileUpdateProposal".equals(submission.getTargetEntityType()) && StringUtils.hasText(submission.getTargetEntityId())) {
+            proposalService.cancelProposalSubmission(submission.getTargetEntityId());
+        } else if ("CompanyMemberResearchDraft".equals(submission.getTargetEntityType()) && StringUtils.hasText(submission.getTargetEntityId())) {
+            if (companyMemberResearchService != null) {
+                companyMemberResearchService.cancelDraftSubmission(submission.getTargetEntityId());
+            }
+        }
+
+        Long subId = submission.getId();
+
+        // Physically delete the pending review envelope
+        submissionRepository.delete(submission);
+        submissionRepository.flush();
+
+        // Return task to IN_PROGRESS
+        task.setStatus(TaskStatus.IN_PROGRESS);
+        task.setCompletedAt(null);
+        taskRepository.saveAndFlush(task);
+
+        // Preserved auditability without creating CompanyProfileVersion
+        auditLogService.log(
+                currentUser.getId(),
+                AuditAction.PROJECT_TASK_SUBMISSION_CANCELLED,
+                "ProjectTaskSubmission",
+                String.valueOf(subId),
+                "Staff cancelled pending submission for task " + taskId
+        );
+        log.info("Cancelled pending submission {} for task {}, status returned to IN_PROGRESS", subId, taskId);
+    }
+
     @Transactional(readOnly = true)
     public Page<ProjectTaskSubmissionResponse> getSubmissions(Long projectId, Long taskId, Pageable pageable) {
         UserDetailsImpl currentUser = getCurrentUser();
@@ -681,6 +771,8 @@ public class ProjectTaskSubmissionService {
                 .projectTaskId(sub.getProjectTask().getId())
                 .projectId(sub.getProject().getId())
                 .submittedByUserId(sub.getSubmittedByAccount().getId())
+                .submittedByName(sub.getSubmittedByAccount() != null ? sub.getSubmittedByAccount().getEmail() : null)
+                .submittedRevisionNumber(sub.getSubmittedRevisionNumber())
                 .submissionType(sub.getSubmissionType())
                 .targetEntityType(sub.getTargetEntityType())
                 .targetEntityId(sub.getTargetEntityId())

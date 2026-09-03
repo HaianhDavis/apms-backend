@@ -41,4 +41,10 @@ public class FieldEvidence {
     private Boolean conflict = false;
 
     private String note;
+
+    private String fieldLabel;
+    private String evidenceImageId;
+    private String evidenceImageUrl;
+    private String evidenceSource;
+    private String evidenceScript;
 }

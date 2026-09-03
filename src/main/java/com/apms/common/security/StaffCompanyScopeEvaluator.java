@@ -96,6 +96,30 @@ public class StaffCompanyScopeEvaluator {
         return isCompanyInScope(profile.getId(), user.getId());
     }
 
+    /**
+     * Authoritative check for whether the current user can directly edit/manage the CompanyProfile.
+     * Allowed ONLY for:
+     * - SYSTEM_ADMIN
+     * - BUSINESS_DEVELOPMENT_MANAGER where profile.getResponsibleManagerId() == user.getId()
+     * Denied for:
+     * - STAFF
+     * - OWNER
+     * - Unassigned profiles (responsibleManagerId == null) for any Manager
+     * - Managers who are not the assigned responsible manager
+     */
+    public boolean canManageCompanyProfile(String companyIdOrProfileId) {
+        UserDetailsImpl user = currentUser();
+        if (user == null || !StringUtils.hasText(companyIdOrProfileId)) return false;
+        if (hasRole(user, SystemRole.SYSTEM_ADMIN)) return true;
+        if (!hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) return false;
+
+        CompanyProfile profile = resolveProfile(companyIdOrProfileId);
+        if (profile == null) return false;
+        if (!"APPROVED".equals(profile.getReviewStatus())) return false;
+
+        return profile.getResponsibleManagerId() != null && profile.getResponsibleManagerId().equals(user.getId());
+    }
+
     // ─────────────────────────────────────────────
     // Project-level guards
     // ─────────────────────────────────────────────
@@ -132,8 +156,15 @@ public class StaffCompanyScopeEvaluator {
         if (!isStaff(user)) return true;
         if (!StringUtils.hasText(proposalId)) return false;
         return proposalRepository.findById(proposalId)
-                .map(CompanyProfileUpdateProposal::getProjectId)
-                .map(projectId -> projectRepository.existsByIdAndMembersAccountId(projectId, user.getId()))
+                .map(proposal -> {
+                    if (proposal.getSubmittedBy() != null && proposal.getSubmittedBy().equals(user.getId())) {
+                        return true;
+                    }
+                    if (proposal.getProjectId() != null) {
+                        return projectRepository.existsByIdAndMembersAccountId(proposal.getProjectId(), user.getId());
+                    }
+                    return false;
+                })
                 .orElse(false);
     }
 

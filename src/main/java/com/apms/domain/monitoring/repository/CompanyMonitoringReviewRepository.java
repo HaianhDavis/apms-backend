@@ -21,4 +21,7 @@ public interface CompanyMonitoringReviewRepository extends JpaRepository<Company
 
     @EntityGraph(attributePaths = {"assignment", "reviewedBy"})
     Page<CompanyMonitoringReview> findByCompanyProfileIdIn(Collection<String> companyProfileIds, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"assignment", "reviewedBy"})
+    Page<CompanyMonitoringReview> findByReviewedById(Long reviewedById, Pageable pageable);
 }

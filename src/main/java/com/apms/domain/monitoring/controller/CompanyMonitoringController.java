@@ -64,7 +64,7 @@ public class CompanyMonitoringController {
     }
 
     @GetMapping("/reviews")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_MANAGER') or hasRole('BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<Page<CompanyMonitoringReviewResponse>> getMonitoringHistory(
             @AuthenticationPrincipal UserDetailsImpl currentUser,
             Pageable pageable) {

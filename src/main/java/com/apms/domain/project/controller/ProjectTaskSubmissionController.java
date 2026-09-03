@@ -94,4 +94,23 @@ public class ProjectTaskSubmissionController {
         submissionService.reopenField(projectId, taskId, submissionId, fieldPath, request);
         return ResponseEntity.ok().build();
     }
+
+    @PostMapping("/{submissionId}/cancel")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<com.apms.common.response.ApiResponse<Void>> cancelSubmission(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable Long submissionId) {
+        submissionService.cancelSubmission(projectId, taskId, submissionId);
+        return ResponseEntity.ok(com.apms.common.response.ApiResponse.success(null, "Submission cancelled successfully"));
+    }
+
+    @PostMapping("/cancel")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<com.apms.common.response.ApiResponse<Void>> cancelTaskSubmission(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId) {
+        submissionService.cancelSubmission(projectId, taskId, null);
+        return ResponseEntity.ok(com.apms.common.response.ApiResponse.success(null, "Submission cancelled successfully"));
+    }
 }

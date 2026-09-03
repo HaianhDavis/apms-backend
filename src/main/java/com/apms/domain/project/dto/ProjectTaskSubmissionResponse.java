@@ -14,6 +14,8 @@ public class ProjectTaskSubmissionResponse {
     private Long projectTaskId;
     private Long projectId;
     private Long submittedByUserId;
+    private String submittedByName;
+    private Integer submittedRevisionNumber;
     private SubmissionType submissionType;
     private String targetEntityType;
     private String targetEntityId;

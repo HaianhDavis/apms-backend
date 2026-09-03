@@ -38,4 +38,17 @@ public class MongoConfig {
     public MongoTransactionManager mongoTransactionManager(MongoDatabaseFactory dbFactory) {
         return new MongoTransactionManager(dbFactory);
     }
+
+    @Bean
+    public org.springframework.data.mongodb.core.convert.MappingMongoConverter mappingMongoConverter(
+            MongoDatabaseFactory factory,
+            org.springframework.data.mongodb.core.mapping.MongoMappingContext context,
+            org.springframework.data.mongodb.core.convert.MongoCustomConversions conversions
+    ) {
+        org.springframework.data.mongodb.core.convert.DbRefResolver dbRefResolver = new org.springframework.data.mongodb.core.convert.DefaultDbRefResolver(factory);
+        org.springframework.data.mongodb.core.convert.MappingMongoConverter mappingConverter = new org.springframework.data.mongodb.core.convert.MappingMongoConverter(dbRefResolver, context);
+        mappingConverter.setCustomConversions(conversions);
+        mappingConverter.setMapKeyDotReplacement("#");
+        return mappingConverter;
+    }
 }

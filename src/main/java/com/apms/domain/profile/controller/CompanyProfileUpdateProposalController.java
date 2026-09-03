@@ -7,6 +7,8 @@ import com.apms.domain.profile.dto.CompanyProfileUpdateProposalResponse;
 import com.apms.domain.profile.dto.CreateCompanyProfileUpdateProposalRequest;
 import com.apms.domain.profile.service.CompanyProfileUpdateProposalService;
 import com.apms.security.UserDetailsImpl;
+import com.apms.security.UserDetailsImpl;
+import com.apms.domain.document.service.StorageService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -21,6 +23,7 @@ public class CompanyProfileUpdateProposalController {
 
     private final CompanyProfileUpdateProposalService proposalService;
     private final ExtractionMergeService mergeService;
+    private final StorageService storageService;
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/profile-update-proposals")
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessProject(#projectId))")
@@ -64,16 +67,28 @@ public class CompanyProfileUpdateProposalController {
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<CompanyProfileUpdateProposalResponse> approveProposal(
             @PathVariable String id,
+            @RequestBody(required = false) com.apms.domain.profile.dto.ReviewDecisionRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-        return ResponseEntity.ok(proposalService.approveMonitoringProposal(id, currentUser.getId()));
+        String comment = request != null ? request.getReviewComment() : null;
+        return ResponseEntity.ok(proposalService.approveMonitoringProposal(id, currentUser.getId(), comment));
     }
 
     @PatchMapping("/profile-update-proposals/{id}/reject")
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<CompanyProfileUpdateProposalResponse> rejectProposal(
             @PathVariable String id,
+            @RequestBody(required = false) com.apms.domain.profile.dto.ReviewDecisionRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
-        return ResponseEntity.ok(proposalService.rejectMonitoringProposal(id, currentUser.getId()));
+        String comment = request != null ? request.getReviewComment() : null;
+        return ResponseEntity.ok(proposalService.rejectMonitoringProposal(id, currentUser.getId(), comment));
+    }
+
+    @PatchMapping("/profile-update-proposals/{id}/withdraw")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_STAFF') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<CompanyProfileUpdateProposalResponse> withdrawProposal(
+            @PathVariable String id,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(proposalService.withdrawMonitoringProposal(id, currentUser.getId()));
     }
 
     @PostMapping("/profile-update-proposals/monitoring")
@@ -88,5 +103,35 @@ public class CompanyProfileUpdateProposalController {
     public ResponseEntity<java.util.List<CompanyProfileUpdateProposalResponse>> getPendingProposals(
             @PathVariable String companyProfileId) {
         return ResponseEntity.ok(proposalService.getPendingProposalsByCompany(companyProfileId));
+    }
+
+    @PostMapping("/profile-update-proposals/monitoring/evidence/upload")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_STAFF') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<java.util.Map<String, String>> uploadEvidenceImage(
+            @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        String storedId = storageService.store(file);
+        return ResponseEntity.ok(java.util.Map.of(
+                "evidenceImageId", storedId,
+                "originalFileName", file.getOriginalFilename() != null ? file.getOriginalFilename() : "unknown"
+        ));
+    }
+
+    @GetMapping("/profile-update-proposals/monitoring/evidence/{id}")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_STAFF') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<org.springframework.core.io.Resource> getEvidenceImage(@PathVariable String id) {
+        try {
+            java.nio.file.Path filePath = storageService.load(id);
+            org.springframework.core.io.Resource resource = storageService.loadAsResource(id);
+            String contentType = java.nio.file.Files.probeContentType(filePath);
+            if (contentType == null) {
+                contentType = org.springframework.http.MediaType.APPLICATION_OCTET_STREAM_VALUE;
+            }
+            return ResponseEntity.ok()
+                    .contentType(org.springframework.http.MediaType.parseMediaType(contentType))
+                    .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + resource.getFilename() + "\"")
+                    .body(resource);
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 }

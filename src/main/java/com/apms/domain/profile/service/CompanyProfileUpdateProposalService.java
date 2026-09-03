@@ -3,6 +3,7 @@ package com.apms.domain.profile.service;
 import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.SubmissionStatus;
 import com.apms.common.enums.SystemRole;
+import com.apms.common.exception.BusinessConflictException;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.profile.CompanyProfile;
@@ -37,6 +38,9 @@ public class CompanyProfileUpdateProposalService {
     private final FieldApprovalService fieldApprovalService;
     private final com.apms.domain.graph.service.GraphService graphService;
     private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
+    private final com.apms.domain.user.repository.sql.UserProfileRepository userProfileRepository;
+    private final CompanyProfileVersionService versionService;
+    private final com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository versionRepository;
 
     @Transactional
     public CompanyProfileUpdateProposalResponse createProposal(Long projectId, Long taskId, CreateCompanyProfileUpdateProposalRequest request) {
@@ -95,6 +99,16 @@ public class CompanyProfileUpdateProposalService {
             throw new ResourceNotFoundException("Target CompanyProfile does not exist");
         }
 
+        java.util.List<CompanyProfileUpdateProposal> existingSubmitted = proposalRepository.findByCompanyProfileIdAndStatusIn(
+                request.getCompanyProfileId(),
+                java.util.List.of(SubmissionStatus.SUBMITTED, SubmissionStatus.IN_REVIEW)
+        );
+        boolean hasActiveSubmitted = existingSubmitted.stream()
+                .anyMatch(p -> p.getOrigin() == com.apms.common.enums.ProposalOrigin.MONITORING);
+        if (hasActiveSubmitted) {
+            throw new BusinessConflictException("A monitoring proposal is already awaiting manager review. Cancel the current proposal before submitting a new one.");
+        }
+
         CompanyProfileUpdateProposal proposal = CompanyProfileUpdateProposal.builder()
                 .origin(com.apms.common.enums.ProposalOrigin.MONITORING)
                 .companyProfileId(request.getCompanyProfileId())
@@ -110,6 +124,8 @@ public class CompanyProfileUpdateProposalService {
                 .proposedCompliance(request.getProposedCompliance())
                 .proposedCompanyMembers(request.getProposedCompanyMembers())
                 .proposedRelationship(request.getProposedRelationship())
+                .changedFieldPaths(request.getChangedFieldPaths())
+                .fieldEvidence(request.getFieldEvidence())
                 .sourceDocumentIds(request.getSourceDocumentIds())
                 .extractionId(request.getExtractionId())
                 .changeSummary(request.getChangeSummary())
@@ -124,6 +140,69 @@ public class CompanyProfileUpdateProposalService {
         return toResponse(proposal);
     }
 
+    @Transactional
+    public CompanyProfileUpdateProposalResponse withdrawMonitoringProposal(String id, Long currentUserId) {
+        CompanyProfileUpdateProposal proposal = proposalRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Proposal not found"));
+
+        if (proposal.getOrigin() != com.apms.common.enums.ProposalOrigin.MONITORING) {
+            throw new com.apms.common.exception.BusinessValidationException("Only MONITORING proposals can be withdrawn via this endpoint");
+        }
+
+        if (proposal.getStatus() == SubmissionStatus.APPROVED ||
+            proposal.getStatus() == SubmissionStatus.REJECTED ||
+            proposal.getStatus() == SubmissionStatus.WITHDRAWN) {
+            throw new BusinessConflictException("Proposal is already in terminal status: " + proposal.getStatus());
+        }
+
+        UserDetailsImpl currentUser = getCurrentUser();
+        boolean isAdmin = currentUser != null && hasRole(currentUser, SystemRole.SYSTEM_ADMIN);
+        if (!isAdmin && (proposal.getSubmittedBy() == null || !proposal.getSubmittedBy().equals(currentUserId))) {
+            throw new AccessDeniedException("Only the submitting staff member can withdraw this proposal");
+        }
+
+        proposal.setStatus(SubmissionStatus.WITHDRAWN);
+        proposal = proposalRepository.save(proposal);
+
+        auditLogService.log(currentUserId, AuditAction.PROFILE_UPDATE_PROPOSAL_REJECTED, "CompanyProfileUpdateProposal", proposal.getId(), "Monitoring Proposal withdrawn by submitter");
+
+        return toResponse(proposal);
+    }
+
+    @Transactional
+    public void cancelProposalSubmission(String id) {
+        CompanyProfileUpdateProposal proposal = proposalRepository.findById(id).orElse(null);
+        if (proposal != null && proposal.getStatus() == SubmissionStatus.IN_REVIEW) {
+            boolean hadManagerReview = proposal.getFieldApprovals() != null && proposal.getFieldApprovals().stream()
+                    .anyMatch(f -> f.getReviewedByAccountId() != null
+                            || f.getStatus() == com.apms.common.enums.FieldApprovalStatus.APPROVED
+                            || f.getStatus() == com.apms.common.enums.FieldApprovalStatus.REVISION_REQUIRED
+                            || f.getStatus() == com.apms.common.enums.FieldApprovalStatus.REJECTED);
+
+            if (hadManagerReview) {
+                proposal.setStatus(SubmissionStatus.REVISION_REQUESTED);
+            } else {
+                proposal.setStatus(SubmissionStatus.DRAFT);
+                proposal.setFieldApprovals(new java.util.ArrayList<>());
+            }
+            proposalRepository.save(proposal);
+        }
+    }
+
+    private Object extractValueByPath(java.util.Map<String, Object> map, String path) {
+        if (map == null || path == null) return null;
+        String[] parts = path.split("\\.");
+        Object current = map;
+        for (String part : parts) {
+            if (current instanceof java.util.Map) {
+                current = ((java.util.Map<?, ?>) current).get(part);
+            } else {
+                return null;
+            }
+        }
+        return current;
+    }
+
     private <T> T updateObject(com.fasterxml.jackson.databind.ObjectMapper mapper, T existing, Object proposed, Class<T> clazz) {
         if (proposed == null) return existing;
         if (existing == null) return mapper.convertValue(proposed, clazz);
@@ -135,8 +214,28 @@ public class CompanyProfileUpdateProposalService {
         }
     }
 
+    private java.util.Map<String, Object> filterMapByPaths(java.util.Map<String, Object> map, String prefix, java.util.List<String> allowedPaths) {
+        if (map == null || allowedPaths == null || allowedPaths.isEmpty()) return map;
+        java.util.Map<String, Object> filtered = new java.util.HashMap<>();
+        for (java.util.Map.Entry<String, Object> entry : map.entrySet()) {
+            String fullPath = prefix.isEmpty() ? entry.getKey() : prefix + "." + entry.getKey();
+            if (allowedPaths.contains(fullPath)) {
+                filtered.put(entry.getKey(), entry.getValue());
+            } else if (entry.getValue() instanceof java.util.Map) {
+                boolean hasChild = allowedPaths.stream().anyMatch(p -> p.startsWith(fullPath + "."));
+                if (hasChild) {
+                    java.util.Map<String, Object> childFiltered = filterMapByPaths((java.util.Map<String, Object>) entry.getValue(), fullPath, allowedPaths);
+                    if (!childFiltered.isEmpty()) {
+                        filtered.put(entry.getKey(), childFiltered);
+                    }
+                }
+            }
+        }
+        return filtered;
+    }
+
     @Transactional
-    public CompanyProfileUpdateProposalResponse approveMonitoringProposal(String id, Long approverId) {
+    public CompanyProfileUpdateProposalResponse approveMonitoringProposal(String id, Long approverId, String reviewComment) {
         CompanyProfileUpdateProposal proposal = proposalRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Proposal not found"));
 
@@ -144,18 +243,57 @@ public class CompanyProfileUpdateProposalService {
             throw new com.apms.common.exception.BusinessValidationException("Only MONITORING proposals can be approved via this endpoint");
         }
 
+        if (proposal.getStatus() == SubmissionStatus.APPROVED) {
+            return toResponse(proposal);
+        }
+
         if (proposal.getStatus() != SubmissionStatus.DRAFT && proposal.getStatus() != SubmissionStatus.SUBMITTED && proposal.getStatus() != SubmissionStatus.IN_REVIEW) {
-            throw new com.apms.common.exception.BusinessValidationException("Proposal is already processed");
+            throw new com.apms.common.exception.BusinessValidationException("Proposal is already in terminal status: " + proposal.getStatus());
+        }
+
+        if (versionRepository.existsByCreatedFromProposalId(proposal.getId())) {
+            proposal.setStatus(SubmissionStatus.APPROVED);
+            proposal.setReviewedBy(approverId);
+            if (reviewComment != null) {
+                proposal.setReviewComment(reviewComment);
+            }
+            proposal = proposalRepository.save(proposal);
+            return toResponse(proposal);
         }
 
         CompanyProfile companyProfile = companyProfileRepository.findById(proposal.getCompanyProfileId())
                 .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found"));
 
+        java.util.Map<String, Object> beforeSnapshot = versionService.createSnapshotMap(companyProfile);
+
         com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
         mapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         mapper.registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
 
-        companyProfile.setIdentity(updateObject(mapper, companyProfile.getIdentity(), proposal.getProposedIdentity(), CompanyProfile.Identity.class));
+        java.util.Map<String, Object> propIdentity = proposal.getProposedIdentity();
+        java.util.Map<String, Object> propBusiness = proposal.getProposedBusiness();
+        java.util.Map<String, Object> propCompanySize = proposal.getProposedCompanySize();
+        java.util.Map<String, Object> propContact = proposal.getProposedContact();
+        java.util.Map<String, Object> propFinancial = proposal.getProposedFinancial();
+        java.util.Map<String, Object> propMarket = proposal.getProposedMarket();
+        java.util.Map<String, Object> propInnovation = proposal.getProposedInnovation();
+        java.util.Map<String, Object> propRisk = proposal.getProposedRisk();
+        java.util.Map<String, Object> propCompliance = proposal.getProposedCompliance();
+
+        if (proposal.getChangedFieldPaths() != null && !proposal.getChangedFieldPaths().isEmpty()) {
+            java.util.List<String> paths = proposal.getChangedFieldPaths();
+            propIdentity = filterMapByPaths(propIdentity, "identity", paths);
+            propBusiness = filterMapByPaths(propBusiness, "business", paths);
+            propCompanySize = filterMapByPaths(propCompanySize, "companySize", paths);
+            propContact = filterMapByPaths(propContact, "contact", paths);
+            propFinancial = filterMapByPaths(propFinancial, "financial", paths);
+            propMarket = filterMapByPaths(propMarket, "market", paths);
+            propInnovation = filterMapByPaths(propInnovation, "innovation", paths);
+            propRisk = filterMapByPaths(propRisk, "risk", paths);
+            propCompliance = filterMapByPaths(propCompliance, "compliance", paths);
+        }
+
+        companyProfile.setIdentity(updateObject(mapper, companyProfile.getIdentity(), propIdentity, CompanyProfile.Identity.class));
         
         if (companyProfile.getIdentity() != null) {
             if ("".equals(companyProfile.getIdentity().getTaxCode())) {
@@ -166,14 +304,14 @@ public class CompanyProfileUpdateProposalService {
             }
         }
         
-        companyProfile.setBusiness(updateObject(mapper, companyProfile.getBusiness(), proposal.getProposedBusiness(), CompanyProfile.Business.class));
-        companyProfile.setCompanySize(updateObject(mapper, companyProfile.getCompanySize(), proposal.getProposedCompanySize(), CompanyProfile.CompanySize.class));
-        companyProfile.setContact(updateObject(mapper, companyProfile.getContact(), proposal.getProposedContact(), CompanyProfile.Contact.class));
-        companyProfile.setFinancial(updateObject(mapper, companyProfile.getFinancial(), proposal.getProposedFinancial(), com.apms.domain.company.model.FinancialInfo.class));
-        companyProfile.setMarket(updateObject(mapper, companyProfile.getMarket(), proposal.getProposedMarket(), com.apms.domain.company.model.MarketInfo.class));
-        companyProfile.setInnovation(updateObject(mapper, companyProfile.getInnovation(), proposal.getProposedInnovation(), com.apms.domain.company.model.InnovationInfo.class));
-        companyProfile.setRisk(updateObject(mapper, companyProfile.getRisk(), proposal.getProposedRisk(), com.apms.domain.company.model.RiskInfo.class));
-        companyProfile.setCompliance(updateObject(mapper, companyProfile.getCompliance(), proposal.getProposedCompliance(), com.apms.domain.company.model.ComplianceInfo.class));
+        companyProfile.setBusiness(updateObject(mapper, companyProfile.getBusiness(), propBusiness, CompanyProfile.Business.class));
+        companyProfile.setCompanySize(updateObject(mapper, companyProfile.getCompanySize(), propCompanySize, CompanyProfile.CompanySize.class));
+        companyProfile.setContact(updateObject(mapper, companyProfile.getContact(), propContact, CompanyProfile.Contact.class));
+        companyProfile.setFinancial(updateObject(mapper, companyProfile.getFinancial(), propFinancial, com.apms.domain.company.model.FinancialInfo.class));
+        companyProfile.setMarket(updateObject(mapper, companyProfile.getMarket(), propMarket, com.apms.domain.company.model.MarketInfo.class));
+        companyProfile.setInnovation(updateObject(mapper, companyProfile.getInnovation(), propInnovation, com.apms.domain.company.model.InnovationInfo.class));
+        companyProfile.setRisk(updateObject(mapper, companyProfile.getRisk(), propRisk, com.apms.domain.company.model.RiskInfo.class));
+        companyProfile.setCompliance(updateObject(mapper, companyProfile.getCompliance(), propCompliance, com.apms.domain.company.model.ComplianceInfo.class));
 
         if (proposal.getProposedCompanyMembers() != null) {
             companyProfile.setCompanyMembers(proposal.getProposedCompanyMembers().stream()
@@ -197,8 +335,6 @@ public class CompanyProfileUpdateProposalService {
             graphService.replaceRelationship(ownerCompanyId, companyProfile.getCompanyId(), relType, confirmedBy);
         }
 
-        companyProfile.setVersion(companyProfile.getVersion() + 1);
-        
         // Ensure source document ids are added to the profile
         if (proposal.getSourceDocumentIds() != null && !proposal.getSourceDocumentIds().isEmpty()) {
             if (companyProfile.getSourceRefs() == null) {
@@ -212,9 +348,59 @@ public class CompanyProfileUpdateProposalService {
             }
         }
 
-        companyProfileRepository.save(companyProfile);
+        java.util.Map<String, Object> afterSnapshot = versionService.createSnapshotMap(companyProfile);
+
+        java.util.Map<String, Object> beforeValues = new java.util.HashMap<>();
+        java.util.Map<String, Object> afterValues = new java.util.HashMap<>();
+        boolean dataChanged = false;
+
+        if (proposal.getChangedFieldPaths() != null && !proposal.getChangedFieldPaths().isEmpty()) {
+            for (String path : proposal.getChangedFieldPaths()) {
+                Object bVal = extractValueByPath(beforeSnapshot, path);
+                Object aVal = extractValueByPath(afterSnapshot, path);
+                beforeValues.put(path, bVal);
+                afterValues.put(path, aVal);
+                if (!java.util.Objects.equals(bVal, aVal)) {
+                    dataChanged = true;
+                }
+            }
+        } else {
+            dataChanged = !java.util.Objects.equals(beforeSnapshot, afterSnapshot);
+        }
+
+        if (dataChanged) {
+            companyProfile.incrementMinorVersion();
+            if (companyProfile.getMetadata() == null) {
+                companyProfile.setMetadata(new CompanyProfile.Metadata());
+            }
+            companyProfile.getMetadata().setUpdatedAt(LocalDateTime.now());
+            companyProfile.getMetadata().setLastModifiedBy(String.valueOf(approverId));
+
+            companyProfileRepository.save(companyProfile);
+
+            versionService.createAndSaveVersion(
+                    companyProfile,
+                    com.apms.domain.profile.enums.CompanyProfileChangeSource.MONITORING_PROPOSAL_APPROVED,
+                    proposal.getChangedFieldPaths(),
+                    beforeValues,
+                    afterValues,
+                    reviewComment,
+                    "Approved monitoring proposal " + proposal.getId(),
+                    proposal.getId(),
+                    proposal.getProjectId(),
+                    proposal.getTaskId(),
+                    proposal.getSourceDocumentIds(),
+                    approverId
+            );
+        } else {
+            companyProfileRepository.save(companyProfile);
+        }
 
         proposal.setStatus(SubmissionStatus.APPROVED);
+        proposal.setReviewedBy(approverId);
+        if (reviewComment != null) {
+            proposal.setReviewComment(reviewComment);
+        }
         proposalRepository.save(proposal);
 
         auditLogService.log(approverId, AuditAction.PROFILE_UPDATE_PROPOSAL_APPROVED, "CompanyProfileUpdateProposal", proposal.getId(), "Monitoring Proposal approved");
@@ -223,7 +409,7 @@ public class CompanyProfileUpdateProposalService {
     }
 
     @Transactional
-    public CompanyProfileUpdateProposalResponse rejectMonitoringProposal(String id, Long approverId) {
+    public CompanyProfileUpdateProposalResponse rejectMonitoringProposal(String id, Long approverId, String reviewComment) {
         CompanyProfileUpdateProposal proposal = proposalRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Proposal not found"));
 
@@ -236,6 +422,10 @@ public class CompanyProfileUpdateProposalService {
         }
 
         proposal.setStatus(SubmissionStatus.REJECTED);
+        proposal.setReviewedBy(approverId);
+        if (reviewComment != null) {
+            proposal.setReviewComment(reviewComment);
+        }
         proposalRepository.save(proposal);
 
         auditLogService.log(approverId, AuditAction.PROFILE_UPDATE_PROPOSAL_REJECTED, "CompanyProfileUpdateProposal", proposal.getId(), "Monitoring Proposal rejected");
@@ -433,6 +623,13 @@ public class CompanyProfileUpdateProposalService {
     }
 
     private CompanyProfileUpdateProposalResponse toResponse(CompanyProfileUpdateProposal proposal) {
+        String reviewerName = null;
+        if (proposal.getReviewedBy() != null) {
+            reviewerName = userProfileRepository.findByAccountId(proposal.getReviewedBy())
+                    .map(p -> p.getFirstName() + " " + p.getLastName())
+                    .orElse(null);
+        }
+
         return CompanyProfileUpdateProposalResponse.builder()
                 .id(proposal.getId())
                 .projectId(proposal.getProjectId())
@@ -451,11 +648,14 @@ public class CompanyProfileUpdateProposalService {
                 .proposedCompliance(proposal.getProposedCompliance())
                 .proposedCompanyMembers(proposal.getProposedCompanyMembers())
                 .proposedRelationship(proposal.getProposedRelationship())
+                .changedFieldPaths(proposal.getChangedFieldPaths())
+                .fieldEvidence(proposal.getFieldEvidence())
                 .sourceDocumentIds(proposal.getSourceDocumentIds())
                 .extractionId(proposal.getExtractionId())
                 .status(proposal.getStatus())
                 .submittedBy(proposal.getSubmittedBy())
                 .reviewedBy(proposal.getReviewedBy())
+                .reviewedByName(reviewerName)
                 .reviewComment(proposal.getReviewComment())
                 .changeSummary(proposal.getChangeSummary())
                 .createdAt(proposal.getCreatedAt())

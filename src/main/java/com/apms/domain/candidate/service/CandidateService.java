@@ -1,7 +1,9 @@
 package com.apms.domain.candidate.service;
 
+import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.CandidateStatus;
 import com.apms.common.enums.RelationshipType;
+import com.apms.common.enums.TaskStatus;
 import com.apms.common.event.CandidateApprovedEvent;
 import com.apms.common.exception.BusinessValidationException;
 import com.apms.common.exception.ResourceNotFoundException;
@@ -54,6 +56,8 @@ public class CandidateService {
     private final ObjectMapper objectMapper;
     private final com.apms.domain.project.repository.sql.ProjectTaskRepository projectTaskRepository;
     private final RawDocumentRepository rawDocumentRepository;
+    private final com.apms.domain.candidate.repository.mongo.CandidateDraftSequenceRepository draftSequenceRepository;
+    private final com.apms.domain.audit.service.AuditLogService auditLogService;
 
     // ─────────────────────────────────────────────
     // CREATE (from AI)
@@ -88,22 +92,42 @@ public class CandidateService {
         return buildAndSaveCandidate(String.valueOf(importJob.getProjectId()), String.valueOf(importJob.getId()), importJob.getRawDocumentId(), cache.getExtractedData(), cache.getFieldResults(), creatorId);
     }
 
+    public synchronized int getNextDraftSequence(Long taskId) {
+        if (taskId == null) return 1;
+        String taskIdStr = String.valueOf(taskId);
+        List<CompanyCandidate> existing = candidateRepository.findByTaskId(taskId);
+        int maxExistingSeq = existing.stream()
+                .map(c -> c.getDraftSequence() != null ? c.getDraftSequence() : 0)
+                .max(Integer::compareTo)
+                .orElse(0);
+        if (maxExistingSeq == 0 && !existing.isEmpty()) {
+            maxExistingSeq = existing.size();
+        }
+        com.apms.domain.candidate.CandidateDraftSequence tracked = draftSequenceRepository.findById(taskIdStr).orElse(null);
+        int next = Math.max(tracked != null && tracked.getCurrentSequence() != null ? tracked.getCurrentSequence() : 0, maxExistingSeq) + 1;
+        draftSequenceRepository.save(new com.apms.domain.candidate.CandidateDraftSequence(taskIdStr, next));
+        return next;
+    }
+
     @Transactional
     public CandidateResponse createManualCandidate(Long projectId, Long taskId, Long creatorId) {
         LocalDateTime now = LocalDateTime.now();
 
-        com.apms.domain.project.Project project = projectRepository.findById(projectId)
+        projectRepository.findById(projectId)
                 .orElseThrow(() -> new com.apms.common.exception.ResourceNotFoundException("Project not found: " + projectId));
+
+        int nextSeq = getNextDraftSequence(taskId);
+        String draftName = "Draft " + nextSeq;
 
         CompanyCandidate candidate = CompanyCandidate.builder()
                 .projectId(String.valueOf(projectId))
                 .taskId(taskId)
+                .draftName(draftName)
+                .draftSequence(nextSeq)
                 .status(CandidateStatus.DRAFT)
                 .revisionNumber(1)
                 .documentVersion(0L)
                 .identity(CompanyCandidate.Identity.builder()
-                        .legalName(project.getTargetCompanyName())
-                        .taxCode(project.getTargetCompanyTaxCode())
                         .build())
                 .business(CompanyCandidate.Business.builder()
                         .industries(new java.util.ArrayList<>())
@@ -208,10 +232,25 @@ public class CandidateService {
                 .status(CandidateStatus.DRAFT)
                 .build();
 
+        Long tid = null;
+        if (rawDocumentId != null) {
+            try {
+                RawDocument rd = rawDocumentRepository.findById(rawDocumentId).orElse(null);
+                if (rd != null && rd.getTaskId() != null) {
+                    tid = Long.valueOf(rd.getTaskId());
+                }
+            } catch (Exception ignored) {}
+        }
+        int nextSeq = getNextDraftSequence(tid);
+        String draftName = "Draft " + nextSeq;
+
         // 3. Create Candidate
         CompanyCandidate candidate = CompanyCandidate.builder()
                 .projectId(projectId)
                 .importJobId(importJobId)
+                .taskId(tid)
+                .draftName(draftName)
+                .draftSequence(nextSeq)
                 .rawDocumentId(rawDocumentId)
                 .sourceDocumentIds(resolveSourceDocumentIds(rawDocumentId, null))
                 .candidateOrder(1)
@@ -340,6 +379,42 @@ public class CandidateService {
 
         candidate = candidateRepository.save(candidate);
         log.info("Candidate updated manually: id={}, newRevision={}", candidateId, candidate.getRevisionNumber());
+
+        return toResponse(candidate);
+    }
+
+    @Transactional
+    public CandidateResponse renameCandidateDraft(String candidateId, String newDraftName, Long currentUserId) {
+        if (newDraftName == null || newDraftName.trim().isBlank()) {
+            throw new BusinessValidationException("Draft name cannot be blank");
+        }
+        String trimmedName = newDraftName.trim();
+        if (trimmedName.length() > 200) {
+            throw new BusinessValidationException("Draft name cannot exceed 200 characters");
+        }
+
+        CompanyCandidate candidate = findCandidateOrThrow(candidateId);
+
+        if (candidate.getStatus() != CandidateStatus.DRAFT && candidate.getStatus() != CandidateStatus.REVISION_REQUIRED) {
+            throw new com.apms.common.exception.BusinessConflictException("Draft name can only be edited when candidate is in DRAFT or REVISION_REQUIRED status");
+        }
+
+        if (candidate.getTaskId() != null) {
+            com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(candidate.getTaskId()).orElse(null);
+            if (task != null && task.getStatus() == TaskStatus.IN_REVIEW) {
+                throw new com.apms.common.exception.BusinessConflictException("Cannot rename draft while task is submitted for review");
+            }
+        }
+
+        candidate.setDraftName(trimmedName);
+        if (candidate.getMetadata() != null) {
+            candidate.getMetadata().setLastModifiedBy(String.valueOf(currentUserId));
+            candidate.getMetadata().setUpdatedAt(LocalDateTime.now());
+        }
+
+        candidate = candidateRepository.save(candidate);
+        auditLogService.log(currentUserId, AuditAction.CORRECT_CANDIDATE, "CompanyCandidate", candidateId,
+                "Renamed candidate draft to '" + trimmedName + "'");
 
         return toResponse(candidate);
     }
@@ -536,6 +611,30 @@ public class CandidateService {
         candidate = candidateRepository.save(candidate);
         log.info("Candidate submitted for review: id={}", candidateId);
         return toResponse(candidate);
+    }
+
+    @Transactional
+    public void cancelCandidateSubmission(String candidateId) {
+        CompanyCandidate candidate = findCandidateOrThrow(candidateId);
+        if (candidate.getStatus() == CandidateStatus.PENDING_REVIEW) {
+            boolean hadManagerReview = candidate.getFieldApprovals() != null && candidate.getFieldApprovals().stream()
+                    .anyMatch(f -> f.getReviewedByAccountId() != null
+                            || f.getStatus() == com.apms.common.enums.FieldApprovalStatus.APPROVED
+                            || f.getStatus() == com.apms.common.enums.FieldApprovalStatus.REVISION_REQUIRED
+                            || f.getStatus() == com.apms.common.enums.FieldApprovalStatus.REJECTED);
+
+            if (hadManagerReview) {
+                candidate.setStatus(CandidateStatus.REVISION_REQUIRED);
+            } else {
+                candidate.setStatus(CandidateStatus.DRAFT);
+                candidate.setFieldApprovals(new java.util.ArrayList<>());
+            }
+            if (candidate.getMetadata() != null) {
+                candidate.getMetadata().setUpdatedAt(LocalDateTime.now());
+            }
+            candidateRepository.save(candidate);
+            log.info("Candidate submission cancelled: id={}, restoredStatus={}", candidateId, candidate.getStatus());
+        }
     }
 
     @Transactional
@@ -1304,6 +1403,8 @@ public class CandidateService {
                 .sourceDocumentIds(resolveSourceDocumentIds(c.getRawDocumentId(), c.getSourceDocumentIds()))
                 .candidateOrder(c.getCandidateOrder())
                 .revisionNumber(c.getRevisionNumber())
+                .draftName(c.getDraftName() != null && !c.getDraftName().isBlank() ? c.getDraftName() : (c.getDraftSequence() != null ? "Draft " + c.getDraftSequence() : "Draft"))
+                .draftSequence(c.getDraftSequence())
                 .status(c.getStatus())
                 .suggestedRelationshipType(c.getSuggestedRelationshipType())
                 .relationshipConfidenceScore(c.getRelationshipConfidenceScore())

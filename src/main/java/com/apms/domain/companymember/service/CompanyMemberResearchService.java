@@ -134,6 +134,15 @@ public class CompanyMemberResearchService {
         auditLogService.log(currentUser.getId(), AuditAction.COMPANY_MEMBER_RESEARCH_SUBMITTED, "CompanyMemberResearchDraft", draft.getId(), "Draft submitted");
     }
 
+    @Transactional
+    public void cancelDraftSubmission(String draftId) {
+        if (!StringUtils.hasText(draftId)) return;
+        draftRepository.findById(draftId).ifPresent(draft -> {
+            draft.setSubmissionId(null);
+            draftRepository.save(draft);
+        });
+    }
+
     /**
      * Called when a COMPANY_MEMBER_RESEARCH submission is approved.
      * Handled within ProjectTaskSubmissionService, or called by a listener/hook.

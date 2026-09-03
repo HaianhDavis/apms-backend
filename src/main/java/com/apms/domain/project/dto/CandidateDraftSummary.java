@@ -17,6 +17,8 @@ import java.util.List;
 public class CandidateDraftSummary {
     private String candidateId;
     private String candidateName;
+    private String draftName;
+    private Integer draftSequence;
     private String candidateIndustry;
     private CandidateStatus status;
     private Long taskId;

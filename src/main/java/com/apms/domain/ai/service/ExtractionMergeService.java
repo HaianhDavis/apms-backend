@@ -48,6 +48,7 @@ public class ExtractionMergeService {
     private final CompanyProfileUpdateProposalRepository proposalRepository;
     private final ProjectRepository projectRepository;
     private final AuditLogService auditLogService;
+    private final com.apms.domain.candidate.service.CandidateService candidateService;
 
     // ─────────────────────────────────────────────
     // GENERATE CANDIDATE DRAFT FROM SELECTED EXTRACTIONS (RESEARCH_NEW_COMPANY)
@@ -102,10 +103,15 @@ public class ExtractionMergeService {
                 .updatedAt(now)
                 .build();
 
+        int nextSeq = candidateService.getNextDraftSequence(taskId);
+        String draftName = "Draft " + nextSeq;
+
         // 5. Build and save a new DRAFT CompanyCandidate for this reviewed extraction set.
         CompanyCandidate candidate = CompanyCandidate.builder()
                 .projectId(String.valueOf(projectId))
                 .taskId(taskId)
+                .draftName(draftName)
+                .draftSequence(nextSeq)
                 .extractionIds(extractionIds)
                 .sourceDocumentIds(sourceDocIds)
                 .status(CandidateStatus.DRAFT)
@@ -292,8 +298,12 @@ public class ExtractionMergeService {
 
     private void applyProjectControlledIdentity(CompanyCandidate.Identity identity, Project project) {
         if (identity == null || project == null) return;
-        identity.setLegalName(project.getTargetCompanyName());
-        identity.setTaxCode(project.getTargetCompanyTaxCode());
+        if (project.getTargetCompanyName() != null && !project.getTargetCompanyName().isBlank()) {
+            identity.setLegalName(project.getTargetCompanyName());
+        }
+        if (project.getTargetCompanyTaxCode() != null && !project.getTargetCompanyTaxCode().isBlank()) {
+            identity.setTaxCode(project.getTargetCompanyTaxCode());
+        }
     }
 
     private boolean isProjectControlledIdentityField(String fieldPath) {

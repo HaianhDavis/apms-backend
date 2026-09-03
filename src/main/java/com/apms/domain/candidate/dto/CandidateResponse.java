@@ -16,6 +16,8 @@ public class CandidateResponse {
     private java.util.List<String> sourceDocumentIds;
     private Integer candidateOrder;
     private Integer revisionNumber;
+    private String draftName;
+    private Integer draftSequence;
     private CandidateStatus status;
     private RelationshipType suggestedRelationshipType;
     private Double relationshipConfidenceScore;

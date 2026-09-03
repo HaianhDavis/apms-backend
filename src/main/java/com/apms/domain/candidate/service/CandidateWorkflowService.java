@@ -142,13 +142,15 @@ public class CandidateWorkflowService {
                 .findFirst()
                 .orElse(null);
 
-        if (submission != null) {
-            submission.setStatus(SubmissionStatus.CHANGES_REQUESTED);
-            submission.setReviewComment(comment);
-            submission.setReviewedByAccount(accountRepository.findById(reviewerId).orElse(null));
-            submission.setReviewedAt(LocalDateTime.now());
-            submissionRepository.saveAndFlush(submission);
+        if (submission == null) {
+            throw new BusinessValidationException("No active candidate submission found to reject.");
         }
+
+        submission.setStatus(SubmissionStatus.CHANGES_REQUESTED);
+        submission.setReviewComment(comment);
+        submission.setReviewedByAccount(accountRepository.findById(reviewerId).orElse(null));
+        submission.setReviewedAt(LocalDateTime.now());
+        submissionRepository.saveAndFlush(submission);
 
         task.setStatus(TaskStatus.IN_PROGRESS);
         task.setCompletedAt(null);
