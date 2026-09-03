@@ -35,7 +35,7 @@ public class CompanyProfileDocumentController {
     private final AuditLogService auditLogService;
 
     @GetMapping("/{companyProfileId}/documents")
-    @PreAuthorize("hasRole('BUSINESS_OWNER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<PageResponse<CompanyDocumentResponse>> getPublishedDocuments(
             @PathVariable String companyProfileId,
             Pageable pageable,
@@ -51,7 +51,7 @@ public class CompanyProfileDocumentController {
     }
 
     @PostMapping("/{companyProfileId}/documents/reconcile")
-    @PreAuthorize("hasRole('BUSINESS_OWNER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<java.util.Map<String, Object>> reconcilePublishedDocuments(
             @PathVariable String companyProfileId,
             HttpServletRequest request,
@@ -68,7 +68,7 @@ public class CompanyProfileDocumentController {
     }
 
     @GetMapping("/{companyProfileId}/documents/{documentId}/download")
-    @PreAuthorize("hasRole('BUSINESS_OWNER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<Resource> downloadDocument(
             @PathVariable String companyProfileId,
             @PathVariable String documentId,

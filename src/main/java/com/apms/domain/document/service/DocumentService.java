@@ -554,8 +554,9 @@ public class DocumentService {
         }
 
         if (task.getTaskType() != com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION
-                && task.getTaskType() != com.apms.common.enums.TaskType.FINANCIAL_RESEARCH) {
-            throw new com.apms.common.exception.BusinessValidationException("Task-linked document uploads are only supported for COMPANY_DATA_PREPARATION or FINANCIAL_RESEARCH via this endpoint.");
+                && task.getTaskType() != com.apms.common.enums.TaskType.FINANCIAL_RESEARCH
+                && task.getTaskType() != com.apms.common.enums.TaskType.PARTNER_CONTRACT_COLLECTION) {
+            throw new com.apms.common.exception.BusinessValidationException("Task-linked document uploads are only supported for COMPANY_DATA_PREPARATION, FINANCIAL_RESEARCH, or PARTNER_CONTRACT_COLLECTION via this endpoint.");
         }
 
         com.apms.common.enums.TaskStatus status = task.getStatus();

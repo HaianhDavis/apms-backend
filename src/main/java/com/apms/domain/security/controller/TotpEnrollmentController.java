@@ -31,7 +31,7 @@ public class TotpEnrollmentController {
     }
 
     @PostMapping("/enrollment")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'ROLE_BUSINESS_OWNER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'ROLE_BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'ROLE_BUSINESS_DEVELOPMENT_MANAGER', 'SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<TotpEnrollmentStartResponse>> startEnrollment() {
         UserDetailsImpl currentUser = getCurrentUser();
         TotpEnrollmentStartResponse response = enrollmentService.startEnrollment(currentUser.getId(), currentUser.getUsername());
@@ -42,7 +42,7 @@ public class TotpEnrollmentController {
     }
 
     @PostMapping("/enrollment/confirm")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'ROLE_BUSINESS_OWNER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'ROLE_BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'ROLE_BUSINESS_DEVELOPMENT_MANAGER', 'SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<StepUpVerifyResponse>> confirmEnrollment(@RequestBody TotpEnrollmentConfirmRequest request) {
         UserDetailsImpl currentUser = getCurrentUser();
         StepUpVerifyResponse response = enrollmentService.confirmEnrollment(currentUser.getId(), request.getEnrollmentId(), request.getCode());

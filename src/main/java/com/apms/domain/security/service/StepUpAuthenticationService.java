@@ -34,19 +34,27 @@ public class StepUpAuthenticationService {
     private final CompanyProfileAccessService companyProfileAccessService;
     private final AccountTotpCredentialRepository credentialRepository;
 
+
     @Value("${apms.stepup.token.expiration-seconds:600}")
     private long tokenExpirationSeconds;
 
     public StepUpStatusResponse getStepUpStatus(String scope, String resourceId, String ownerSecureToken) {
         UserDetailsImpl currentUser = getCurrentUser();
 
-        if (!hasRole(currentUser, SystemRole.BUSINESS_OWNER)) {
-            throw new AccessDeniedException("User is not a BUSINESS_OWNER");
+        boolean isOwner = hasRole(currentUser, SystemRole.BUSINESS_OWNER) || hasRole(currentUser, SystemRole.SYSTEM_ADMIN);
+        boolean isManager = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+
+        if (!isOwner && !isManager) {
+            throw new AccessDeniedException("User role is not authorized for secure access");
         }
 
         if (SCOPE_COMPANY_INTERNAL_NEWS.equals(scope) || SCOPE_COMPANY_PROFILE_DOCUMENTS.equals(scope)) {
             companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile(resourceId, currentUser);
-        } else if (scope != null || resourceId != null) {
+        } else if (scope == null && resourceId == null) {
+            if (!isOwner) {
+                throw new AccessDeniedException("Only BUSINESS_OWNER can access global secure scope");
+            }
+        } else {
             throw new AccessDeniedException("STEP_UP_SCOPE_FORBIDDEN");
         }
 
@@ -70,14 +78,22 @@ public class StepUpAuthenticationService {
     public StepUpVerifyResponse verifyTotpStepUp(String code, String scope, String resourceId) {
         UserDetailsImpl currentUser = getCurrentUser();
 
-        if (!hasRole(currentUser, SystemRole.BUSINESS_OWNER)) {
-            auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_FAILED, "StepUpAuth", resourceId, "User is not a BUSINESS_OWNER for scope: " + scope);
-            throw new AccessDeniedException("User is not a BUSINESS_OWNER");
+        boolean isOwner = hasRole(currentUser, SystemRole.BUSINESS_OWNER) || hasRole(currentUser, SystemRole.SYSTEM_ADMIN);
+        boolean isManager = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+
+        if (!isOwner && !isManager) {
+            auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_FAILED, "StepUpAuth", resourceId, "User is not authorized for scope: " + scope);
+            throw new AccessDeniedException("User role is not authorized for secure access");
         }
 
         if (SCOPE_COMPANY_INTERNAL_NEWS.equals(scope) || SCOPE_COMPANY_PROFILE_DOCUMENTS.equals(scope)) {
             companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile(resourceId, currentUser);
-        } else if (scope != null || resourceId != null) {
+        } else if (scope == null && resourceId == null) {
+            if (!isOwner) {
+                auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_FAILED, "StepUpAuth", null, "Manager cannot verify global secure scope");
+                throw new AccessDeniedException("Only BUSINESS_OWNER can access global secure scope");
+            }
+        } else {
             throw new AccessDeniedException("STEP_UP_SCOPE_FORBIDDEN");
         }
 
@@ -90,7 +106,7 @@ public class StepUpAuthenticationService {
 
         StepUpVerifyResponse response = grantOwnerSecureSession(currentUser.getId());
 
-        auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_SUCCEEDED, "StepUpAuth", resourceId, "Owner secure session granted with TOTP");
+        auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_SUCCEEDED, "StepUpAuth", resourceId, "Secure session granted with TOTP");
         if (SCOPE_COMPANY_PROFILE_DOCUMENTS.equals(scope)) {
             auditLogService.log(currentUser.getId(), AuditAction.COMPANY_DOCUMENT_ACCESS_VERIFIED, "CompanyProfile", resourceId, "Company document access verified with TOTP");
         }
