@@ -27,4 +27,7 @@ public class CreateCompanyProfileUpdateProposalRequest {
     private String extractionId;
     private String changeSummary;
     private String proposedRelationship;
+
+    private List<String> changedFieldPaths;
+    private List<com.apms.domain.ai.dto.FieldEvidence> fieldEvidence;
 }

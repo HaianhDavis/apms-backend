@@ -508,6 +508,8 @@ public class ProjectTaskService {
                 return CandidateDraftSummary.builder()
                         .candidateId(c.getId())
                         .candidateName(candidateDisplayName(c))
+                        .draftName(candidateDisplayName(c))
+                        .draftSequence(c.getDraftSequence())
                         .candidateIndustry(candidateIndustry(c))
                         .status(c.getStatus())
                         .taskId(c.getTaskId())
@@ -552,6 +554,8 @@ public class ProjectTaskService {
                 .projectTaskId(sub.getProjectTask().getId())
                 .projectId(sub.getProject().getId())
                 .submittedByUserId(sub.getSubmittedByAccount().getId())
+                .submittedByName(sub.getSubmittedByAccount() != null ? sub.getSubmittedByAccount().getEmail() : null)
+                .submittedRevisionNumber(sub.getSubmittedRevisionNumber())
                 .submissionType(sub.getSubmissionType())
                 .targetEntityType(sub.getTargetEntityType())
                 .targetEntityId(sub.getTargetEntityId())
@@ -591,16 +595,13 @@ public class ProjectTaskService {
 
 
     private String candidateDisplayName(CompanyCandidate candidate) {
-        if (candidate.getIdentity() == null) {
-            return "Candidate " + candidate.getId().substring(Math.max(0, candidate.getId().length() - 8));
+        if (candidate.getDraftName() != null && !candidate.getDraftName().isBlank()) {
+            return candidate.getDraftName();
         }
-        if (candidate.getIdentity().getTradeName() != null && !candidate.getIdentity().getTradeName().isBlank()) {
-            return candidate.getIdentity().getTradeName();
+        if (candidate.getDraftSequence() != null) {
+            return "Draft " + candidate.getDraftSequence();
         }
-        if (candidate.getIdentity().getLegalName() != null && !candidate.getIdentity().getLegalName().isBlank()) {
-            return candidate.getIdentity().getLegalName();
-        }
-        return "Candidate " + candidate.getId().substring(Math.max(0, candidate.getId().length() - 8));
+        return "Draft";
     }
 
     private int candidateDraftStatusRank(CandidateStatus status) {

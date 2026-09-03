@@ -34,9 +34,13 @@ public class CompanyProfileUpdateProposalResponse {
     private List<String> sourceDocumentIds;
     private String extractionId;
 
+    private List<String> changedFieldPaths;
+    private List<com.apms.domain.ai.dto.FieldEvidence> fieldEvidence;
+
     private SubmissionStatus status;
     private Long submittedBy;
     private Long reviewedBy;
+    private String reviewedByName;
     private String reviewComment;
     private String changeSummary;
 

@@ -120,6 +120,21 @@ public class CandidateController {
     }
 
     // ─────────────────────────────────────────────
+    // PATCH /api/v1/candidates/{candidateId}/rename
+    // Role: BUSINESS_DEVELOPMENT_STAFF
+    // ─────────────────────────────────────────────
+    @PatchMapping("/candidates/{candidateId}/rename")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> renameCandidateDraft(
+            @PathVariable String candidateId,
+            @jakarta.validation.Valid @RequestBody com.apms.domain.candidate.dto.RenameCandidateDraftRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        CandidateResponse response = candidateService.renameCandidateDraft(candidateId, request.getDraftName(), currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(response, "Candidate draft renamed successfully"));
+    }
+
+    // ─────────────────────────────────────────────
     // POST /api/v1/candidates/{candidateId}/submit
     // Role: BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────

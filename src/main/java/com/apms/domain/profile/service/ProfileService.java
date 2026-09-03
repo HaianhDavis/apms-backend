@@ -67,6 +67,9 @@ public class ProfileService {
     private final TrackedCompanyCache trackedCompanyCache;
     private final com.apms.domain.project.service.ProjectTargetProfileResolver projectTargetProfileResolver;
     private final com.apms.domain.user.repository.sql.AccountRepository accountRepository;
+    private final CompanyProfileVersionService versionService;
+    private final com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository profileVersionRepository;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER
@@ -170,6 +173,9 @@ public class ProfileService {
                 .compliance(candidate.getCompliance())
                 .reviewStatus("APPROVED")
                 .isHidden(true)
+                .majorVersion(1)
+                .revision(0)
+                .version(CompanyProfileVersionHelper.formatLegacyVersion(1, 0))
                 .metadata(CompanyProfile.Metadata.builder()
                         .createdBy("SYSTEM")
                         .createdAt(LocalDateTime.now())
@@ -187,7 +193,23 @@ public class ProfileService {
         profile = profileRepository.save(profile);
         linkProjectToProfile(project, profile);
         linkCandidateToProfile(candidate, profile);
-        log.info("Successfully created CompanyProfile for companyId: {}", newCompanyId);
+
+        versionService.createAndSaveVersion(
+                profile,
+                com.apms.domain.profile.enums.CompanyProfileChangeSource.INITIAL_PROFILE_CREATION,
+                null,
+                null,
+                null,
+                "Initial approved official profile",
+                "Initial profile creation (" + profile.getVersionLabel() + ")",
+                null,
+                project.getId(),
+                null,
+                candidate.getSourceDocumentIds(),
+                canonicalManagerId
+        );
+
+        log.info("Successfully created CompanyProfile for companyId: {}, version: {}", newCompanyId, profile.getVersionLabel());
         return profile;
     }
 
@@ -249,12 +271,18 @@ public class ProfileService {
         if (!wasApproved) {
             profile.setIsHidden(true);
         }
-        profile.incrementMinorVersion();
+
+        boolean alreadyApplied = profileVersionRepository.existsByCompanyProfileIdAndCreatedFromProjectId(profile.getId(), project.getId());
+        if (!alreadyApplied) {
+            profile.incrementMajorVersion();
+        }
+
         profile.getMetadata().setUpdatedAt(LocalDateTime.now());
         profile.getMetadata().setLastModifiedBy("SYSTEM");
 
-        if (profile.getResponsibleManagerId() == null) {
-            Long canonicalManagerId = findCanonicalManager(project);
+        Long canonicalManagerId = profile.getResponsibleManagerId();
+        if (canonicalManagerId == null) {
+            canonicalManagerId = findCanonicalManager(project);
             if (canonicalManagerId != null) {
                 profile.setResponsibleManagerId(canonicalManagerId);
             }
@@ -264,7 +292,25 @@ public class ProfileService {
 
         profile = profileRepository.save(profile);
         linkCandidateToProfile(candidate, profile);
-        log.info("Successfully updated CompanyProfile for companyId: {}, new version: {}", profile.getCompanyId(), profile.getVersion());
+
+        if (!alreadyApplied) {
+            versionService.createAndSaveVersion(
+                    profile,
+                    com.apms.domain.profile.enums.CompanyProfileChangeSource.PROJECT_PROFILE_UPDATE,
+                    null,
+                    null,
+                    null,
+                    "Official profile generation updated from project " + project.getProjectName(),
+                    "Applied UPDATE_EXISTING_COMPANY project " + project.getId() + " (" + profile.getVersionLabel() + ")",
+                    null,
+                    project.getId(),
+                    null,
+                    candidate.getSourceDocumentIds(),
+                    canonicalManagerId
+            );
+        }
+
+        log.info("Successfully updated CompanyProfile for companyId: {}, new version: {}", profile.getCompanyId(), profile.getVersionLabel());
         return profile;
     }
 
@@ -584,45 +630,206 @@ public class ProfileService {
 
     @Transactional
     public ProfileResponse updateProfile(String companyId, UpdateCompanyProfileRequest request) {
+        UserDetailsImpl currentUser = null;
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getPrincipal() instanceof UserDetailsImpl) {
+                currentUser = (UserDetailsImpl) auth.getPrincipal();
+            }
+        } catch (Exception ignored) {}
+        return updateProfile(companyId, request, currentUser);
+    }
+
+    @Transactional
+    public ProfileResponse updateProfile(String companyId, UpdateCompanyProfileRequest request, UserDetailsImpl currentUser) {
         CompanyProfile profile = profileRepository.findByCompanyId(companyId)
-                .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found"));
+                .or(() -> profileRepository.findById(companyId))
+                .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found: " + companyId));
 
         if (Boolean.TRUE.equals(profile.getIsDeleted())) {
-            throw new ResourceNotFoundException("CompanyProfile not found");
+            throw new ResourceNotFoundException("CompanyProfile not found: " + companyId);
         }
 
-        if (profile.getIdentity() == null) profile.setIdentity(new CompanyProfile.Identity());
-        if (StringUtils.hasText(request.getLegalName())) profile.getIdentity().setLegalName(request.getLegalName());
-        if (StringUtils.hasText(request.getTradeName())) profile.getIdentity().setTradeName(request.getTradeName());
+        if (currentUser != null) {
+            boolean isAdmin = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+            boolean isManager = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DEVELOPMENT_MANAGER"));
+            if (!isAdmin && !isManager) {
+                throw new org.springframework.security.access.AccessDeniedException("You are not responsible for this company profile.");
+            }
+            if (isManager && !isAdmin) {
+                if (profile.getResponsibleManagerId() == null || !profile.getResponsibleManagerId().equals(currentUser.getId())) {
+                    throw new org.springframework.security.access.AccessDeniedException("You are not responsible for this company profile.");
+                }
+            }
+        } else {
+            throw new org.springframework.security.access.AccessDeniedException("You are not responsible for this company profile.");
+        }
 
-        if (profile.getBusiness() == null) profile.setBusiness(new CompanyProfile.Business());
-        if (request.getIndustries() != null) profile.getBusiness().setIndustries(request.getIndustries());
-        if (request.getMarkets() != null) profile.getBusiness().setMarkets(request.getMarkets());
+        if (!"APPROVED".equals(profile.getReviewStatus())) {
+            throw new com.apms.common.exception.BusinessValidationException("Only APPROVED company profiles can be edited.");
+        }
+
+        // Optimistic concurrency / Stale write check
+        CompanyProfileVersionHelper.VersionState currentVersion = CompanyProfileVersionHelper.resolveVersion(profile);
+        if (request.getExpectedMajorVersion() == null || request.getExpectedRevision() == null
+                || request.getExpectedMajorVersion() != currentVersion.majorVersion()
+                || request.getExpectedRevision() != currentVersion.revision()) {
+            throw new com.apms.common.exception.BusinessConflictException("The company profile has changed since you opened it. Refresh before saving.");
+        }
+
+        java.util.Map<String, Object> beforeSnapshot = versionService.createSnapshotMap(profile);
+        CompanyProfile originalProfile = null;
+        if (objectMapper != null && beforeSnapshot != null) {
+            try {
+                originalProfile = objectMapper.convertValue(beforeSnapshot, CompanyProfile.class);
+            } catch (Exception e) {
+                log.warn("Failed to create pre-edit backup of CompanyProfile {}: {}", profile.getId(), e.getMessage());
+            }
+        }
+
+        // Apply Identity
+        if (profile.getIdentity() == null) profile.setIdentity(new CompanyProfile.Identity());
+        if (request.getLegalName() != null) profile.getIdentity().setLegalName(request.getLegalName());
+        if (request.getTradeName() != null) profile.getIdentity().setTradeName(request.getTradeName());
+        if (request.getTaxCode() != null) profile.getIdentity().setTaxCode(request.getTaxCode());
+        if (request.getRegistrationNumber() != null) profile.getIdentity().setRegistrationNumber(request.getRegistrationNumber());
+
+        // Apply Contact
+        if (profile.getContact() == null) profile.setContact(new CompanyProfile.Contact());
+        if (request.getWebsite() != null) profile.getContact().setWebsite(request.getWebsite());
+        if (request.getEmails() != null) profile.getContact().setEmails(request.getEmails());
+        if (request.getPhones() != null) profile.getContact().setPhones(request.getPhones());
+        if (request.getHeadOfficeAddress() != null) {
+            CompanyProfile.Address addr = CompanyProfile.Address.builder()
+                    .type("HEADQUARTERS")
+                    .fullAddress(request.getHeadOfficeAddress())
+                    .build();
+            profile.getContact().setAddresses(java.util.List.of(addr));
+        }
+
+        // Apply Company Size
         if (profile.getCompanySize() == null) profile.setCompanySize(new CompanyProfile.CompanySize());
         if (request.getEmployeeTier() != null) profile.getCompanySize().setEmployeeTier(request.getEmployeeTier());
         if (request.getEmployeeCount() != null) profile.getCompanySize().setEmployeeCount(request.getEmployeeCount());
         if (request.getRevenueTier() != null) profile.getCompanySize().setRevenueTier(request.getRevenueTier());
 
-        if (profile.getContact() == null) profile.setContact(new CompanyProfile.Contact());
-        if (StringUtils.hasText(request.getWebsite())) profile.getContact().setWebsite(request.getWebsite());
-        if (request.getEmails() != null) profile.getContact().setEmails(request.getEmails());
-        if (request.getPhones() != null) profile.getContact().setPhones(request.getPhones());
+        // Apply Business
+        if (profile.getBusiness() == null) profile.setBusiness(new CompanyProfile.Business());
+        if (request.getIndustries() != null) profile.getBusiness().setIndustries(request.getIndustries());
+        if (request.getMarkets() != null) profile.getBusiness().setMarkets(request.getMarkets());
+        if (request.getTargetCustomers() != null) profile.getBusiness().setTargetCustomers(request.getTargetCustomers());
+        if (request.getProductsServices() != null) {
+            java.util.List<CompanyProfile.Product> prods = request.getProductsServices().stream()
+                    .map(name -> CompanyProfile.Product.builder().name(name).build())
+                    .collect(java.util.stream.Collectors.toList());
+            profile.getBusiness().setProducts(prods);
+        }
+        if (request.getBusinessModel() != null) profile.getBusiness().setBusinessModel(request.getBusinessModel());
 
+        // Apply Leadership
+        if (request.getCompanyMembers() != null) {
+            profile.setCompanyMembers(request.getCompanyMembers());
+        }
+
+        // Apply Tags
         if (request.getTags() != null) profile.setTags(request.getTags());
 
-        profile.incrementMinorVersion();
-        profile.getMetadata().setUpdatedAt(LocalDateTime.now());
+        java.util.Map<String, Object> afterSnapshot = versionService.createSnapshotMap(profile);
 
-        Long currentUserId = getCurrentUserId();
-        profile.getMetadata().setLastModifiedBy(currentUserId != null ? String.valueOf(currentUserId) : "SYSTEM");
+        // Detect actual changes
+        java.util.List<String> changedFieldPaths = new java.util.ArrayList<>();
+        java.util.Map<String, Object> beforeValues = new java.util.HashMap<>();
+        java.util.Map<String, Object> afterValues = new java.util.HashMap<>();
+
+        String[] potentialPaths = new String[]{
+                "identity.legalName", "identity.tradeName", "identity.taxCode", "identity.registrationNumber",
+                "contact.website", "contact.emails", "contact.phones", "contact.addresses",
+                "companySize.employeeTier", "companySize.employeeCount", "companySize.revenueTier",
+                "business.industries", "business.markets", "business.targetCustomers", "business.products",
+                "business.businessModel",
+                "companyMembers", "tags"
+        };
+
+        for (String path : potentialPaths) {
+            Object bVal = extractValueByPath(beforeSnapshot, path);
+            Object aVal = extractValueByPath(afterSnapshot, path);
+            if (!java.util.Objects.equals(bVal, aVal)) {
+                changedFieldPaths.add(path);
+                beforeValues.put(path, bVal);
+                afterValues.put(path, aVal);
+            }
+        }
+
+        if (changedFieldPaths.isEmpty()) {
+            return toResponse(profile);
+        }
+
+        profile.incrementMinorVersion();
+        if (profile.getMetadata() == null) {
+            profile.setMetadata(new CompanyProfile.Metadata());
+        }
+        profile.getMetadata().setUpdatedAt(LocalDateTime.now());
+        profile.getMetadata().setLastModifiedBy(currentUser != null ? String.valueOf(currentUser.getId()) : "SYSTEM");
 
         profileRepository.save(profile);
 
-        if (currentUserId != null) {
-            auditLogService.log(currentUserId, AuditAction.COMPANY_PROFILE_UPDATED, "CompanyProfile", companyId, "Profile updated manually");
+        try {
+            versionService.createAndSaveVersion(
+                    profile,
+                    com.apms.domain.profile.enums.CompanyProfileChangeSource.MANAGER_MANUAL_EDIT,
+                    changedFieldPaths,
+                    beforeValues,
+                    afterValues,
+                    request.getChangeNote(),
+                    "Manager Manual Edit (" + profile.getVersionLabel() + ")",
+                    null,
+                    null,
+                    null,
+                    null,
+                    currentUser != null ? currentUser.getId() : null
+            );
+        } catch (Exception ex) {
+            log.error("Failed to persist CompanyProfileVersion for profile {}: {}", profile.getId(), ex.getMessage(), ex);
+            if (originalProfile != null) {
+                try {
+                    profileRepository.save(originalProfile);
+                    log.info("Successfully rolled back profile {} to pre-edit state", profile.getId());
+                } catch (Exception rollbackEx) {
+                    log.error("CRITICAL: Failed to rollback profile {} after version creation failure: {}", profile.getId(), rollbackEx.getMessage(), rollbackEx);
+                }
+            }
+            throw ex;
+        }
+
+        if (currentUser != null) {
+            try {
+                auditLogService.log(
+                        currentUser.getId(),
+                        AuditAction.COMPANY_PROFILE_UPDATED,
+                        "CompanyProfile",
+                        companyId,
+                        "Profile updated by Manager (" + profile.getVersionLabel() + ", " + changedFieldPaths.size() + " fields changed)"
+                );
+            } catch (Exception e) {
+                log.warn("Failed to write audit log for manager profile update on company {}: {}", companyId, e.getMessage());
+            }
         }
 
         return toResponse(profile);
+    }
+
+    private Object extractValueByPath(java.util.Map<String, Object> map, String path) {
+        if (map == null || path == null) return null;
+        String[] parts = path.split("\\.");
+        Object current = map;
+        for (String part : parts) {
+            if (current instanceof java.util.Map) {
+                current = ((java.util.Map<?, ?>) current).get(part);
+            } else {
+                return null;
+            }
+        }
+        return current;
     }
 
     public ProfileResponse updateVisibility(String companyId, com.apms.domain.profile.dto.UpdateProfileVisibilityRequest request, Long actorId) {
@@ -926,7 +1133,29 @@ public class ProfileService {
         if ("APPROVED".equals(p.getReviewStatus())) {
             visibility = Boolean.TRUE.equals(p.getIsHidden()) ? com.apms.common.enums.ProfileVisibility.HIDDEN : com.apms.common.enums.ProfileVisibility.PUBLISHED;
         }
-        
+
+        CompanyProfileVersionHelper.VersionState versionState = CompanyProfileVersionHelper.resolveVersion(p);
+        int major = versionState.majorVersion();
+        int rev = versionState.revision();
+        String versionLabel = versionState.versionLabel();
+        String legacyVersion = p.getVersion() != null ? p.getVersion() : versionState.legacyVersion();
+
+        boolean canEdit = false;
+        try {
+            org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getPrincipal() instanceof UserDetailsImpl user) {
+                if ("APPROVED".equals(p.getReviewStatus())) {
+                    boolean isAdmin = user.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+                    boolean isManager = user.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DEVELOPMENT_MANAGER"));
+                    if (isAdmin) {
+                        canEdit = true;
+                    } else if (isManager && p.getResponsibleManagerId() != null && p.getResponsibleManagerId().equals(user.getId())) {
+                        canEdit = true;
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
         return ProfileResponse.builder()
                 .id(p.getId())
                 .companyId(p.getCompanyId())
@@ -946,8 +1175,12 @@ public class ProfileService {
                 .relationshipType(resolveRelationshipType(p.getCompanyId()))
                 .tags(p.getTags())
                 .metadata(p.getMetadata())
-                .version(p.getVersion())
+                .version(legacyVersion)
+                .majorVersion(major)
+                .revision(rev)
+                .versionLabel(versionLabel)
                 .responsibleManagerId(p.getResponsibleManagerId())
+                .canEditProfile(canEdit)
                 .build();
     }
 

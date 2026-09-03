@@ -119,12 +119,13 @@ public class ProfileController {
     // Role: SYSTEM_ADMIN, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @PatchMapping("/{companyId}")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @companyScope.canManageCompanyProfile(#companyId))")
     public ResponseEntity<ApiResponse<ProfileResponse>> updateProfile(
             @PathVariable String companyId,
-            @RequestBody com.apms.domain.profile.dto.UpdateCompanyProfileRequest request) {
+            @RequestBody com.apms.domain.profile.dto.UpdateCompanyProfileRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
-        return ResponseEntity.ok(ApiResponse.success(profileService.updateProfile(companyId, request), "Profile updated"));
+        return ResponseEntity.ok(ApiResponse.success(profileService.updateProfile(companyId, request, currentUser), "Profile updated"));
     }
 
     // ─────────────────────────────────────────────

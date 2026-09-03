@@ -56,6 +56,17 @@ public class CompanyCandidate implements org.springframework.data.domain.Persist
     @Indexed
     private Long taskId; // References SQL project_tasks.id
 
+    /**
+     * User-facing label identifying the draft in the task (e.g. "Draft 1", "Draft 2", "Samsung Research").
+     * Completely independent from Company Legal Name and Trade Name.
+     */
+    private String draftName;
+
+    /**
+     * Stable sequential integer assigned at creation time (1, 2, 3...) within the task.
+     */
+    private Integer draftSequence;
+
     private java.util.List<String> extractionIds; // References Mongo ai_extraction_caches.id
 
     private java.util.List<String> sourceDocumentIds; // Source raw doc IDs across all extractions
