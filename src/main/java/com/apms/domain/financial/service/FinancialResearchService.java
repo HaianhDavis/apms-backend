@@ -142,6 +142,7 @@ public class FinancialResearchService {
             }
 
             recoverStaleExtractions(research);
+            healOrphanManualMetrics(research);
         }
         return Optional.of(toResponse(research));
     }
@@ -215,6 +216,13 @@ public class FinancialResearchService {
             return toResponse(research);
         }
 
+        // Prevent concurrent extraction across documents
+        boolean anyExtracting = research.getReports() != null && research.getReports().stream()
+                .anyMatch(r -> r.getExtractionStatus() == ExtractionStatus.EXTRACTING);
+        if (anyExtracting) {
+            throw new BusinessValidationException("Một tài liệu khác đang được AI trích xuất. Vui lòng đợi hoàn tất trước khi thao tác tiếp.");
+        }
+
         // Set initial extraction state
         report.setExtractionStatus(ExtractionStatus.EXTRACTING);
         report.setExtractionStage(FinancialExtractionStage.QUEUED);
@@ -249,16 +257,24 @@ public class FinancialResearchService {
         if (report.getExtractionStatus() == ExtractionStatus.EXTRACTING) {
             return toResponse(research);
         }
+
+        // Prevent concurrent extraction across documents
+        boolean anyOtherExtracting = research.getReports() != null && research.getReports().stream()
+                .anyMatch(r -> !r.getId().equals(reportId) && r.getExtractionStatus() == ExtractionStatus.EXTRACTING);
+        if (anyOtherExtracting) {
+            throw new BusinessValidationException("Một tài liệu khác đang được AI trích xuất. Vui lòng đợi hoàn tất trước khi thao tác tiếp.");
+        }
                 
         if (research.getMetrics() == null) {
             research.setMetrics(new ArrayList<>());
         }
         
-        // Keep verified and manual metrics for this report, remove unverified AI metrics
+        // Remove ALL previous AI-extracted metrics for this report (whether verified or unverified)
+        // so that the re-extraction starts completely fresh without duplicating existing metrics
         research.getMetrics().removeIf(m -> 
-                m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()) &&
                 m.getInputMethod() == MetricInputMethod.AI_EXTRACTED &&
-                m.getVerificationStatus() == MetricVerificationStatus.UNVERIFIED);
+                ((m.getSource() != null && reportId.equals(m.getSource().getReportEntryId())) ||
+                 (m.getSource() != null && report.getDocumentId() != null && report.getDocumentId().equals(m.getSource().getDocumentId()))));
                 
         // Set initial extraction state
         report.setExtractionStatus(ExtractionStatus.EXTRACTING);
@@ -276,6 +292,44 @@ public class FinancialResearchService {
         self.executeExtractionAsync(taskId, reportId);
 
         auditLogService.log(getCurrentUserId(), AuditAction.FINANCIAL_AI_EXTRACTION_RUN, "ProjectTask", taskId.toString(), "Started re-extraction for report " + reportId);
+        return toResponse(research);
+    }
+
+    /**
+     * Cancel in-progress AI extraction for a report.
+     */
+    public FinancialResearchResponse cancelExtraction(Long projectId, Long taskId, String reportId) {
+        FinancialResearch research = researchRepository.findByTaskId(taskId)
+                .orElseThrow(() -> new BusinessValidationException("Research not found"));
+
+        FinancialReportEntry report = research.getReports().stream()
+                .filter(r -> r.getId().equals(reportId)).findFirst()
+                .orElseThrow(() -> new BusinessValidationException("Report not found"));
+
+        if (research.getStatus() != FinancialResearchStatus.DRAFT && research.getStatus() != FinancialResearchStatus.CHANGES_REQUESTED) {
+            throw new BusinessValidationException("Cannot cancel extraction on submitted or approved research");
+        }
+
+        if (report.getExtractionStatus() == ExtractionStatus.EXTRACTING) {
+            boolean hasMetrics = research.getMetrics() != null && research.getMetrics().stream()
+                    .anyMatch(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()));
+
+            if (hasMetrics) {
+                report.setExtractionStatus(ExtractionStatus.EXTRACTED);
+            } else {
+                report.setExtractionStatus(ExtractionStatus.NOT_EXTRACTED);
+            }
+            report.setExtractionStage(null);
+            report.setExtractionProgress(0);
+            report.setExtractionErrorCode(null);
+            report.setExtractionErrorMessage(null);
+            report.setUpdatedAt(LocalDateTime.now());
+
+            research = researchRepository.save(research);
+            log.info("Cancelled AI extraction for task {} report {}", taskId, reportId);
+            auditLogService.log(getCurrentUserId(), AuditAction.FINANCIAL_AI_EXTRACTION_RUN, "ProjectTask", taskId.toString(), "Cancelled AI extraction for report " + reportId);
+        }
+
         return toResponse(research);
     }
 
@@ -310,6 +364,10 @@ public class FinancialResearchService {
             updateExtractionProgress(taskId, reportId, FinancialExtractionStage.EXTRACTING_METRICS, PROGRESS_EXTRACTING);
 
             FinancialDocumentExtractionResult docResult = extractionService.callAiExtraction(doc);
+            if (isExtractionCancelled(taskId, reportId)) {
+                log.info("Extraction was cancelled for task {} report {}, aborting.", taskId, reportId);
+                return;
+            }
             if (docResult == null) {
                 // If multimodal fallback to text failed as well (returning null), or Gemini had a bad request
                 failExtraction(taskId, reportId, "AI_NO_RESULT", "AI did not return extraction results. Please retry.");
@@ -349,7 +407,19 @@ public class FinancialResearchService {
             }
 
             // --- STAGE: SAVING_RESULTS ---
+            if (isExtractionCancelled(taskId, reportId)) {
+                log.info("Extraction was cancelled for task {} report {}, skipping save.", taskId, reportId);
+                return;
+            }
             updateExtractionProgress(taskId, reportId, FinancialExtractionStage.SAVING_RESULTS, PROGRESS_SAVING);
+
+            // Ensure no duplicate AI metrics remain for this report before adding fresh ones
+            final String currentDocId = doc.getId();
+            research.getMetrics().removeIf(m -> 
+                    m.getInputMethod() == MetricInputMethod.AI_EXTRACTED &&
+                    m.getSource() != null &&
+                    (reportId.equals(m.getSource().getReportEntryId()) ||
+                     (currentDocId != null && currentDocId.equals(m.getSource().getDocumentId()))));
 
             research.getMetrics().addAll(newMetrics);
 
@@ -380,17 +450,23 @@ public class FinancialResearchService {
             FinancialResearch research = researchRepository.findByTaskId(taskId).orElse(null);
             if (research == null) return;
 
-            research.getReports().stream()
+            boolean shouldSave = research.getReports().stream()
                     .filter(r -> r.getId().equals(reportId))
                     .findFirst()
-                    .ifPresent(report -> {
+                    .map(report -> {
+                        if (report.getExtractionStatus() != ExtractionStatus.EXTRACTING) {
+                            return false;
+                        }
                         report.setExtractionStage(stage);
                         report.setExtractionProgress(progress);
                         report.setUpdatedAt(LocalDateTime.now());
-                    });
+                        return true;
+                    }).orElse(false);
 
-            researchRepository.save(research);
-            log.debug("Extraction progress updated: task={} report={} stage={} progress={}%", taskId, reportId, stage, progress);
+            if (shouldSave) {
+                researchRepository.save(research);
+                log.debug("Extraction progress updated: task={} report={} stage={} progress={}%", taskId, reportId, stage, progress);
+            }
         } catch (Exception e) {
             log.warn("Failed to update extraction progress for task={} report={}: {}", taskId, reportId, e.getMessage());
         }
@@ -404,23 +480,38 @@ public class FinancialResearchService {
             FinancialResearch research = researchRepository.findByTaskId(taskId).orElse(null);
             if (research == null) return;
 
-            research.getReports().stream()
+            boolean shouldSave = research.getReports().stream()
                     .filter(r -> r.getId().equals(reportId))
                     .findFirst()
-                    .ifPresent(report -> {
+                    .map(report -> {
+                        if (report.getExtractionStatus() != ExtractionStatus.EXTRACTING) {
+                            return false;
+                        }
                         report.setExtractionStatus(ExtractionStatus.FAILED);
                         report.setExtractionStage(FinancialExtractionStage.FAILED);
                         report.setExtractionCompletedAt(LocalDateTime.now());
                         report.setExtractionErrorCode(errorCode);
                         report.setExtractionErrorMessage(errorMessage);
                         report.setUpdatedAt(LocalDateTime.now());
-                        // Keep last progress value — don't reset to 0
-                    });
+                        return true;
+                    }).orElse(false);
 
-            researchRepository.save(research);
+            if (shouldSave) {
+                researchRepository.save(research);
+            }
         } catch (Exception e) {
             log.error("Failed to persist extraction failure for task={} report={}", taskId, reportId, e);
         }
+    }
+
+    private boolean isExtractionCancelled(Long taskId, String reportId) {
+        FinancialResearch research = researchRepository.findByTaskId(taskId).orElse(null);
+        if (research == null) return true;
+        return research.getReports().stream()
+                .filter(r -> r.getId().equals(reportId))
+                .findFirst()
+                .map(r -> r.getExtractionStatus() != ExtractionStatus.EXTRACTING)
+                .orElse(true);
     }
 
     /**
@@ -452,6 +543,30 @@ public class FinancialResearchService {
     public FinancialResearchResponse addManualMetric(Long projectId, Long taskId, CreateFinancialMetricRequest request) {
         FinancialResearch research = researchRepository.findByTaskId(taskId).orElseThrow();
         
+        String reportEntryId = request.getReportEntryId();
+        if ((reportEntryId == null || reportEntryId.isBlank()) && request.getReportId() != null) {
+            reportEntryId = request.getReportId();
+        }
+
+        FinancialReportEntry targetReport = null;
+        if (research.getReports() != null && !research.getReports().isEmpty()) {
+            if (reportEntryId != null) {
+                final String finalReportEntryId = reportEntryId;
+                targetReport = research.getReports().stream()
+                        .filter(r -> finalReportEntryId.equals(r.getId()))
+                        .findFirst().orElse(null);
+            }
+            if (targetReport == null && research.getReports().size() == 1) {
+                targetReport = research.getReports().get(0);
+                reportEntryId = targetReport.getId();
+            }
+        }
+
+        String sourceDocumentId = request.getSourceDocumentId();
+        if (sourceDocumentId == null && targetReport != null) {
+            sourceDocumentId = targetReport.getDocumentId();
+        }
+
         FinancialMetric metric = FinancialMetric.builder()
                 .id(UUID.randomUUID().toString())
                 .label(request.getLabel())
@@ -460,10 +575,10 @@ public class FinancialResearchService {
                 .rawUnit(request.getRawUnit())
                 .evidence(request.getEvidence())
                 .inputMethod(MetricInputMethod.MANUAL)
-                .period(request.getPeriod())
+                .period(request.getPeriod() != null ? request.getPeriod() : (targetReport != null ? targetReport.getReportingPeriod() : null))
                 .source(MetricSource.builder()
-                        .reportEntryId(request.getReportEntryId())
-                        .documentId(request.getSourceDocumentId())
+                        .reportEntryId(reportEntryId)
+                        .documentId(sourceDocumentId)
                         .page(request.getSourcePage())
                         .build())
                 .qualityStatus(MetricQualityStatus.VALID)
@@ -474,9 +589,63 @@ public class FinancialResearchService {
         metric.setNormalizedValue(norm.value);
         metric.setNormalizedUnit(norm.unit);
 
+        if (research.getMetrics() == null) {
+            research.setMetrics(new ArrayList<>());
+        }
         research.getMetrics().add(metric);
+
+        if (targetReport != null && (targetReport.getExtractionStatus() == ExtractionStatus.NOT_EXTRACTED ||
+                                     targetReport.getExtractionStatus() == ExtractionStatus.FAILED)) {
+            targetReport.setExtractionStatus(ExtractionStatus.EXTRACTED);
+        }
+
+        healOrphanManualMetrics(research);
+
         research = researchRepository.save(research);
         return toResponse(research);
+    }
+
+    private void healOrphanManualMetrics(FinancialResearch research) {
+        if (research.getMetrics() == null || research.getMetrics().isEmpty() ||
+            research.getReports() == null || research.getReports().isEmpty()) {
+            return;
+        }
+        boolean modified = false;
+        for (FinancialMetric m : research.getMetrics()) {
+            if (m.getSource() == null || m.getSource().getReportEntryId() == null) {
+                FinancialReportEntry targetReport = null;
+                if (research.getReports().size() == 1) {
+                    targetReport = research.getReports().get(0);
+                } else if (m.getPeriod() != null) {
+                    for (FinancialReportEntry r : research.getReports()) {
+                        if (r.getReportingPeriod() != null &&
+                            java.util.Objects.equals(r.getReportingPeriod().getYear(), m.getPeriod().getYear()) &&
+                            r.getReportingPeriod().getPeriod() != null && m.getPeriod().getPeriod() != null &&
+                            r.getReportingPeriod().getPeriod().trim().equalsIgnoreCase(m.getPeriod().getPeriod().trim())) {
+                            targetReport = r;
+                            break;
+                        }
+                    }
+                }
+                if (targetReport != null) {
+                    if (m.getSource() == null) {
+                        m.setSource(MetricSource.builder()
+                                .reportEntryId(targetReport.getId())
+                                .documentId(targetReport.getDocumentId())
+                                .build());
+                    } else {
+                        m.getSource().setReportEntryId(targetReport.getId());
+                        if (m.getSource().getDocumentId() == null) {
+                            m.getSource().setDocumentId(targetReport.getDocumentId());
+                        }
+                    }
+                    modified = true;
+                }
+            }
+        }
+        if (modified) {
+            researchRepository.save(research);
+        }
     }
 
     private void validateMetricEditable(FinancialResearch research, FinancialMetric metric) {
@@ -521,12 +690,13 @@ public class FinancialResearchService {
         return toResponse(research);
     }
 
+    @Transactional
     public FinancialResearchResponse removeMetric(Long projectId, Long taskId, String metricId) {
         FinancialResearch research = researchRepository.findByTaskId(taskId).orElseThrow();
         FinancialMetric metric = research.getMetrics().stream().filter(m -> m.getId().equals(metricId)).findFirst().orElseThrow();
         validateMetricEditable(research, metric);
         
-        research.getMetrics().remove(metric);
+        research.getMetrics().removeIf(m -> m.getId().equals(metricId));
         research = researchRepository.save(research);
         return toResponse(research);
     }
@@ -539,6 +709,61 @@ public class FinancialResearchService {
 
         metric.setQualityStatus(MetricQualityStatus.VALID);
         metric.setVerificationStatus(MetricVerificationStatus.VERIFIED);
+        research = researchRepository.save(research);
+        return toResponse(research);
+    }
+
+    public FinancialResearchResponse unverifyMetric(Long projectId, Long taskId, String metricId) {
+        FinancialResearch research = researchRepository.findByTaskId(taskId).orElseThrow();
+        FinancialMetric metric = research.getMetrics().stream().filter(m -> m.getId().equals(metricId)).findFirst().orElseThrow();
+        
+        validateMetricEditable(research, metric);
+
+        metric.setVerificationStatus(MetricVerificationStatus.UNVERIFIED);
+        research = researchRepository.save(research);
+        return toResponse(research);
+    }
+
+    public FinancialResearchResponse verifyAllMetricsForReport(Long projectId, Long taskId, String reportId) {
+        FinancialResearch research = researchRepository.findByTaskId(taskId)
+                .orElseThrow(() -> new BusinessValidationException("Research not found"));
+
+        FinancialReportEntry report = research.getReports().stream()
+                .filter(r -> r.getId().equals(reportId))
+                .findFirst()
+                .orElseThrow(() -> new BusinessValidationException("Report not found"));
+
+        if (research.getStatus() == FinancialResearchStatus.SUBMITTED || research.getStatus() == FinancialResearchStatus.APPROVED) {
+            throw new BusinessValidationException("Cannot modify metrics in a submitted or approved research package.");
+        }
+        if (report.getReviewStatus() == FinancialReportReviewStatus.APPROVED) {
+            throw new BusinessValidationException("Cannot modify metrics for an approved report.");
+        }
+
+        if (research.getMetrics() != null && !research.getMetrics().isEmpty()) {
+            for (FinancialMetric metric : research.getMetrics()) {
+                boolean belongs = (metric.getSource() != null && reportId.equals(metric.getSource().getReportEntryId())) ||
+                        (metric.getSource() != null && metric.getSource().getDocumentId() != null && metric.getSource().getDocumentId().equals(report.getDocumentId())) ||
+                        (metric.getPeriod() != null && report.getReportingPeriod() != null &&
+                         java.util.Objects.equals(metric.getPeriod().getYear(), report.getReportingPeriod().getYear()) &&
+                         metric.getPeriod().getPeriod() != null && report.getReportingPeriod().getPeriod() != null &&
+                         metric.getPeriod().getPeriod().trim().equalsIgnoreCase(report.getReportingPeriod().getPeriod().trim()));
+
+                if (belongs) {
+                    metric.setQualityStatus(MetricQualityStatus.VALID);
+                    metric.setVerificationStatus(MetricVerificationStatus.VERIFIED);
+                    if (metric.getSource() == null) {
+                        metric.setSource(MetricSource.builder()
+                                .reportEntryId(report.getId())
+                                .documentId(report.getDocumentId())
+                                .build());
+                    } else if (metric.getSource().getReportEntryId() == null) {
+                        metric.getSource().setReportEntryId(report.getId());
+                    }
+                }
+            }
+        }
+
         research = researchRepository.save(research);
         return toResponse(research);
     }
@@ -576,12 +801,19 @@ public class FinancialResearchService {
                 throw new BusinessValidationException("Cannot submit report that has not been extracted: " + report.getTitle());
             }
             
-            // Check for unverified metrics in THIS report
+            long reportMetricCount = research.getMetrics().stream()
+                    .filter(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()))
+                    .count();
+            if (reportMetricCount == 0) {
+                throw new BusinessValidationException("NO_METRICS", "Báo cáo '" + report.getTitle() + "' chưa có chỉ số nào được trích xuất.");
+            }
+
+            // Check for unverified metrics in THIS report - all metrics must be VERIFIED before submit
             boolean hasUnverified = research.getMetrics().stream()
                     .filter(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()))
-                    .anyMatch(m -> m.getQualityStatus() == MetricQualityStatus.NEEDS_REVIEW && m.getVerificationStatus() == MetricVerificationStatus.UNVERIFIED);
+                    .anyMatch(m -> m.getVerificationStatus() != MetricVerificationStatus.VERIFIED);
             if (hasUnverified) {
-                throw new BusinessValidationException("Cannot submit report with unverified metrics that need review: " + report.getTitle());
+                throw new BusinessValidationException("UNVERIFIED_FIELDS", "Không thể nộp báo cáo '" + report.getTitle() + "' do còn chỉ số chưa được xác thực. Vui lòng xác thực tất cả các chỉ số trước khi nộp cho Manager.");
             }
 
             // Set review status to PENDING_REVIEW for all selected reports

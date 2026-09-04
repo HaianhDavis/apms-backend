@@ -59,6 +59,14 @@ public class FinancialResearchController {
         return ResponseEntity.ok(researchService.reExtractReport(projectId, taskId, reportId));
     }
 
+    @PostMapping("/projects/{projectId}/tasks/{taskId}/financial-research/reports/{reportId}/cancel-extract")
+    public ResponseEntity<FinancialResearchResponse> cancelExtractReport(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String reportId) {
+        return ResponseEntity.ok(researchService.cancelExtraction(projectId, taskId, reportId));
+    }
+
     @PostMapping("/projects/{projectId}/tasks/{taskId}/financial-research/metrics")
     public ResponseEntity<FinancialResearchResponse> addManualMetric(
             @PathVariable Long projectId,
@@ -90,6 +98,22 @@ public class FinancialResearchController {
             @PathVariable Long taskId,
             @PathVariable String metricId) {
         return ResponseEntity.ok(researchService.verifyMetric(projectId, taskId, metricId));
+    }
+
+    @PostMapping("/projects/{projectId}/tasks/{taskId}/financial-research/metrics/{metricId}/unverify")
+    public ResponseEntity<FinancialResearchResponse> unverifyMetric(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String metricId) {
+        return ResponseEntity.ok(researchService.unverifyMetric(projectId, taskId, metricId));
+    }
+
+    @PostMapping("/projects/{projectId}/tasks/{taskId}/financial-research/reports/{reportId}/verify-all")
+    public ResponseEntity<FinancialResearchResponse> verifyAllMetrics(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String reportId) {
+        return ResponseEntity.ok(researchService.verifyAllMetricsForReport(projectId, taskId, reportId));
     }
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/financial-research/reports/{reportId}/review")

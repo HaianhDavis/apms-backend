@@ -161,6 +161,16 @@ public class ContractResearchController {
         return ResponseEntity.ok(researchService.verifyArrayItem(taskId, contractId, fieldPath, itemId, userId));
     }
 
+    @PostMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}/verify-all")
+    public ResponseEntity<ContractResearchResponse> verifyAllContractFields(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String contractId,
+            @AuthenticationPrincipal UserDetailsImpl user) {
+        Long userId = user != null ? user.getId() : 1L;
+        return ResponseEntity.ok(researchService.verifyAllContractFields(taskId, contractId, userId));
+    }
+
     @PostMapping("/projects/{projectId}/tasks/{taskId}/contract-research/submit")
     @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'SYSTEM_ADMIN')")
     public ResponseEntity<ContractResearchResponse> submitResearch(

@@ -238,6 +238,12 @@ public class ContractResearchService {
             throw new BusinessValidationException("EXTRACTION_IN_PROGRESS", "Extraction is already in progress for this contract.");
         }
 
+        boolean anyExtracting = research.getContracts() != null && research.getContracts().stream()
+                .anyMatch(c -> c.getExtractionStatus() == ContractExtractionStatus.PROCESSING);
+        if (anyExtracting) {
+            throw new BusinessValidationException("EXTRACTION_IN_PROGRESS", "Một tài liệu khác đang được AI trích xuất. Vui lòng đợi hoàn tất trước khi thao tác tiếp.");
+        }
+
         entry.setExtractionStatus(ContractExtractionStatus.PROCESSING);
         entry.setExtractionStage(ContractExtractionStage.QUEUED);
         entry.setExtractionProgress(PROGRESS_QUEUED);
@@ -392,6 +398,16 @@ public class ContractResearchService {
         ContractEntry entry = findContractOrThrow(research, contractId);
 
         validateContractEditable(research, entry);
+
+        if (entry.getExtractionStatus() == ContractExtractionStatus.PROCESSING) {
+            throw new BusinessValidationException("EXTRACTION_IN_PROGRESS", "Extraction is already in progress for this contract.");
+        }
+
+        boolean anyOtherExtracting = research.getContracts() != null && research.getContracts().stream()
+                .anyMatch(c -> !c.getId().equals(contractId) && c.getExtractionStatus() == ContractExtractionStatus.PROCESSING);
+        if (anyOtherExtracting) {
+            throw new BusinessValidationException("EXTRACTION_IN_PROGRESS", "Một tài liệu khác đang được AI trích xuất. Vui lòng đợi hoàn tất trước khi thao tác tiếp.");
+        }
 
         ContractType confirmedType = entry.getConfirmedContractType() != null ? entry.getConfirmedContractType() : ContractType.COOPERATION_AGREEMENT;
 
@@ -574,6 +590,62 @@ public class ContractResearchService {
         applyArrayItemVerification(entry, fieldPath, itemId);
         entry.setUpdatedAt(LocalDateTime.now());
 
+        research = contractResearchRepository.save(research);
+        return toResponse(research);
+    }
+
+    @Transactional
+    public ContractResearchResponse verifyAllContractFields(Long taskId, String contractId, Long userId) {
+        ContractResearch research = getResearchEntity(taskId);
+        ContractEntry entry = findContractOrThrow(research, contractId);
+        validateContractEditable(research, entry);
+
+        List<String> scalarFields = List.of(
+            "common.contractNumber", "common.signDate", "common.effectiveDate",
+            "common.expirationDate", "common.contractValue", "common.governingLaw", "common.purpose"
+        );
+        for (String fieldPath : scalarFields) {
+            applyScalarFieldVerification(entry, fieldPath);
+        }
+
+        if (entry.getCommonData() != null && entry.getCommonData().getParties() != null) {
+            for (com.apms.domain.contract.model.ContractParty p : entry.getCommonData().getParties()) {
+                if (p.getId() != null) {
+                    applyArrayItemVerification(entry, "parties", p.getId());
+                }
+            }
+        }
+        if (entry.getCooperationAgreementData() != null) {
+            if (entry.getCooperationAgreementData().getResponsibilities() != null) {
+                for (com.apms.domain.contract.model.PartyResponsibility r : entry.getCooperationAgreementData().getResponsibilities()) {
+                    if (r.getId() != null) applyArrayItemVerification(entry, "responsibilities", r.getId());
+                }
+            }
+            if (entry.getCooperationAgreementData().getResourceCommitments() != null) {
+                for (com.apms.domain.contract.model.ResourceCommitment rc : entry.getCooperationAgreementData().getResourceCommitments()) {
+                    if (rc.getId() != null) applyArrayItemVerification(entry, "resourcecommitments", rc.getId());
+                }
+            }
+        }
+        if (entry.getPartnershipAgreementData() != null) {
+            if (entry.getPartnershipAgreementData().getPartnerRoles() != null) {
+                for (com.apms.domain.contract.model.PartnerRole pr : entry.getPartnershipAgreementData().getPartnerRoles()) {
+                    if (pr.getId() != null) applyArrayItemVerification(entry, "partnerroles", pr.getId());
+                }
+            }
+            if (entry.getPartnershipAgreementData().getMutualCommitments() != null) {
+                for (com.apms.domain.contract.model.MutualCommitment mc : entry.getPartnershipAgreementData().getMutualCommitments()) {
+                    if (mc.getId() != null) applyArrayItemVerification(entry, "mutualcommitments", mc.getId());
+                }
+            }
+            if (entry.getPartnershipAgreementData().getPerformanceRequirements() != null) {
+                for (com.apms.domain.contract.model.PerformanceRequirement pr : entry.getPartnershipAgreementData().getPerformanceRequirements()) {
+                    if (pr.getId() != null) applyArrayItemVerification(entry, "performancerequirements", pr.getId());
+                }
+            }
+        }
+
+        entry.setUpdatedAt(LocalDateTime.now());
         research = contractResearchRepository.save(research);
         return toResponse(research);
     }

@@ -12,5 +12,13 @@ public class CreateFinancialMetricRequest {
     private String sourceDocumentId;
     private Integer sourcePage;
     private String reportEntryId;
+    private String reportId;
     private String evidence;
+
+    public String getReportEntryId() {
+        if (reportEntryId != null && !reportEntryId.isBlank()) {
+            return reportEntryId;
+        }
+        return reportId;
+    }
 }

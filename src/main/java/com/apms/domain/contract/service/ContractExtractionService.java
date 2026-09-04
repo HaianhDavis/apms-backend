@@ -405,8 +405,14 @@ public class ContractExtractionService {
         }
     }
 
+    private String getCleanApiKey() {
+        if (geminiApiKey == null) return "";
+        return geminiApiKey.trim().replaceAll("^[`'\"\\s]+|[`'\"\\s]+$", "");
+    }
+
     private String callGemini(String fullPrompt) {
-        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
+        String cleanKey = getCleanApiKey();
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + cleanKey;
 
         Map<String, Object> requestBody = Map.of(
                 "contents", List.of(
@@ -425,6 +431,7 @@ public class ContractExtractionService {
             try {
                 return restClient.post()
                         .uri(url)
+                        .header("x-goog-api-key", cleanKey)
                         .body(requestBody)
                         .retrieve()
                         .body(String.class);
@@ -473,7 +480,8 @@ public class ContractExtractionService {
     }
 
     private String callGeminiMultimodal(String prompt, String mimeType, String base64Data) {
-        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
+        String cleanKey = getCleanApiKey();
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + cleanKey;
 
         Map<String, Object> requestBody = Map.of(
                 "contents", List.of(
@@ -496,6 +504,7 @@ public class ContractExtractionService {
             try {
                 return restClient.post()
                         .uri(url)
+                        .header("x-goog-api-key", cleanKey)
                         .body(requestBody)
                         .retrieve()
                         .body(String.class);

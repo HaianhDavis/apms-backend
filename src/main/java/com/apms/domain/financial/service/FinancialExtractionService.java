@@ -172,9 +172,15 @@ public class FinancialExtractionService {
         }
     }
 
+    private String getCleanApiKey() {
+        if (geminiApiKey == null) return "";
+        return geminiApiKey.trim().replaceAll("^[`'\"\\s]+|[`'\"\\s]+$", "");
+    }
+
     private FinancialDocumentExtractionResult callGemini(String promptTemplate, String text) {
         try {
-            String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
+            String cleanKey = getCleanApiKey();
+            String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + cleanKey;
 
             String combinedPrompt = promptTemplate + "\n\n=== DOCUMENT TEXT ===\n" + text;
 
@@ -185,13 +191,15 @@ public class FinancialExtractionService {
                             ))
                     ),
                     "generationConfig", Map.of(
-                            "responseMimeType", "application/json"
+                            "responseMimeType", "application/json",
+                            "temperature", 0.0
                     )
             );
 
             RestClient restClient = restClientBuilder.build();
             String response = restClient.post()
                     .uri(url)
+                    .header("x-goog-api-key", cleanKey)
                     .body(requestBody)
                     .retrieve()
                     .body(String.class);
@@ -220,7 +228,8 @@ public class FinancialExtractionService {
 
     private FinancialDocumentExtractionResult callGeminiMultimodal(String promptTemplate, String mimeType, String base64Data) {
         try {
-            String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + geminiApiKey;
+            String cleanKey = getCleanApiKey();
+            String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + cleanKey;
 
             Map<String, Object> requestBody = Map.of(
                     "contents", List.of(
@@ -233,13 +242,15 @@ public class FinancialExtractionService {
                             ))
                     ),
                     "generationConfig", Map.of(
-                            "responseMimeType", "application/json"
+                            "responseMimeType", "application/json",
+                            "temperature", 0.0
                     )
             );
 
             RestClient restClient = restClientBuilder.build();
             String response = restClient.post()
                     .uri(url)
+                    .header("x-goog-api-key", cleanKey)
                     .body(requestBody)
                     .retrieve()
                     .body(String.class);
