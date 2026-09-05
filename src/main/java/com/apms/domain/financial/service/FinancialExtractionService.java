@@ -2,6 +2,8 @@ package com.apms.domain.financial.service;
 
 import com.apms.common.exception.BusinessValidationException;
 import com.apms.domain.document.RawDocument;
+import com.apms.domain.financial.ReportingPeriod;
+import com.apms.domain.financial.ReportingPeriodType;
 import com.apms.domain.financial.dto.FinancialDocumentExtractionResult;
 import com.apms.domain.financial.dto.FinancialExtractionResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -54,13 +56,17 @@ public class FinancialExtractionService {
     }
 
     public Optional<FinancialDocumentExtractionResult> extractDocument(RawDocument doc) {
+        return extractDocument(doc, null);
+    }
+
+    public Optional<FinancialDocumentExtractionResult> extractDocument(RawDocument doc, ReportingPeriod targetPeriod) {
         try {
             if (!isExtractable(doc)) {
                 log.warn("Document {} contains no extractable data", doc.getId());
                 return Optional.empty();
             }
 
-            return Optional.ofNullable(callAiExtraction(doc));
+            return Optional.ofNullable(callAiExtraction(doc, targetPeriod));
         } catch (BusinessValidationException e) {
             throw e;
         } catch (Exception e) {
@@ -138,7 +144,13 @@ public class FinancialExtractionService {
     }
 
     public FinancialDocumentExtractionResult callAiExtraction(RawDocument doc) {
+        return callAiExtraction(doc, null);
+    }
+
+    public FinancialDocumentExtractionResult callAiExtraction(RawDocument doc, ReportingPeriod targetPeriod) {
         String promptTemplate = loadPrompt();
+        String targetContext = buildTargetContextPrompt(targetPeriod);
+        String finalPrompt = promptTemplate + targetContext;
         
         String docPath = doc.getStorage() != null ? doc.getStorage().getPath() : null;
         if (docPath != null) {
@@ -147,8 +159,8 @@ public class FinancialExtractionService {
                 try {
                     byte[] fileBytes = java.nio.file.Files.readAllBytes(file.toPath());
                     String base64 = java.util.Base64.getEncoder().encodeToString(fileBytes);
-                    log.info("Sending PDF directly to Gemini via Multimodal API: {}", file.getName());
-                    return callGeminiMultimodal(promptTemplate, "application/pdf", base64);
+                    log.info("Sending PDF directly to Gemini via Multimodal API: {} with target period: {}", file.getName(), targetPeriod);
+                    return callGeminiMultimodal(finalPrompt, "application/pdf", base64);
                 } catch (IOException e) {
                     log.warn("Failed to read PDF for multimodal extraction, falling back to text", e);
                 }
@@ -159,7 +171,44 @@ public class FinancialExtractionService {
         if (text.isBlank()) {
             return null;
         }
-        return callGemini(promptTemplate, text);
+        return callGemini(finalPrompt, text);
+    }
+
+    private String buildTargetContextPrompt(ReportingPeriod targetPeriod) {
+        if (targetPeriod == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n\n=== TARGET REPORT CONTEXT ===\n");
+        if (targetPeriod.getPeriodType() != null) {
+            sb.append("Report Type: ").append(targetPeriod.getPeriodType()).append("\n");
+        }
+        if (targetPeriod.getPeriod() != null) {
+            sb.append("Target Quarter: ").append(targetPeriod.getPeriod()).append("\n");
+        }
+        if (targetPeriod.getYear() != null) {
+            sb.append("Target Year: ").append(targetPeriod.getYear()).append("\n");
+        }
+        if (targetPeriod.getPeriod() != null && targetPeriod.getYear() != null) {
+            sb.append("TARGET REPORTING PERIOD: ").append(targetPeriod.getPeriod()).append(" ").append(targetPeriod.getYear()).append("\n");
+        }
+        if (targetPeriod.getAsOfDate() != null) {
+            sb.append("Target As-Of Date: ").append(targetPeriod.getAsOfDate()).append("\n");
+        }
+        sb.append("\nCRITICAL EXTRACTION DIRECTIVE FOR TARGET PERIOD:\n");
+        if (targetPeriod.getPeriodType() == ReportingPeriodType.QUARTER || 
+            (targetPeriod.getPeriod() != null && targetPeriod.getPeriod().toUpperCase().startsWith("Q"))) {
+            String q = targetPeriod.getPeriod() != null ? targetPeriod.getPeriod() : "QUARTER";
+            sb.append("- You MUST extract data strictly for ").append(q)
+              .append(targetPeriod.getYear() != null ? " " + targetPeriod.getYear() : "")
+              .append(" (3 MONTHS of ").append(q).append(" ONLY).\n");
+            sb.append("- In Báo cáo kết quả hoạt động kinh doanh (Income Statement): Extract ONLY from the column for ")
+              .append(q).append(" current year (Quý này năm nay). DO NOT extract from 'Lũy kế 6 tháng', 'Lũy kế từ đầu năm', 'Bán niên', 'YTD', or annual columns.\n");
+            sb.append("- In Bảng cân đối kế toán (Balance Sheet): Extract ONLY from 'Số cuối kỳ'.\n");
+            sb.append("- For EVERY extracted metric, set period.period to '").append(q).append("', period.periodType to 'QUARTER', and period.year to ")
+              .append(targetPeriod.getYear() != null ? targetPeriod.getYear() : "current year").append(".\n");
+        }
+        return sb.toString();
     }
 
     private String loadPrompt() {

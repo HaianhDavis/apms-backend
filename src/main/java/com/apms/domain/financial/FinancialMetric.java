@@ -16,6 +16,8 @@ import java.math.BigDecimal;
 public class FinancialMetric {
     private String id;
     private String label;
+    private String originalLabel;
+    private String metricCode;
     private String normalizedKey;
 
     private String rawValue;

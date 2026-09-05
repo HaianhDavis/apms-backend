@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -365,7 +366,7 @@ public class FinancialResearchService {
             // --- STAGE: EXTRACTING_METRICS ---
             updateExtractionProgress(taskId, reportId, FinancialExtractionStage.EXTRACTING_METRICS, PROGRESS_EXTRACTING);
 
-            FinancialDocumentExtractionResult docResult = extractionService.callAiExtraction(doc);
+            FinancialDocumentExtractionResult docResult = extractionService.callAiExtraction(doc, report.getReportingPeriod());
             if (isExtractionCancelled(taskId, reportId)) {
                 log.info("Extraction was cancelled for task {} report {}, aborting.", taskId, reportId);
                 return;
@@ -399,8 +400,20 @@ public class FinancialResearchService {
                         .filter(java.util.Objects::nonNull)
                         .collect(java.util.stream.Collectors.toSet());
 
+                ReportingPeriod repPeriod = report.getReportingPeriod();
+                boolean isTargetQuarter = repPeriod != null && (repPeriod.getPeriodType() == ReportingPeriodType.QUARTER
+                        || (repPeriod.getPeriod() != null && repPeriod.getPeriod().toUpperCase().startsWith("Q")));
+
                 for (AiFinancialMetricCandidate candidate : docResult.getMetricCandidates()) {
-                    FinancialMetric metric = mapToMetric(candidate, doc, report.getId());
+                    if (isTargetQuarter) {
+                        boolean isIncome = isIncomeStatementMetric(candidate.getLabel(), candidate.getStatementType());
+                        if (isIncome && isCumulativeColumn(candidate.getSourceColumn())) {
+                            log.warn("Skipped metric {} because source column '{}' is cumulative/YTD and does not match target quarterly period {}",
+                                    candidate.getLabel(), candidate.getSourceColumn(), repPeriod.getPeriod());
+                            continue;
+                        }
+                    }
+                    FinancialMetric metric = mapToMetric(candidate, doc, report);
                     if (!existingKeys.contains(metric.getNormalizedKey())) {
                         newMetrics.add(metric);
                         existingKeys.add(metric.getNormalizedKey());
@@ -1201,7 +1214,51 @@ public class FinancialResearchService {
                 .build();
     }
 
-    private FinancialMetric mapToMetric(AiFinancialMetricCandidate candidate, RawDocument doc, String reportEntryId) {
+    public static boolean isCumulativeColumn(String sourceColumn) {
+        if (sourceColumn == null || sourceColumn.isBlank()) {
+            return false;
+        }
+        String lower = sourceColumn.trim().toLowerCase();
+        String normalized = Normalizer.normalize(lower, Normalizer.Form.NFD)
+                .replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
+
+        return normalized.contains("luy ke")
+                || normalized.contains("6 thang")
+                || normalized.contains("9 thang")
+                || normalized.contains("ban nien")
+                || normalized.contains("nua nam")
+                || normalized.contains("ytd")
+                || normalized.contains("year to date")
+                || normalized.contains("year-to-date")
+                || normalized.contains("cumulative")
+                || normalized.contains("full year")
+                || normalized.contains("annual")
+                || normalized.contains("ca nam")
+                || normalized.contains("12 thang");
+    }
+
+    public static boolean isIncomeStatementMetric(String label, String statementType) {
+        if ("INCOME_STATEMENT".equalsIgnoreCase(statementType)) {
+            return true;
+        }
+        if (label == null) return false;
+        String lower = Normalizer.normalize(label.toLowerCase(), Normalizer.Form.NFD)
+                .replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
+        return lower.contains("doanh thu")
+                || lower.contains("gia von")
+                || lower.contains("loi nhuan")
+                || lower.contains("chi phi")
+                || lower.contains("thu nhap")
+                || lower.contains("lai co ban")
+                || lower.contains("eps");
+    }
+
+    public FinancialMetric mapToMetric(AiFinancialMetricCandidate candidate, RawDocument doc, String reportEntryId) {
+        FinancialReportEntry dummyReport = FinancialReportEntry.builder().id(reportEntryId).build();
+        return mapToMetric(candidate, doc, dummyReport);
+    }
+
+    public FinancialMetric mapToMetric(AiFinancialMetricCandidate candidate, RawDocument doc, FinancialReportEntry report) {
         NormalizedValue normalized = normalizeValue(candidate.getRawValue(), candidate.getRawUnit());
         
         MetricQualityStatus quality = MetricQualityStatus.VALID;
@@ -1212,21 +1269,49 @@ public class FinancialResearchService {
             quality = MetricQualityStatus.NEEDS_REVIEW;
         }
 
+        // ReportingPeriod normalization: report.reportingPeriod is the authoritative SOURCE OF TRUTH
+        ReportingPeriod reportPeriod = report != null ? report.getReportingPeriod() : null;
+        ReportingPeriod finalPeriod;
+
+        if (reportPeriod != null && reportPeriod.getPeriod() != null) {
+            String asOfDate = null;
+            if (candidate.getPeriod() != null && candidate.getPeriod().getAsOfDate() != null) {
+                asOfDate = candidate.getPeriod().getAsOfDate();
+            } else if (reportPeriod.getAsOfDate() != null) {
+                asOfDate = reportPeriod.getAsOfDate();
+            }
+
+            finalPeriod = ReportingPeriod.builder()
+                    .year(reportPeriod.getYear())
+                    .periodType(reportPeriod.getPeriodType())
+                    .period(reportPeriod.getPeriod())
+                    .asOfDate(asOfDate)
+                    .build();
+        } else if (candidate.getPeriod() != null) {
+            finalPeriod = candidate.getPeriod();
+        } else {
+            finalPeriod = null;
+        }
+
         return FinancialMetric.builder()
                 .id(UUID.randomUUID().toString())
                 .label(candidate.getLabel())
+                .originalLabel(candidate.getOriginalLabel() != null ? candidate.getOriginalLabel() : candidate.getLabel())
+                .metricCode(candidate.getMetricCode())
                 .normalizedKey(generateNormalizedKey(candidate.getLabel()))
                 .rawValue(candidate.getRawValue())
                 .rawUnit(candidate.getRawUnit())
                 .normalizedValue(normalized.value)
                 .normalizedUnit(normalized.unit)
                 .inputMethod(MetricInputMethod.AI_EXTRACTED)
-                .period(candidate.getPeriod())
+                .period(finalPeriod)
                 .source(MetricSource.builder()
-                        .reportEntryId(reportEntryId)
-                        .documentId(doc.getId())
-                        .documentName(doc.getSource() != null ? doc.getSource().getFileName() : "Unknown")
+                        .reportEntryId(report != null ? report.getId() : null)
+                        .documentId(doc != null ? doc.getId() : null)
+                        .documentName(doc != null && doc.getSource() != null ? doc.getSource().getFileName() : "Unknown")
                         .page(candidate.getSourcePage())
+                        .sourceColumn(candidate.getSourceColumn())
+                        .statementType(candidate.getStatementType())
                         .build())
                 .evidence(candidate.getEvidence())
                 .confidence(candidate.getConfidence())
@@ -1294,23 +1379,47 @@ public class FinancialResearchService {
         }
     }
 
-    private FinancialResearchResponse toResponse(FinancialResearch domain) {
-        List<FinancialMetricResponse> metricResponses = domain.getMetrics() != null ? domain.getMetrics().stream().map(m -> FinancialMetricResponse.builder()
-                .id(m.getId())
-                .label(m.getLabel())
-                .normalizedKey(m.getNormalizedKey())
-                .rawValue(m.getRawValue())
-                .rawUnit(m.getRawUnit())
-                .normalizedValue(m.getNormalizedValue() != null ? m.getNormalizedValue().toString() : null)
-                .normalizedUnit(m.getNormalizedUnit())
-                .inputMethod(m.getInputMethod())
-                .period(m.getPeriod())
-                .source(m.getSource())
-                .evidence(m.getEvidence())
-                .confidence(m.getConfidence())
-                .qualityStatus(m.getQualityStatus())
-                .verificationStatus(m.getVerificationStatus())
-                .build()).collect(Collectors.toList()) : new ArrayList<>();
+    public FinancialResearchResponse toResponse(FinancialResearch domain) {
+        Map<String, FinancialReportEntry> reportMap = domain.getReports() != null ? domain.getReports().stream()
+                .collect(Collectors.toMap(FinancialReportEntry::getId, r -> r, (a, b) -> a)) : Collections.emptyMap();
+
+        List<FinancialMetricResponse> metricResponses = domain.getMetrics() != null ? domain.getMetrics().stream().map(m -> {
+            ReportingPeriod responsePeriod = m.getPeriod();
+            if (m.getSource() != null && m.getSource().getReportEntryId() != null) {
+                FinancialReportEntry rep = reportMap.get(m.getSource().getReportEntryId());
+                if (rep != null && rep.getReportingPeriod() != null && rep.getReportingPeriod().getPeriod() != null) {
+                    ReportingPeriod rp = rep.getReportingPeriod();
+                    if (responsePeriod == null || responsePeriod.getPeriod() == null || responsePeriod.getPeriod().isBlank()
+                            || responsePeriod.getPeriodType() == ReportingPeriodType.AS_OF_DATE) {
+                        responsePeriod = ReportingPeriod.builder()
+                                .year(rp.getYear() != null ? rp.getYear() : (responsePeriod != null ? responsePeriod.getYear() : null))
+                                .periodType(rp.getPeriodType())
+                                .period(rp.getPeriod())
+                                .asOfDate(responsePeriod != null && responsePeriod.getAsOfDate() != null ? responsePeriod.getAsOfDate() : rp.getAsOfDate())
+                                .build();
+                    }
+                }
+            }
+
+            return FinancialMetricResponse.builder()
+                    .id(m.getId())
+                    .label(m.getLabel())
+                    .originalLabel(m.getOriginalLabel())
+                    .metricCode(m.getMetricCode())
+                    .normalizedKey(m.getNormalizedKey())
+                    .rawValue(m.getRawValue())
+                    .rawUnit(m.getRawUnit())
+                    .normalizedValue(m.getNormalizedValue() != null ? m.getNormalizedValue().toString() : null)
+                    .normalizedUnit(m.getNormalizedUnit())
+                    .inputMethod(m.getInputMethod())
+                    .period(responsePeriod)
+                    .source(m.getSource())
+                    .evidence(m.getEvidence())
+                    .confidence(m.getConfidence())
+                    .qualityStatus(m.getQualityStatus())
+                    .verificationStatus(m.getVerificationStatus())
+                    .build();
+        }).collect(Collectors.toList()) : new ArrayList<>();
 
         List<FinancialReportEntry> filteredReports = domain.getReports() != null ? new ArrayList<>(domain.getReports()) : new ArrayList<>();
         // Removed backend filtering of non-submitted reports.

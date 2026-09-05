@@ -14,4 +14,6 @@ public class MetricSource {
     private String documentId;
     private String documentName;
     private Integer page;  // 1-based
+    private String sourceColumn;
+    private String statementType;
 }

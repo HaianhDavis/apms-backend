@@ -13,6 +13,8 @@ import lombok.NoArgsConstructor;
 public class FinancialMetricResponse {
     private String id;
     private String label;
+    private String originalLabel;
+    private String metricCode;
     private String normalizedKey;
     private String rawValue;
     private String rawUnit;

@@ -12,10 +12,14 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class AiFinancialMetricCandidate {
     private String label;
+    private String originalLabel;
+    private String metricCode;
+    private String statementType;
     private String rawValue;
     private String rawUnit;
     private ReportingPeriod period;
     private Integer sourcePage;
+    private String sourceColumn;
     private String evidence;
     private Double confidence;
 }
