@@ -155,7 +155,7 @@ public class ContractResearchService {
             throw new BusinessValidationException("DOCUMENT_NOT_FOUND", "RawDocument not found: " + req.getDocumentId());
         }
 
-        LocalDate docDate = req.getDocumentDate() != null ? req.getDocumentDate() : LocalDate.now();
+        LocalDate docDate = req.getDocumentDate();
 
         String docName = (doc.getSource() != null && doc.getSource().getFileName() != null)
                 ? doc.getSource().getFileName()
@@ -559,7 +559,21 @@ public class ContractResearchService {
 
         validateContractEditable(research, entry);
 
-        applyScalarFieldVerification(entry, fieldPath);
+        applyScalarFieldVerification(entry, fieldPath, ContractFieldVerificationStatus.VERIFIED);
+        entry.setUpdatedAt(LocalDateTime.now());
+
+        research = contractResearchRepository.save(research);
+        return toResponse(research);
+    }
+
+    @Transactional
+    public ContractResearchResponse unverifyScalarField(Long taskId, String contractId, String fieldPath, Long userId) {
+        ContractResearch research = getResearchEntity(taskId);
+        ContractEntry entry = findContractOrThrow(research, contractId);
+
+        validateContractEditable(research, entry);
+
+        applyScalarFieldVerification(entry, fieldPath, ContractFieldVerificationStatus.UNVERIFIED);
         entry.setUpdatedAt(LocalDateTime.now());
 
         research = contractResearchRepository.save(research);
@@ -587,7 +601,21 @@ public class ContractResearchService {
 
         validateContractEditable(research, entry);
 
-        applyArrayItemVerification(entry, fieldPath, itemId);
+        applyArrayItemVerification(entry, fieldPath, itemId, ContractFieldVerificationStatus.VERIFIED);
+        entry.setUpdatedAt(LocalDateTime.now());
+
+        research = contractResearchRepository.save(research);
+        return toResponse(research);
+    }
+
+    @Transactional
+    public ContractResearchResponse unverifyArrayItem(Long taskId, String contractId, String fieldPath, String itemId, Long userId) {
+        ContractResearch research = getResearchEntity(taskId);
+        ContractEntry entry = findContractOrThrow(research, contractId);
+
+        validateContractEditable(research, entry);
+
+        applyArrayItemVerification(entry, fieldPath, itemId, ContractFieldVerificationStatus.UNVERIFIED);
         entry.setUpdatedAt(LocalDateTime.now());
 
         research = contractResearchRepository.save(research);
@@ -600,54 +628,140 @@ public class ContractResearchService {
         ContractEntry entry = findContractOrThrow(research, contractId);
         validateContractEditable(research, entry);
 
+        setAllFieldsVerificationStatus(entry, ContractFieldVerificationStatus.VERIFIED);
+
+        entry.setUpdatedAt(LocalDateTime.now());
+        research = contractResearchRepository.save(research);
+        return toResponse(research);
+    }
+
+    @Transactional
+    public ContractResearchResponse unverifyAllContractFields(Long taskId, String contractId, Long userId) {
+        ContractResearch research = getResearchEntity(taskId);
+        ContractEntry entry = findContractOrThrow(research, contractId);
+        validateContractEditable(research, entry);
+
+        setAllFieldsVerificationStatus(entry, ContractFieldVerificationStatus.UNVERIFIED);
+
+        entry.setUpdatedAt(LocalDateTime.now());
+        research = contractResearchRepository.save(research);
+        return toResponse(research);
+    }
+
+    private void setAllFieldsVerificationStatus(ContractEntry entry, ContractFieldVerificationStatus status) {
         List<String> scalarFields = List.of(
-            "common.contractNumber", "common.signDate", "common.effectiveDate",
-            "common.expirationDate", "common.contractValue", "common.governingLaw", "common.purpose"
+            "common.contractNumber", "common.signingDate", "common.effectiveDate",
+            "common.expiryDate", "common.contractValue", "common.governingLaw", "common.purpose"
         );
         for (String fieldPath : scalarFields) {
-            applyScalarFieldVerification(entry, fieldPath);
+            applyScalarFieldVerification(entry, fieldPath, status);
         }
 
         if (entry.getCommonData() != null && entry.getCommonData().getParties() != null) {
             for (com.apms.domain.contract.model.ContractParty p : entry.getCommonData().getParties()) {
                 if (p.getId() != null) {
-                    applyArrayItemVerification(entry, "parties", p.getId());
+                    applyArrayItemVerification(entry, "parties", p.getId(), status);
                 }
             }
         }
         if (entry.getCooperationAgreementData() != null) {
             if (entry.getCooperationAgreementData().getResponsibilities() != null) {
                 for (com.apms.domain.contract.model.PartyResponsibility r : entry.getCooperationAgreementData().getResponsibilities()) {
-                    if (r.getId() != null) applyArrayItemVerification(entry, "responsibilities", r.getId());
+                    if (r.getId() != null) applyArrayItemVerification(entry, "responsibilities", r.getId(), status);
                 }
             }
             if (entry.getCooperationAgreementData().getResourceCommitments() != null) {
                 for (com.apms.domain.contract.model.ResourceCommitment rc : entry.getCooperationAgreementData().getResourceCommitments()) {
-                    if (rc.getId() != null) applyArrayItemVerification(entry, "resourcecommitments", rc.getId());
+                    if (rc.getId() != null) applyArrayItemVerification(entry, "resourcecommitments", rc.getId(), status);
                 }
             }
         }
         if (entry.getPartnershipAgreementData() != null) {
             if (entry.getPartnershipAgreementData().getPartnerRoles() != null) {
                 for (com.apms.domain.contract.model.PartnerRole pr : entry.getPartnershipAgreementData().getPartnerRoles()) {
-                    if (pr.getId() != null) applyArrayItemVerification(entry, "partnerroles", pr.getId());
+                    if (pr.getId() != null) applyArrayItemVerification(entry, "partnerroles", pr.getId(), status);
                 }
             }
             if (entry.getPartnershipAgreementData().getMutualCommitments() != null) {
                 for (com.apms.domain.contract.model.MutualCommitment mc : entry.getPartnershipAgreementData().getMutualCommitments()) {
-                    if (mc.getId() != null) applyArrayItemVerification(entry, "mutualcommitments", mc.getId());
+                    if (mc.getId() != null) applyArrayItemVerification(entry, "mutualcommitments", mc.getId(), status);
                 }
             }
             if (entry.getPartnershipAgreementData().getPerformanceRequirements() != null) {
                 for (com.apms.domain.contract.model.PerformanceRequirement pr : entry.getPartnershipAgreementData().getPerformanceRequirements()) {
-                    if (pr.getId() != null) applyArrayItemVerification(entry, "performancerequirements", pr.getId());
+                    if (pr.getId() != null) applyArrayItemVerification(entry, "performancerequirements", pr.getId(), status);
                 }
             }
         }
-
-        entry.setUpdatedAt(LocalDateTime.now());
-        research = contractResearchRepository.save(research);
-        return toResponse(research);
+        if (entry.getJointVentureAgreementData() != null) {
+            if (entry.getJointVentureAgreementData().getCapitalContributions() != null) {
+                for (com.apms.domain.contract.model.CapitalContribution c : entry.getJointVentureAgreementData().getCapitalContributions()) {
+                    if (c.getId() != null) applyArrayItemVerification(entry, "capitalcontributions", c.getId(), status);
+                }
+            }
+            if (entry.getJointVentureAgreementData().getOwnershipPercentages() != null) {
+                for (com.apms.domain.contract.model.OwnershipPercentage o : entry.getJointVentureAgreementData().getOwnershipPercentages()) {
+                    if (o.getId() != null) applyArrayItemVerification(entry, "ownershippercentages", o.getId(), status);
+                }
+            }
+            if (entry.getJointVentureAgreementData().getVotingRights() != null) {
+                for (com.apms.domain.contract.model.VotingRight v : entry.getJointVentureAgreementData().getVotingRights()) {
+                    if (v.getId() != null) applyArrayItemVerification(entry, "votingrights", v.getId(), status);
+                }
+            }
+            if (entry.getJointVentureAgreementData().getProfitDistribution() != null) {
+                for (com.apms.domain.contract.model.DistributionShare p : entry.getJointVentureAgreementData().getProfitDistribution()) {
+                    if (p.getId() != null) applyArrayItemVerification(entry, "profitdistribution", p.getId(), status);
+                }
+            }
+            if (entry.getJointVentureAgreementData().getLossSharing() != null) {
+                for (com.apms.domain.contract.model.DistributionShare l : entry.getJointVentureAgreementData().getLossSharing()) {
+                    if (l.getId() != null) applyArrayItemVerification(entry, "losssharing", l.getId(), status);
+                }
+            }
+            if (entry.getJointVentureAgreementData().getManagementAppointments() != null) {
+                for (com.apms.domain.contract.model.ManagementAppointment m : entry.getJointVentureAgreementData().getManagementAppointments()) {
+                    if (m.getId() != null) applyArrayItemVerification(entry, "managementappointments", m.getId(), status);
+                }
+            }
+        }
+        if (entry.getBusinessCooperationContractData() != null) {
+            if (entry.getBusinessCooperationContractData().getContributions() != null) {
+                for (com.apms.domain.contract.model.BccContribution c : entry.getBusinessCooperationContractData().getContributions()) {
+                    if (c.getId() != null) applyArrayItemVerification(entry, "contributions", c.getId(), status);
+                }
+            }
+            if (entry.getBusinessCooperationContractData().getContributionRatios() != null) {
+                for (com.apms.domain.contract.model.ContributionRatio r : entry.getBusinessCooperationContractData().getContributionRatios()) {
+                    if (r.getId() != null) applyArrayItemVerification(entry, "contributionratios", r.getId(), status);
+                }
+            }
+            if (entry.getBusinessCooperationContractData().getRevenueSharing() != null) {
+                for (com.apms.domain.contract.model.SharingArrangement s : entry.getBusinessCooperationContractData().getRevenueSharing()) {
+                    if (s.getId() != null) applyArrayItemVerification(entry, "revenuesharing", s.getId(), status);
+                }
+            }
+            if (entry.getBusinessCooperationContractData().getProfitSharing() != null) {
+                for (com.apms.domain.contract.model.SharingArrangement s : entry.getBusinessCooperationContractData().getProfitSharing()) {
+                    if (s.getId() != null) applyArrayItemVerification(entry, "profitsharing", s.getId(), status);
+                }
+            }
+            if (entry.getBusinessCooperationContractData().getCostSharing() != null) {
+                for (com.apms.domain.contract.model.SharingArrangement s : entry.getBusinessCooperationContractData().getCostSharing()) {
+                    if (s.getId() != null) applyArrayItemVerification(entry, "costsharing", s.getId(), status);
+                }
+            }
+            if (entry.getBusinessCooperationContractData().getLossSharing() != null) {
+                for (com.apms.domain.contract.model.SharingArrangement s : entry.getBusinessCooperationContractData().getLossSharing()) {
+                    if (s.getId() != null) applyArrayItemVerification(entry, "losssharing", s.getId(), status);
+                }
+            }
+            if (entry.getBusinessCooperationContractData().getRightsAndObligations() != null) {
+                for (com.apms.domain.contract.model.PartyRightsAndObligations ro : entry.getBusinessCooperationContractData().getRightsAndObligations()) {
+                    if (ro.getId() != null) applyArrayItemVerification(entry, "rightsandobligations", ro.getId(), status);
+                }
+            }
+        }
     }
 
     @Transactional
@@ -1306,242 +1420,343 @@ public class ContractResearchService {
         String path = fieldPath != null ? fieldPath.toLowerCase().trim() : "";
         String valStr = req.getValue() != null ? req.getValue().toString() : null;
 
-        if ((path.endsWith("contracttitle") || path.equals("title")) && entry.getCommonData() != null) {
+        if (entry.getCommonData() == null) {
+            entry.setCommonData(new CommonContractData());
+        }
+
+        if ((path.endsWith("contracttitle") || path.equals("title"))) {
             entry.getCommonData().setContractTitle(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("contractnumber") && entry.getCommonData() != null) {
+        } else if (path.endsWith("contractnumber")) {
             entry.getCommonData().setContractNumber(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("purpose") && entry.getCommonData() != null) {
+        } else if (path.endsWith("signingdate") || path.endsWith("signdate")) {
+            LocalDate d = null;
+            if (StringUtils.hasText(valStr)) {
+                try {
+                    d = LocalDate.parse(valStr.trim().substring(0, 10));
+                } catch (Exception ignored) {}
+            }
+            entry.setDocumentDate(d);
+            entry.getCommonData().setSigningDate(ExtractedContractField.<LocalDate>builder()
+                    .value(d)
+                    .evidence(req.getEvidence())
+                    .sourcePage(req.getSourcePage())
+                    .qualityStatus(ContractFieldQualityStatus.VALID)
+                    .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
+                    .build());
+        } else if (path.endsWith("effectivedate")) {
+            LocalDate d = null;
+            if (StringUtils.hasText(valStr)) {
+                try {
+                    d = LocalDate.parse(valStr.trim().substring(0, 10));
+                } catch (Exception ignored) {}
+            }
+            entry.getCommonData().setEffectiveDate(ExtractedContractField.<LocalDate>builder()
+                    .value(d)
+                    .evidence(req.getEvidence())
+                    .sourcePage(req.getSourcePage())
+                    .qualityStatus(ContractFieldQualityStatus.VALID)
+                    .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
+                    .build());
+        } else if (path.endsWith("expirydate") || path.endsWith("expirationdate")) {
+            LocalDate d = null;
+            if (StringUtils.hasText(valStr)) {
+                try {
+                    d = LocalDate.parse(valStr.trim().substring(0, 10));
+                } catch (Exception ignored) {}
+            }
+            entry.getCommonData().setExpiryDate(ExtractedContractField.<LocalDate>builder()
+                    .value(d)
+                    .evidence(req.getEvidence())
+                    .sourcePage(req.getSourcePage())
+                    .qualityStatus(ContractFieldQualityStatus.VALID)
+                    .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
+                    .build());
+        } else if (path.endsWith("contractvalue")) {
+            BigDecimal amt = null;
+            if (StringUtils.hasText(valStr)) {
+                try {
+                    String cleanAmt = valStr.replaceAll("[^0-9.]", "");
+                    if (StringUtils.hasText(cleanAmt)) {
+                        amt = new BigDecimal(cleanAmt);
+                    }
+                } catch (Exception ignored) {}
+            }
+            String curr = entry.getCommonData().getContractValue() != null && entry.getCommonData().getContractValue().getValue() != null
+                    ? entry.getCommonData().getContractValue().getValue().getCurrency()
+                    : "VND";
+            ContractValue cv = ContractValue.builder()
+                    .amount(amt)
+                    .currency(curr)
+                    .rawAmountText(valStr)
+                    .build();
+            entry.getCommonData().setContractValue(ExtractedContractField.<ContractValue>builder()
+                    .value(cv)
+                    .evidence(req.getEvidence())
+                    .sourcePage(req.getSourcePage())
+                    .qualityStatus(ContractFieldQualityStatus.VALID)
+                    .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
+                    .build());
+        } else if (path.endsWith("purpose")) {
             entry.getCommonData().setPurpose(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("governinglaw") && entry.getCommonData() != null) {
+        } else if (path.endsWith("governinglaw")) {
             entry.getCommonData().setGoverningLaw(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("term") && entry.getCommonData() != null) {
+        } else if (path.endsWith("term")) {
             entry.getCommonData().setTerm(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("cooperationscope") && entry.getCooperationAgreementData() != null) {
+        } else if (path.endsWith("cooperationscope")) {
+            if (entry.getCooperationAgreementData() == null) entry.setCooperationAgreementData(new CooperationAgreementData());
             entry.getCooperationAgreementData().setCooperationScope(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("informationsharing") && entry.getCooperationAgreementData() != null) {
+        } else if (path.endsWith("informationsharing")) {
+            if (entry.getCooperationAgreementData() == null) entry.setCooperationAgreementData(new CooperationAgreementData());
             entry.getCooperationAgreementData().setInformationSharing(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("coordinationmechanism") && entry.getCooperationAgreementData() != null) {
+        } else if (path.endsWith("coordinationmechanism")) {
+            if (entry.getCooperationAgreementData() == null) entry.setCooperationAgreementData(new CooperationAgreementData());
             entry.getCooperationAgreementData().setCoordinationMechanism(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("partnershipscope") && entry.getPartnershipAgreementData() != null) {
+        } else if (path.endsWith("partnershipscope")) {
+            if (entry.getPartnershipAgreementData() == null) entry.setPartnershipAgreementData(new PartnershipAgreementData());
             entry.getPartnershipAgreementData().setPartnershipScope(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("benefitsharing") && entry.getPartnershipAgreementData() != null) {
-            entry.getPartnershipAgreementData().setBenefitSharing(ExtractedContractField.<String>builder()
-                    .value(valStr)
-                    .evidence(req.getEvidence())
-                    .sourcePage(req.getSourcePage())
-                    .qualityStatus(ContractFieldQualityStatus.VALID)
-                    .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
-                    .build());
-        } else if (path.endsWith("salesormarketrights") && entry.getPartnershipAgreementData() != null) {
+        } else if (path.endsWith("salesormarketrights")) {
+            if (entry.getPartnershipAgreementData() == null) entry.setPartnershipAgreementData(new PartnershipAgreementData());
             entry.getPartnershipAgreementData().setSalesOrMarketRights(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("relationshipgovernance") && entry.getPartnershipAgreementData() != null) {
+        } else if (path.endsWith("relationshipgovernance")) {
+            if (entry.getPartnershipAgreementData() == null) entry.setPartnershipAgreementData(new PartnershipAgreementData());
             entry.getPartnershipAgreementData().setRelationshipGovernance(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("jointventurename") && entry.getJointVentureAgreementData() != null) {
+        } else if (path.endsWith("jointventurename")) {
+            if (entry.getJointVentureAgreementData() == null) entry.setJointVentureAgreementData(new JointVentureAgreementData());
             entry.getJointVentureAgreementData().setJointVentureName(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("jointventurepurpose") && entry.getJointVentureAgreementData() != null) {
+        } else if (path.endsWith("jointventurepurpose")) {
+            if (entry.getJointVentureAgreementData() == null) entry.setJointVentureAgreementData(new JointVentureAgreementData());
             entry.getJointVentureAgreementData().setJointVenturePurpose(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("governancestructure") && entry.getJointVentureAgreementData() != null) {
+        } else if (path.endsWith("governancestructure")) {
+            if (entry.getJointVentureAgreementData() == null) entry.setJointVentureAgreementData(new JointVentureAgreementData());
             entry.getJointVentureAgreementData().setGovernanceStructure(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("businessscope") && entry.getBusinessCooperationContractData() != null) {
+        } else if (path.endsWith("businessscope")) {
+            if (entry.getBusinessCooperationContractData() == null) entry.setBusinessCooperationContractData(new BusinessCooperationContractData());
             entry.getBusinessCooperationContractData().setBusinessScope(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("managementmechanism") && entry.getBusinessCooperationContractData() != null) {
+        } else if (path.endsWith("managementmechanism")) {
+            if (entry.getBusinessCooperationContractData() == null) entry.setBusinessCooperationContractData(new BusinessCooperationContractData());
             entry.getBusinessCooperationContractData().setManagementMechanism(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("financialmanagement") && entry.getBusinessCooperationContractData() != null) {
+        } else if (path.endsWith("financialmanagement")) {
+            if (entry.getBusinessCooperationContractData() == null) entry.setBusinessCooperationContractData(new BusinessCooperationContractData());
             entry.getBusinessCooperationContractData().setFinancialManagement(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("assetownership") && entry.getBusinessCooperationContractData() != null) {
+        } else if (path.endsWith("assetownership")) {
+            if (entry.getBusinessCooperationContractData() == null) entry.setBusinessCooperationContractData(new BusinessCooperationContractData());
             entry.getBusinessCooperationContractData().setAssetOwnership(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
-        } else if (path.endsWith("terminationsettlement") && entry.getBusinessCooperationContractData() != null) {
+        } else if (path.endsWith("terminationsettlement")) {
+            if (entry.getBusinessCooperationContractData() == null) entry.setBusinessCooperationContractData(new BusinessCooperationContractData());
             entry.getBusinessCooperationContractData().setTerminationSettlement(ExtractedContractField.<String>builder()
                     .value(valStr)
                     .evidence(req.getEvidence())
                     .sourcePage(req.getSourcePage())
                     .qualityStatus(ContractFieldQualityStatus.VALID)
                     .verificationStatus(ContractFieldVerificationStatus.VERIFIED)
-                    .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                    .inputMethod(ContractFieldInputMethod.MANUAL)
                     .build());
         }
     }
 
     private void applyScalarFieldVerification(ContractEntry entry, String fieldPath) {
+        applyScalarFieldVerification(entry, fieldPath, ContractFieldVerificationStatus.VERIFIED);
+    }
+
+    private void applyScalarFieldVerification(ContractEntry entry, String fieldPath, ContractFieldVerificationStatus status) {
         String path = fieldPath != null ? fieldPath.toLowerCase().trim() : "";
 
         if (entry.getCommonData() != null) {
             if (path.endsWith("contracttitle")) {
                 if (entry.getCommonData().getContractTitle() == null) {
-                    entry.getCommonData().setContractTitle(ExtractedContractField.<String>builder().value("").qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(ContractFieldVerificationStatus.VERIFIED).build());
+                    if (status == ContractFieldVerificationStatus.VERIFIED) {
+                        entry.getCommonData().setContractTitle(ExtractedContractField.<String>builder().value("").qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(status).build());
+                    }
                 } else {
-                    entry.getCommonData().getContractTitle().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                    entry.getCommonData().getContractTitle().setVerificationStatus(status);
                 }
             } else if (path.endsWith("contractnumber")) {
                 if (entry.getCommonData().getContractNumber() == null) {
-                    entry.getCommonData().setContractNumber(ExtractedContractField.<String>builder().value("").qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(ContractFieldVerificationStatus.VERIFIED).build());
+                    if (status == ContractFieldVerificationStatus.VERIFIED) {
+                        entry.getCommonData().setContractNumber(ExtractedContractField.<String>builder().value("").qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(status).build());
+                    }
                 } else {
-                    entry.getCommonData().getContractNumber().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                    entry.getCommonData().getContractNumber().setVerificationStatus(status);
                 }
-            } else if (path.endsWith("signingdate")) {
+            } else if (path.endsWith("signingdate") || path.endsWith("signdate")) {
                 if (entry.getCommonData().getSigningDate() == null) {
-                    entry.getCommonData().setSigningDate(ExtractedContractField.<LocalDate>builder().qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(ContractFieldVerificationStatus.VERIFIED).build());
+                    if (status == ContractFieldVerificationStatus.VERIFIED) {
+                        entry.getCommonData().setSigningDate(ExtractedContractField.<LocalDate>builder().qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(status).build());
+                    }
                 } else {
-                    entry.getCommonData().getSigningDate().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                    entry.getCommonData().getSigningDate().setVerificationStatus(status);
                 }
             } else if (path.endsWith("effectivedate")) {
                 if (entry.getCommonData().getEffectiveDate() == null) {
-                    entry.getCommonData().setEffectiveDate(ExtractedContractField.<LocalDate>builder().qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(ContractFieldVerificationStatus.VERIFIED).build());
+                    if (status == ContractFieldVerificationStatus.VERIFIED) {
+                        entry.getCommonData().setEffectiveDate(ExtractedContractField.<LocalDate>builder().qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(status).build());
+                    }
                 } else {
-                    entry.getCommonData().getEffectiveDate().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                    entry.getCommonData().getEffectiveDate().setVerificationStatus(status);
                 }
-            } else if (path.endsWith("expirydate")) {
+            } else if (path.endsWith("expirydate") || path.endsWith("expirationdate")) {
                 if (entry.getCommonData().getExpiryDate() == null) {
-                    entry.getCommonData().setExpiryDate(ExtractedContractField.<LocalDate>builder().qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(ContractFieldVerificationStatus.VERIFIED).build());
+                    if (status == ContractFieldVerificationStatus.VERIFIED) {
+                        entry.getCommonData().setExpiryDate(ExtractedContractField.<LocalDate>builder().qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(status).build());
+                    }
                 } else {
-                    entry.getCommonData().getExpiryDate().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                    entry.getCommonData().getExpiryDate().setVerificationStatus(status);
                 }
             } else if (path.endsWith("term") && entry.getCommonData().getTerm() != null) {
-                entry.getCommonData().getTerm().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                entry.getCommonData().getTerm().setVerificationStatus(status);
             } else if (path.endsWith("purpose")) {
                 if (entry.getCommonData().getPurpose() == null) {
-                    entry.getCommonData().setPurpose(ExtractedContractField.<String>builder().value("").qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(ContractFieldVerificationStatus.VERIFIED).build());
+                    if (status == ContractFieldVerificationStatus.VERIFIED) {
+                        entry.getCommonData().setPurpose(ExtractedContractField.<String>builder().value("").qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(status).build());
+                    }
                 } else {
-                    entry.getCommonData().getPurpose().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                    entry.getCommonData().getPurpose().setVerificationStatus(status);
                 }
             } else if (path.endsWith("contractvalue")) {
                 if (entry.getCommonData().getContractValue() == null) {
-                    entry.getCommonData().setContractValue(ExtractedContractField.<ContractValue>builder().qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(ContractFieldVerificationStatus.VERIFIED).build());
+                    if (status == ContractFieldVerificationStatus.VERIFIED) {
+                        entry.getCommonData().setContractValue(ExtractedContractField.<ContractValue>builder().qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(status).build());
+                    }
                 } else {
-                    entry.getCommonData().getContractValue().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                    entry.getCommonData().getContractValue().setVerificationStatus(status);
                 }
             } else if (path.endsWith("governinglaw")) {
                 if (entry.getCommonData().getGoverningLaw() == null) {
-                    entry.getCommonData().setGoverningLaw(ExtractedContractField.<String>builder().value("").qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(ContractFieldVerificationStatus.VERIFIED).build());
+                    if (status == ContractFieldVerificationStatus.VERIFIED) {
+                        entry.getCommonData().setGoverningLaw(ExtractedContractField.<String>builder().value("").qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(status).build());
+                    }
                 } else {
-                    entry.getCommonData().getGoverningLaw().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                    entry.getCommonData().getGoverningLaw().setVerificationStatus(status);
                 }
             }
         }
@@ -1549,52 +1764,52 @@ public class ContractResearchService {
         if (entry.getCooperationAgreementData() != null) {
             CooperationAgreementData c = entry.getCooperationAgreementData();
             if (path.endsWith("cooperationscope") && c.getCooperationScope() != null) {
-                c.getCooperationScope().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                c.getCooperationScope().setVerificationStatus(status);
             } else if (path.endsWith("informationsharing") && c.getInformationSharing() != null) {
-                c.getInformationSharing().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                c.getInformationSharing().setVerificationStatus(status);
             } else if (path.endsWith("coordinationmechanism") && c.getCoordinationMechanism() != null) {
-                c.getCoordinationMechanism().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                c.getCoordinationMechanism().setVerificationStatus(status);
             }
         }
 
         if (entry.getPartnershipAgreementData() != null) {
             PartnershipAgreementData p = entry.getPartnershipAgreementData();
             if (path.endsWith("partnershipscope") && p.getPartnershipScope() != null) {
-                p.getPartnershipScope().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                p.getPartnershipScope().setVerificationStatus(status);
             } else if (path.endsWith("benefitsharing") && p.getBenefitSharing() != null) {
-                p.getBenefitSharing().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                p.getBenefitSharing().setVerificationStatus(status);
             } else if (path.endsWith("salesormarketrights") && p.getSalesOrMarketRights() != null) {
-                p.getSalesOrMarketRights().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                p.getSalesOrMarketRights().setVerificationStatus(status);
             } else if (path.endsWith("relationshipgovernance") && p.getRelationshipGovernance() != null) {
-                p.getRelationshipGovernance().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                p.getRelationshipGovernance().setVerificationStatus(status);
             } else if (path.endsWith("exclusivity") && p.getExclusivity() != null) {
-                p.getExclusivity().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                p.getExclusivity().setVerificationStatus(status);
             }
         }
 
         if (entry.getJointVentureAgreementData() != null) {
             JointVentureAgreementData jv = entry.getJointVentureAgreementData();
             if (path.endsWith("jointventurename") && jv.getJointVentureName() != null) {
-                jv.getJointVentureName().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                jv.getJointVentureName().setVerificationStatus(status);
             } else if (path.endsWith("jointventurepurpose") && jv.getJointVenturePurpose() != null) {
-                jv.getJointVenturePurpose().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                jv.getJointVenturePurpose().setVerificationStatus(status);
             } else if (path.endsWith("governancestructure") && jv.getGovernanceStructure() != null) {
-                jv.getGovernanceStructure().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                jv.getGovernanceStructure().setVerificationStatus(status);
             }
         }
 
         if (entry.getBusinessCooperationContractData() != null) {
             BusinessCooperationContractData bcc = entry.getBusinessCooperationContractData();
             if (path.endsWith("businessscope") && bcc.getBusinessScope() != null) {
-                bcc.getBusinessScope().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                bcc.getBusinessScope().setVerificationStatus(status);
             } else if (path.endsWith("managementmechanism") && bcc.getManagementMechanism() != null) {
-                bcc.getManagementMechanism().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                bcc.getManagementMechanism().setVerificationStatus(status);
             } else if (path.endsWith("financialmanagement") && bcc.getFinancialManagement() != null) {
-                bcc.getFinancialManagement().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                bcc.getFinancialManagement().setVerificationStatus(status);
             } else if (path.endsWith("assetownership") && bcc.getAssetOwnership() != null) {
-                bcc.getAssetOwnership().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                bcc.getAssetOwnership().setVerificationStatus(status);
             } else if (path.endsWith("terminationsettlement") && bcc.getTerminationSettlement() != null) {
-                bcc.getTerminationSettlement().setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                bcc.getTerminationSettlement().setVerificationStatus(status);
             }
         }
     }
@@ -1646,33 +1861,28 @@ public class ContractResearchService {
         } else if (path.endsWith("capitalcontributions") && entry.getJointVentureAgreementData() != null && entry.getJointVentureAgreementData().getCapitalContributions() != null) {
             entry.getJointVentureAgreementData().getCapitalContributions().stream().filter(c -> c.getId().equals(itemId)).findFirst().ifPresent(c -> {
                 if (payload.containsKey("party")) c.setParty(payload.get("party") != null ? payload.get("party").toString() : c.getParty());
-                if (payload.containsKey("amount")) c.setAmount(normalizer.parseBigDecimal(payload.get("amount").toString()));
                 if (payload.containsKey("contributionType")) c.setContributionType(payload.get("contributionType") != null ? payload.get("contributionType").toString() : c.getContributionType());
                 c.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
             });
         } else if (path.endsWith("ownershippercentages") && entry.getJointVentureAgreementData() != null && entry.getJointVentureAgreementData().getOwnershipPercentages() != null) {
             entry.getJointVentureAgreementData().getOwnershipPercentages().stream().filter(o -> o.getId().equals(itemId)).findFirst().ifPresent(o -> {
                 if (payload.containsKey("party")) o.setParty(payload.get("party") != null ? payload.get("party").toString() : o.getParty());
-                if (payload.containsKey("percentage")) o.setPercentage(normalizer.parsePercentage(payload.get("percentage").toString()));
                 o.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
             });
         } else if (path.endsWith("votingrights") && entry.getJointVentureAgreementData() != null && entry.getJointVentureAgreementData().getVotingRights() != null) {
             entry.getJointVentureAgreementData().getVotingRights().stream().filter(v -> v.getId().equals(itemId)).findFirst().ifPresent(v -> {
                 if (payload.containsKey("party")) v.setParty(payload.get("party") != null ? payload.get("party").toString() : v.getParty());
-                if (payload.containsKey("votingPercentage")) v.setVotingPercentage(normalizer.parsePercentage(payload.get("votingPercentage").toString()));
-                if (payload.containsKey("description")) v.setDescription(payload.get("description") != null ? payload.get("description").toString() : null);
+                if (payload.containsKey("description")) v.setDescription(payload.get("description") != null ? payload.get("description").toString() : v.getDescription());
                 v.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
             });
         } else if (path.endsWith("profitdistribution") && entry.getJointVentureAgreementData() != null && entry.getJointVentureAgreementData().getProfitDistribution() != null) {
             entry.getJointVentureAgreementData().getProfitDistribution().stream().filter(p -> p.getId().equals(itemId)).findFirst().ifPresent(p -> {
-                if (payload.containsKey("percentage")) p.setPercentage(normalizer.parsePercentage(payload.get("percentage").toString()));
-                if (payload.containsKey("description")) p.setDescription(payload.get("description") != null ? payload.get("description").toString() : null);
+                if (payload.containsKey("party")) p.setParty(payload.get("party") != null ? payload.get("party").toString() : p.getParty());
                 p.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
             });
         } else if (path.endsWith("losssharing") && entry.getJointVentureAgreementData() != null && entry.getJointVentureAgreementData().getLossSharing() != null) {
             entry.getJointVentureAgreementData().getLossSharing().stream().filter(l -> l.getId().equals(itemId)).findFirst().ifPresent(l -> {
-                if (payload.containsKey("percentage")) l.setPercentage(normalizer.parsePercentage(payload.get("percentage").toString()));
-                if (payload.containsKey("description")) l.setDescription(payload.get("description") != null ? payload.get("description").toString() : null);
+                if (payload.containsKey("party")) l.setParty(payload.get("party") != null ? payload.get("party").toString() : l.getParty());
                 l.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
             });
         } else if (path.endsWith("managementappointments") && entry.getJointVentureAgreementData() != null && entry.getJointVentureAgreementData().getManagementAppointments() != null) {
@@ -1684,39 +1894,32 @@ public class ContractResearchService {
         } else if (path.endsWith("contributions") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getContributions() != null) {
             entry.getBusinessCooperationContractData().getContributions().stream().filter(c -> c.getId().equals(itemId)).findFirst().ifPresent(c -> {
                 if (payload.containsKey("party")) c.setParty(payload.get("party") != null ? payload.get("party").toString() : c.getParty());
-                if (payload.containsKey("amount")) c.setAmount(normalizer.parseBigDecimal(payload.get("amount").toString()));
                 if (payload.containsKey("contributionType")) c.setContributionType(payload.get("contributionType") != null ? payload.get("contributionType").toString() : c.getContributionType());
-                if (payload.containsKey("description")) c.setDescription(payload.get("description") != null ? payload.get("description").toString() : c.getDescription());
                 c.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
             });
         } else if (path.endsWith("contributionratios") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getContributionRatios() != null) {
             entry.getBusinessCooperationContractData().getContributionRatios().stream().filter(cr -> cr.getId().equals(itemId)).findFirst().ifPresent(cr -> {
                 if (payload.containsKey("party")) cr.setParty(payload.get("party") != null ? payload.get("party").toString() : cr.getParty());
-                if (payload.containsKey("ratioPercentage")) cr.setRatioPercentage(normalizer.parsePercentage(payload.get("ratioPercentage").toString()));
                 cr.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
             });
         } else if (path.endsWith("revenuesharing") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getRevenueSharing() != null) {
             entry.getBusinessCooperationContractData().getRevenueSharing().stream().filter(rs -> rs.getId().equals(itemId)).findFirst().ifPresent(rs -> {
-                if (payload.containsKey("percentage")) rs.setPercentage(normalizer.parsePercentage(payload.get("percentage").toString()));
-                if (payload.containsKey("description")) rs.setDescription(payload.get("description") != null ? payload.get("description").toString() : null);
+                if (payload.containsKey("party")) rs.setParty(payload.get("party") != null ? payload.get("party").toString() : rs.getParty());
                 rs.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
             });
         } else if (path.endsWith("profitsharing") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getProfitSharing() != null) {
             entry.getBusinessCooperationContractData().getProfitSharing().stream().filter(ps -> ps.getId().equals(itemId)).findFirst().ifPresent(ps -> {
-                if (payload.containsKey("percentage")) ps.setPercentage(normalizer.parsePercentage(payload.get("percentage").toString()));
-                if (payload.containsKey("description")) ps.setDescription(payload.get("description") != null ? payload.get("description").toString() : null);
+                if (payload.containsKey("party")) ps.setParty(payload.get("party") != null ? payload.get("party").toString() : ps.getParty());
                 ps.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
             });
         } else if (path.endsWith("costsharing") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getCostSharing() != null) {
             entry.getBusinessCooperationContractData().getCostSharing().stream().filter(cs -> cs.getId().equals(itemId)).findFirst().ifPresent(cs -> {
-                if (payload.containsKey("percentage")) cs.setPercentage(normalizer.parsePercentage(payload.get("percentage").toString()));
-                if (payload.containsKey("description")) cs.setDescription(payload.get("description") != null ? payload.get("description").toString() : null);
+                if (payload.containsKey("party")) cs.setParty(payload.get("party") != null ? payload.get("party").toString() : cs.getParty());
                 cs.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
             });
         } else if (path.endsWith("losssharing") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getLossSharing() != null) {
             entry.getBusinessCooperationContractData().getLossSharing().stream().filter(ls -> ls.getId().equals(itemId)).findFirst().ifPresent(ls -> {
-                if (payload.containsKey("percentage")) ls.setPercentage(normalizer.parsePercentage(payload.get("percentage").toString()));
-                if (payload.containsKey("description")) ls.setDescription(payload.get("description") != null ? payload.get("description").toString() : null);
+                if (payload.containsKey("party")) ls.setParty(payload.get("party") != null ? payload.get("party").toString() : ls.getParty());
                 ls.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
             });
         } else if (path.endsWith("rightsandobligations") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getRightsAndObligations() != null) {
@@ -1728,83 +1931,87 @@ public class ContractResearchService {
     }
 
     private void applyArrayItemVerification(ContractEntry entry, String fieldPath, String itemId) {
+        applyArrayItemVerification(entry, fieldPath, itemId, ContractFieldVerificationStatus.VERIFIED);
+    }
+
+    private void applyArrayItemVerification(ContractEntry entry, String fieldPath, String itemId, ContractFieldVerificationStatus status) {
         String path = fieldPath != null ? fieldPath.toLowerCase().trim() : "";
 
         if (path.endsWith("parties") && entry.getCommonData() != null && entry.getCommonData().getParties() != null) {
             entry.getCommonData().getParties().stream().filter(p -> p.getId().equals(itemId)).findFirst().ifPresent(p -> {
-                p.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                p.setVerificationStatus(status);
             });
         } else if (path.endsWith("responsibilities") && entry.getCooperationAgreementData() != null && entry.getCooperationAgreementData().getResponsibilities() != null) {
             entry.getCooperationAgreementData().getResponsibilities().stream().filter(r -> r.getId().equals(itemId)).findFirst().ifPresent(r -> {
-                r.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                r.setVerificationStatus(status);
             });
         } else if (path.endsWith("resourcecommitments") && entry.getCooperationAgreementData() != null && entry.getCooperationAgreementData().getResourceCommitments() != null) {
             entry.getCooperationAgreementData().getResourceCommitments().stream().filter(rc -> rc.getId().equals(itemId)).findFirst().ifPresent(rc -> {
-                rc.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                rc.setVerificationStatus(status);
             });
         } else if (path.endsWith("partnerroles") && entry.getPartnershipAgreementData() != null && entry.getPartnershipAgreementData().getPartnerRoles() != null) {
             entry.getPartnershipAgreementData().getPartnerRoles().stream().filter(r -> r.getId().equals(itemId)).findFirst().ifPresent(r -> {
-                r.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                r.setVerificationStatus(status);
             });
         } else if (path.endsWith("mutualcommitments") && entry.getPartnershipAgreementData() != null && entry.getPartnershipAgreementData().getMutualCommitments() != null) {
             entry.getPartnershipAgreementData().getMutualCommitments().stream().filter(mc -> mc.getId().equals(itemId)).findFirst().ifPresent(mc -> {
-                mc.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                mc.setVerificationStatus(status);
             });
         } else if (path.endsWith("performancerequirements") && entry.getPartnershipAgreementData() != null && entry.getPartnershipAgreementData().getPerformanceRequirements() != null) {
             entry.getPartnershipAgreementData().getPerformanceRequirements().stream().filter(pr -> pr.getId().equals(itemId)).findFirst().ifPresent(pr -> {
-                pr.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                pr.setVerificationStatus(status);
             });
         } else if (path.endsWith("capitalcontributions") && entry.getJointVentureAgreementData() != null && entry.getJointVentureAgreementData().getCapitalContributions() != null) {
             entry.getJointVentureAgreementData().getCapitalContributions().stream().filter(c -> c.getId().equals(itemId)).findFirst().ifPresent(c -> {
-                c.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                c.setVerificationStatus(status);
             });
         } else if (path.endsWith("ownershippercentages") && entry.getJointVentureAgreementData() != null && entry.getJointVentureAgreementData().getOwnershipPercentages() != null) {
             entry.getJointVentureAgreementData().getOwnershipPercentages().stream().filter(o -> o.getId().equals(itemId)).findFirst().ifPresent(o -> {
-                o.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                o.setVerificationStatus(status);
             });
         } else if (path.endsWith("votingrights") && entry.getJointVentureAgreementData() != null && entry.getJointVentureAgreementData().getVotingRights() != null) {
             entry.getJointVentureAgreementData().getVotingRights().stream().filter(v -> v.getId().equals(itemId)).findFirst().ifPresent(v -> {
-                v.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                v.setVerificationStatus(status);
             });
         } else if (path.endsWith("profitdistribution") && entry.getJointVentureAgreementData() != null && entry.getJointVentureAgreementData().getProfitDistribution() != null) {
             entry.getJointVentureAgreementData().getProfitDistribution().stream().filter(p -> p.getId().equals(itemId)).findFirst().ifPresent(p -> {
-                p.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                p.setVerificationStatus(status);
             });
         } else if (path.endsWith("losssharing") && entry.getJointVentureAgreementData() != null && entry.getJointVentureAgreementData().getLossSharing() != null) {
             entry.getJointVentureAgreementData().getLossSharing().stream().filter(l -> l.getId().equals(itemId)).findFirst().ifPresent(l -> {
-                l.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                l.setVerificationStatus(status);
             });
         } else if (path.endsWith("managementappointments") && entry.getJointVentureAgreementData() != null && entry.getJointVentureAgreementData().getManagementAppointments() != null) {
             entry.getJointVentureAgreementData().getManagementAppointments().stream().filter(m -> m.getId().equals(itemId)).findFirst().ifPresent(m -> {
-                m.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                m.setVerificationStatus(status);
             });
         } else if (path.endsWith("contributions") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getContributions() != null) {
             entry.getBusinessCooperationContractData().getContributions().stream().filter(c -> c.getId().equals(itemId)).findFirst().ifPresent(c -> {
-                c.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                c.setVerificationStatus(status);
             });
         } else if (path.endsWith("contributionratios") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getContributionRatios() != null) {
             entry.getBusinessCooperationContractData().getContributionRatios().stream().filter(cr -> cr.getId().equals(itemId)).findFirst().ifPresent(cr -> {
-                cr.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                cr.setVerificationStatus(status);
             });
         } else if (path.endsWith("revenuesharing") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getRevenueSharing() != null) {
             entry.getBusinessCooperationContractData().getRevenueSharing().stream().filter(rs -> rs.getId().equals(itemId)).findFirst().ifPresent(rs -> {
-                rs.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                rs.setVerificationStatus(status);
             });
         } else if (path.endsWith("profitsharing") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getProfitSharing() != null) {
             entry.getBusinessCooperationContractData().getProfitSharing().stream().filter(ps -> ps.getId().equals(itemId)).findFirst().ifPresent(ps -> {
-                ps.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                ps.setVerificationStatus(status);
             });
         } else if (path.endsWith("costsharing") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getCostSharing() != null) {
             entry.getBusinessCooperationContractData().getCostSharing().stream().filter(cs -> cs.getId().equals(itemId)).findFirst().ifPresent(cs -> {
-                cs.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                cs.setVerificationStatus(status);
             });
         } else if (path.endsWith("losssharing") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getLossSharing() != null) {
             entry.getBusinessCooperationContractData().getLossSharing().stream().filter(ls -> ls.getId().equals(itemId)).findFirst().ifPresent(ls -> {
-                ls.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                ls.setVerificationStatus(status);
             });
         } else if (path.endsWith("rightsandobligations") && entry.getBusinessCooperationContractData() != null && entry.getBusinessCooperationContractData().getRightsAndObligations() != null) {
             entry.getBusinessCooperationContractData().getRightsAndObligations().stream().filter(ro -> ro.getId().equals(itemId)).findFirst().ifPresent(ro -> {
-                ro.setVerificationStatus(ContractFieldVerificationStatus.VERIFIED);
+                ro.setVerificationStatus(status);
             });
         }
     }

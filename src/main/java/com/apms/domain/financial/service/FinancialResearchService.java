@@ -28,6 +28,8 @@ import java.text.Normalizer;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -122,11 +124,11 @@ public class FinancialResearchService {
                         if (research.getStatus() != FinancialResearchStatus.SUBMITTED) {
                             research.setStatus(FinancialResearchStatus.SUBMITTED);
                         }
-                        if (research.getSubmittedReportIds() == null || research.getSubmittedReportIds().isEmpty()) {
-                            com.apms.domain.project.ProjectTaskSubmission sub = activeSubs.get(0);
-                            if (sub.getTargetItemIdList() != null && !sub.getTargetItemIdList().isEmpty()) {
-                                research.setSubmittedReportIds(new ArrayList<>(sub.getTargetItemIdList()));
-                            } else if (research.getReports() != null) {
+                        com.apms.domain.project.ProjectTaskSubmission sub = activeSubs.get(0);
+                        if (sub.getTargetItemIdList() != null && !sub.getTargetItemIdList().isEmpty()) {
+                            research.setSubmittedReportIds(new ArrayList<>(sub.getTargetItemIdList()));
+                        } else if (research.getSubmittedReportIds() == null || research.getSubmittedReportIds().isEmpty()) {
+                            if (research.getReports() != null) {
                                 List<String> autoIds = research.getReports().stream()
                                         .filter(r -> r.getReviewStatus() != FinancialReportReviewStatus.APPROVED)
                                         .map(FinancialReportEntry::getId)
@@ -1032,20 +1034,20 @@ public class FinancialResearchService {
                 .findFirst()
                 .orElseThrow(() -> new BusinessValidationException("Report not found"));
 
-        if (research.getSubmittedReportIds() == null || research.getSubmittedReportIds().isEmpty()) {
+        com.apms.domain.project.ProjectTaskSubmission activeSub = activeSubs.get(0);
+        if (activeSub.getTargetItemIdList() != null && !activeSub.getTargetItemIdList().isEmpty()) {
+            research.setSubmittedReportIds(new ArrayList<>(activeSub.getTargetItemIdList()));
+            research = researchRepository.save(research);
+        } else if (research.getSubmittedReportIds() == null || research.getSubmittedReportIds().isEmpty()) {
             List<String> autoIds = research.getReports() != null
                     ? research.getReports().stream().map(FinancialReportEntry::getId).collect(Collectors.toList())
                     : new ArrayList<>();
             research.setSubmittedReportIds(autoIds);
             research = researchRepository.save(research);
-        } else if (!research.getSubmittedReportIds().contains(reportId)) {
-            boolean existsInReports = research.getReports() != null && research.getReports().stream().anyMatch(r -> r.getId().equals(reportId));
-            if (existsInReports) {
-                research.getSubmittedReportIds().add(reportId);
-                research = researchRepository.save(research);
-            } else {
-                throw new BusinessValidationException("Report is not included in the current submission package.");
-            }
+        }
+
+        if (research.getSubmittedReportIds() != null && !research.getSubmittedReportIds().contains(reportId)) {
+            throw new BusinessValidationException("Report is not included in the current submission package.");
         }
 
         if (request.getStatus() == FinancialReportReviewStatus.APPROVED) {
@@ -1089,14 +1091,19 @@ public class FinancialResearchService {
 
         if (currentSubmissionReviewed) {
             com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(taskId).orElseThrow();
+            final Set<String> submittedReportIdSet = new HashSet<>(
+                    research.getSubmittedReportIds() != null ? research.getSubmittedReportIds() : Collections.emptyList());
             
             boolean anyChangesRequested = research.getReports().stream()
+                    .filter(r -> submittedReportIdSet.contains(r.getId()))
                     .anyMatch(r -> r.getReviewStatus() == FinancialReportReviewStatus.CHANGES_REQUESTED);
             
             boolean anyPending = research.getReports().stream()
+                    .filter(r -> submittedReportIdSet.contains(r.getId()))
                     .anyMatch(r -> r.getReviewStatus() == FinancialReportReviewStatus.PENDING_REVIEW);
             
             boolean anyApproved = research.getReports().stream()
+                    .filter(r -> submittedReportIdSet.contains(r.getId()))
                     .anyMatch(r -> r.getReviewStatus() == FinancialReportReviewStatus.APPROVED);
 
             if (anyChangesRequested) {

@@ -136,6 +136,17 @@ public class ContractResearchController {
         return ResponseEntity.ok(researchService.verifyScalarField(taskId, contractId, fieldPath, userId));
     }
 
+    @PostMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}/fields/{fieldPath}/unverify")
+    public ResponseEntity<ContractResearchResponse> unverifyScalarField(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String contractId,
+            @PathVariable String fieldPath,
+            @AuthenticationPrincipal UserDetailsImpl user) {
+        Long userId = user != null ? user.getId() : 1L;
+        return ResponseEntity.ok(researchService.unverifyScalarField(taskId, contractId, fieldPath, userId));
+    }
+
     @PutMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}/fields/{fieldPath}/items/{itemId}")
     public ResponseEntity<ContractResearchResponse> updateArrayItem(
             @PathVariable Long projectId,
@@ -161,6 +172,18 @@ public class ContractResearchController {
         return ResponseEntity.ok(researchService.verifyArrayItem(taskId, contractId, fieldPath, itemId, userId));
     }
 
+    @PostMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}/fields/{fieldPath}/items/{itemId}/unverify")
+    public ResponseEntity<ContractResearchResponse> unverifyArrayItem(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String contractId,
+            @PathVariable String fieldPath,
+            @PathVariable String itemId,
+            @AuthenticationPrincipal UserDetailsImpl user) {
+        Long userId = user != null ? user.getId() : 1L;
+        return ResponseEntity.ok(researchService.unverifyArrayItem(taskId, contractId, fieldPath, itemId, userId));
+    }
+
     @PostMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}/verify-all")
     public ResponseEntity<ContractResearchResponse> verifyAllContractFields(
             @PathVariable Long projectId,
@@ -169,6 +192,16 @@ public class ContractResearchController {
             @AuthenticationPrincipal UserDetailsImpl user) {
         Long userId = user != null ? user.getId() : 1L;
         return ResponseEntity.ok(researchService.verifyAllContractFields(taskId, contractId, userId));
+    }
+
+    @PostMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}/unverify-all")
+    public ResponseEntity<ContractResearchResponse> unverifyAllContractFields(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String contractId,
+            @AuthenticationPrincipal UserDetailsImpl user) {
+        Long userId = user != null ? user.getId() : 1L;
+        return ResponseEntity.ok(researchService.unverifyAllContractFields(taskId, contractId, userId));
     }
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/contract-research/submit")

@@ -40,11 +40,33 @@ Field rules:
 - legalName: official registered company name.
 - tradeName: common commercial/brand name if available.
 - taxCode: official tax code/business registration code only.
-- industries: array of granular industries and business sectors explicitly supported by documents. Include both parent sectors and specific sub-sectors when present.
-- businessModel: concise but complete description of how the company operates and generates value.
-- products: array of objects with "name", "category", and "description". Extract specific products/services/business lines, not only broad categories.
+- industries: array of granular industries, business sectors, and operating business units explicitly named in the documents.
+    - STRICT DOCUMENT GROUNDING: Extract only business sectors, industries, or operational divisions that appear verbatim or near-verbatim in the documents (e.g., "Semiconductor Components", "Memory Business", "Foundry Business", "System LSI Business", "Network Systems", "Medical Equipment").
+    - FORBID UNQUOTED TAXONOMY INFERENCE: Do NOT invent, synthesize, or infer broader category labels (e.g., do NOT extract "Consumer Electronics", "Digital Appliances", "ICT", or "High Tech") UNLESS the document explicitly contains that exact phrase and you cite it in evidenceText. If a sector name is not in a cited quote, it must NOT appear in the array.
+    - 1-TO-1 EVIDENCE BINDING: Every single industry in the extracted array MUST be backed by an exact quote and page citation in evidenceText. If industries originate from multiple pages, include quotes from all of those pages.
+- businessModel: concise but comprehensive description of how the company operates and generates value.
+    - WHAT TO EXTRACT:
+        1. Primary operational divisions and their core focus (e.g., DX Division producing finished consumer/commercial products; DS Division operating memory, foundry, and system LSI semiconductor businesses).
+        2. Business delivery models (e.g., finished goods sales, B2B component manufacturing/supply, contract semiconductor fabrication/foundry).
+        3. Target commercial channels (B2C direct/retail, B2B enterprise/commercial clients).
+    - STRICT 1-TO-1 EVIDENCE BINDING:
+        - EVERY division, product line (e.g., DRAM, NAND Flash, mobile APs, HBM, server SSDs), technology, and customer channel mentioned in the businessModel narrative MUST be explicitly quoted in evidenceText with its [fileName | docId | Page X] citation.
+        - If your businessModel narrative mentions facts found on different pages (e.g., Page 4 for advanced AI semiconductors/HBM, Page 5 for DX & DS divisions and finished products, Page 7 for B2C & B2B customers), your evidenceText MUST contain quotes from ALL those pages:
+          "[fileName | docId | Page 4] ... [fileName | docId | Page 5] ... [fileName | docId | Page 7] ...".
+        - FORBIDDEN: Do NOT mention any operational division, technology, or product line in businessModel if the supporting quote is missing from evidenceText. Everything asserted in businessModel must be verifiable in the cited quotes.
+- products: array of objects with "name", "category", and "description".
+    - EXHAUSTIVE EXTRACTION: When documents enumerate products (e.g. "finished products such as smartphones, network systems, computers, TVs, refrigerators, washing machines, air conditioners, and medical equipment"), extract EVERY SINGLE product mentioned. Do NOT skip items such as "network systems", "computers", or "medical equipment".
+    - EXTRACT BOTH LINES AND NOTABLE MODELS: Extract both overarching product lines/divisions and specific key models or technologies mentioned in the text (e.g. HBM4, Exynos 2600, Galaxy series, server SSDs).
+    - EVIDENCE CONSISTENCY: Every product mentioned in your "evidenceText" quote MUST have an entry in "products". If it appears in evidenceText, it must NOT be missing from "products".
 - markets: array of geographic markets, countries, regions, or operating areas explicitly mentioned.
-- targetCustomers: array of customer segments inferred only from explicit business activities or stated customers/users.
+    - Every market or country extracted MUST be backed by an exact quote and page citation in evidenceText.
+- targetCustomers: array of customer segments and client types explicitly identified or directly served by the company.
+    - WHAT TO EXTRACT:
+        - Direct customer classifications stated in the document (e.g., "B2C Customers", "B2B Enterprise Customers", "Telecommunications Carriers", "Data Center Operators", "Automotive OEMs").
+        - Keep labels concise and faithful to the source text. Do NOT add decorative or bloated wording (e.g., if the text says "Customers (B2C & B2B)", extract "B2C Customers" and "B2B Customers").
+    - STRICT 1-TO-1 EVIDENCE BINDING:
+        - Every customer segment in the array MUST have an exact supporting quote and page number in evidenceText.
+        - Do NOT convert general mentions of external entities, partners, or ESG subjects (e.g., a statement about renewable energy procurement) into a target customer unless the text clearly identifies them as buyers/clients of the company's products or services.
 - email: array of company contact emails. Prioritize general company contact emails such as info@, contact@, support@. Ignore investor relations, shareholder, or personal employee emails unless they are the only emails available.
 - phone: array of official company phone numbers.
 - address: registered/head office address.
@@ -88,6 +110,13 @@ Output format:
 - evidenceText must be an exact quote from the document. Do NOT write paraphrased evidence.
 - Do NOT create generic evidence such as "Business registration details for..." unless that exact sentence appears in the document.
 - For identity and contact fields including legalName, tradeName, taxCode, website, email, phone, and address, the extracted value itself must appear verbatim in the evidenceText.
+- For list and array fields including markets, industries, products, and targetCustomers, as well as the textual businessModel:
+    - 1-TO-1 BIDIRECTIONAL FIDELITY:
+        1. FORWARD CHECK (Value -> Evidence): Every item, category, division, or claim in "value" MUST be present in the quotes inside "evidenceText". If an item in "value" is not in "evidenceText", either add the exact quote with [fileName | sourceDocumentId | Page X] or delete the item from "value".
+        2. BACKWARD CHECK (Evidence -> Value): Every quote in "evidenceText" must directly support the extracted value. For enumerated lists (like products and markets), do not quote a list of items and then omit half of them from "value".
+    - MULTI-PAGE COMPLETENESS: If facts are extracted from multiple pages (for example, products on Page 4 and Page 5; sales regions on Page 64 and operational countries on Page 12; business divisions on Page 5 and customer channels on Page 7), evidenceText MUST combine exact quotes from ALL referenced pages:
+      "[fileName | sourceDocumentId | Page X] quote 1 ... [fileName | sourceDocumentId | Page Y] quote 2 ..."
+    - Never return a single partial quote if "value" contains items sourced from other pages.
 - If the value does not appear verbatim in the source evidence, return null for value, confidence 0, evidenceText "", and sourceDocumentIds [].
 
 STRICT TAX CODE RULES:
@@ -182,3 +211,19 @@ If any check fails, overwrite taxCode as:
 "evidenceText": "",
 "sourceDocumentIds": []
 }
+
+FINAL 1-TO-1 FIELD VERIFICATION (MANDATORY BEFORE GENERATING JSON):
+For industries, businessModel, targetCustomers, products, and markets:
+1. "industries":
+   - Does every industry item appear word-for-word or in exact meaning within the quotes in evidenceText?
+   - Are there inferred labels like "Consumer Electronics" or "Digital Appliances"? If they are not in the quote, REMOVE them immediately.
+2. "businessModel":
+   - Does every business division, product line, client tier, or capability mentioned in the businessModel text have an exact quote in evidenceText?
+   - If you mention products like HBM, server SSDs, DRAM, NAND Flash, TVs, smartphones, or customer types B2B/B2C, make sure quotes from all relevant pages are concatenated in evidenceText. If you cannot quote a fact, REMOVE that sentence from businessModel.
+3. "targetCustomers":
+   - Is each customer category supported by an exact quote in evidenceText?
+   - Did you use concise terms directly grounded in the quote (e.g. "B2C Customers", "B2B Customers") instead of synthetic embellishments?
+4. "products" & "markets":
+   - Does every extracted product or market have its source quote in evidenceText?
+   - Did you extract all products enumerated in the evidenceText quote?
+
