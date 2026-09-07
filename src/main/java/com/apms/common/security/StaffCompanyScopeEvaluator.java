@@ -115,7 +115,7 @@ public class StaffCompanyScopeEvaluator {
 
         CompanyProfile profile = resolveProfile(companyIdOrProfileId);
         if (profile == null) return false;
-        if (!"APPROVED".equals(profile.getReviewStatus())) return false;
+        if (Boolean.TRUE.equals(profile.getIsDeleted())) return false;
 
         return profile.getResponsibleManagerId() != null && profile.getResponsibleManagerId().equals(user.getId());
     }
@@ -227,12 +227,17 @@ public class StaffCompanyScopeEvaluator {
                 .orElse(null);
     }
 
-    private boolean isCompanyInScope(String companyId, Long accountId) {
-        if (projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(
-                companyId, accountId, ALL_PROJECT_STATUSES)) {
+    private boolean isCompanyInScope(String companyIdOrProfileId, Long accountId) {
+        CompanyProfile profile = resolveProfile(companyIdOrProfileId);
+        String compId = profile != null && profile.getCompanyId() != null ? profile.getCompanyId() : companyIdOrProfileId;
+        String mongoId = profile != null && profile.getId() != null ? profile.getId() : companyIdOrProfileId;
+
+        if (projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(compId, accountId, ALL_PROJECT_STATUSES)
+                || (mongoId != null && projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(mongoId, accountId, ALL_PROJECT_STATUSES))) {
             return true;
         }
-        return monitoringAssignmentRepository.existsByCompanyProfileIdAndAssignedStaffId(companyId, accountId);
+        return monitoringAssignmentRepository.existsByCompanyProfileIdAndAssignedStaffId(compId, accountId)
+                || (mongoId != null && monitoringAssignmentRepository.existsByCompanyProfileIdAndAssignedStaffId(mongoId, accountId));
     }
 
     private boolean isStaff(UserDetailsImpl user) {

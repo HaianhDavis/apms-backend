@@ -17,15 +17,9 @@ public class CandidateFieldAccessor {
 
     static {
         // identity
-        register("identity.legalName", true, false, false,
-                c -> c.getIdentity() != null ? c.getIdentity().getLegalName() : null,
-                (c, v) -> ensureIdentity(c).setLegalName((String) v));
         register("identity.tradeName", false, false, false,
                 c -> c.getIdentity() != null ? c.getIdentity().getTradeName() : null,
                 (c, v) -> ensureIdentity(c).setTradeName((String) v));
-        register("identity.taxCode", false, false, false,
-                c -> c.getIdentity() != null ? c.getIdentity().getTaxCode() : null,
-                (c, v) -> ensureIdentity(c).setTaxCode((String) v));
         // business
         register("business.industries", false, true, false,
                 c -> c.getBusiness() != null ? c.getBusiness().getIndustries() : null,

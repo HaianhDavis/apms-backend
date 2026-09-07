@@ -44,8 +44,8 @@ public class ProfileController {
 
         Set<String> allowedCompanyIds = companyScope.allowedCompanyIds();
         
-        // Enforce APPROVED and PUBLISHED for global list
-        String effectiveReviewStatus = (reviewStatus != null) ? reviewStatus : "APPROVED";
+        // Enforce PUBLISHED by default; allow published profiles regardless of reviewStatus (e.g. UNVERIFIED)
+        String effectiveReviewStatus = reviewStatus;
         com.apms.common.enums.ProfileVisibility effectiveVisibility = (visibility != null) ? visibility : com.apms.common.enums.ProfileVisibility.PUBLISHED;
 
         Long managerId = (createdByMe != null && createdByMe) ? currentUser.getId() : null;
@@ -157,5 +157,17 @@ public class ProfileController {
     }
 
     // ─────────────────────────────────────────────
-    // visibility mutation is now strictly governed through project-scoped endpoints
+    // PATCH /api/v1/company-profiles/{companyId}/visibility (or /api/v1/profiles/{companyId}/visibility)
+    // Role: SYSTEM_ADMIN, BUSINESS_DEVELOPMENT_MANAGER (must be responsible manager)
+    // ─────────────────────────────────────────────
+    @PatchMapping("/{companyId}/visibility")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @companyScope.canManageCompanyProfile(#companyId))")
+    public ResponseEntity<ApiResponse<ProfileResponse>> updateVisibility(
+            @PathVariable String companyId,
+            @jakarta.validation.Valid @RequestBody com.apms.domain.profile.dto.UpdateProfileVisibilityRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        Long actorId = currentUser != null ? currentUser.getId() : null;
+        return ResponseEntity.ok(ApiResponse.success(profileService.updateVisibility(companyId, request, actorId)));
+    }
 }

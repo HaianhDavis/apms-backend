@@ -69,6 +69,7 @@ public class SecurityConfig {
                                         "/ws/**",
                                         "/health"
                                 ).permitAll()
+                                .requestMatchers(HttpMethod.GET, "/api/v1/projects/*/tasks/*/company-members/images/**").permitAll()
                                 .anyRequest().authenticated()
                 );
 

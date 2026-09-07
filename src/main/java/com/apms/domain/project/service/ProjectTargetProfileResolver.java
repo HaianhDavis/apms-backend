@@ -116,4 +116,97 @@ public class ProjectTargetProfileResolver {
                 ? java.util.Optional.of(profile.getCompanyId())
                 : java.util.Optional.empty();
     }
+
+    @Transactional
+    public CompanyProfile getOrCreateProjectProfileShell(Project project, Long managerId) {
+        if (project == null) {
+            return null;
+        }
+
+        // 1. If project already has targetCompanyProfileId, verify and return it
+        if (StringUtils.hasText(project.getTargetCompanyProfileId())) {
+            String existingId = project.getTargetCompanyProfileId().trim();
+            java.util.Optional<CompanyProfile> existing = companyProfileRepository.findByCompanyId(existingId)
+                    .or(() -> companyProfileRepository.findById(existingId))
+                    .filter(p -> !Boolean.TRUE.equals(p.getIsDeleted()));
+            if (existing.isPresent()) {
+                return existing.get();
+            }
+        }
+
+        // 2. Check by project linkage in sourceRefs
+        if (project.getId() != null) {
+            java.util.List<CompanyProfile> byProject = companyProfileRepository.findByProjectId(String.valueOf(project.getId()));
+            if (!byProject.isEmpty()) {
+                CompanyProfile shell = byProject.get(0);
+                if (!shell.getCompanyId().equals(project.getTargetCompanyProfileId())) {
+                    project.setTargetCompanyProfileId(shell.getCompanyId());
+                    projectRepository.save(project);
+                }
+                return shell;
+            }
+        }
+
+        // 3. Check by Tax Code if provided
+        if (StringUtils.hasText(project.getTargetCompanyTaxCode())) {
+            String normTaxCode = project.getTargetCompanyTaxCode().replaceAll("[\\s\\-]", "").trim();
+            java.util.Optional<CompanyProfile> byTax = companyProfileRepository.findByIdentityTaxCode(normTaxCode)
+                    .filter(p -> !Boolean.TRUE.equals(p.getIsDeleted()));
+            if (byTax.isPresent()) {
+                CompanyProfile existing = byTax.get();
+                if (existing.getSourceRefs() == null) {
+                    existing.setSourceRefs(new CompanyProfile.SourceRefs());
+                }
+                if (project.getId() != null) {
+                    existing.getSourceRefs().getProjectIds().add(String.valueOf(project.getId()));
+                }
+                existing = companyProfileRepository.save(existing);
+                project.setTargetCompanyProfileId(existing.getCompanyId());
+                projectRepository.save(project);
+                return existing;
+            }
+        }
+
+        // 4. Create new shell with authoritative project identity
+        String newCompanyId = java.util.UUID.randomUUID().toString();
+        CompanyProfile.Identity identity = CompanyProfile.Identity.builder()
+                .legalName(project.getTargetCompanyName())
+                .taxCode(StringUtils.hasText(project.getTargetCompanyTaxCode()) ? project.getTargetCompanyTaxCode().replaceAll("[\\s\\-]", "").trim() : null)
+                .build();
+
+        Long responsibleManager = managerId;
+        if (responsibleManager == null && project.getCreatedById() != null) {
+            responsibleManager = project.getCreatedById();
+        }
+
+        CompanyProfile shell = CompanyProfile.builder()
+                .companyId(newCompanyId)
+                .identity(identity)
+                .reviewStatus("UNVERIFIED")
+                .isHidden(true)
+                .majorVersion(1)
+                .revision(0)
+                .version("1.00")
+                .responsibleManagerId(responsibleManager)
+                .metadata(CompanyProfile.Metadata.builder()
+                        .createdBy(responsibleManager != null ? String.valueOf(responsibleManager) : "SYSTEM")
+                        .createdAt(java.time.LocalDateTime.now())
+                        .updatedAt(java.time.LocalDateTime.now())
+                        .build())
+                .build();
+
+        if (shell.getSourceRefs() == null) {
+            shell.setSourceRefs(new CompanyProfile.SourceRefs());
+        }
+        if (project.getId() != null) {
+            shell.getSourceRefs().getProjectIds().add(String.valueOf(project.getId()));
+        }
+
+        shell = companyProfileRepository.save(shell);
+
+        project.setTargetCompanyProfileId(shell.getCompanyId());
+        projectRepository.save(project);
+
+        return shell;
+    }
 }

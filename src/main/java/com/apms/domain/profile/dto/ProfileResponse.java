@@ -32,6 +32,8 @@ public class ProfileResponse {
 
     private String reviewStatus;
     private ProfileVisibility visibility;
+    @com.fasterxml.jackson.annotation.JsonProperty("isHidden")
+    private Boolean isHidden;
     private String relationshipType;
     private List<String> tags;
     private CompanyProfile.Metadata metadata;
@@ -41,4 +43,6 @@ public class ProfileResponse {
     private String versionLabel;
     private Long responsibleManagerId;
     private Boolean canEditProfile;
+    private Boolean canManageVisibility;
+    private Boolean canPublish;
 }

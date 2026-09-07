@@ -156,7 +156,13 @@ public class ProjectService {
 
         project = projectRepository.save(project);
         
-        if (org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId())) {
+        if (project.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY && projectTargetProfileResolver != null) {
+            com.apms.domain.profile.CompanyProfile shell = projectTargetProfileResolver.getOrCreateProjectProfileShell(project, creatorAccountId);
+            if (shell != null && !shell.getCompanyId().equals(project.getTargetCompanyProfileId())) {
+                project.setTargetCompanyProfileId(shell.getCompanyId());
+                project = projectRepository.save(project);
+            }
+        } else if (org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId())) {
             syncTargetIdentity(project.getTargetCompanyProfileId(), project.getTargetCompanyTaxCode());
         }
         
@@ -191,9 +197,16 @@ public class ProjectService {
     // READ
     // ─────────────────────────────────────────────
 
-    @Transactional(readOnly = true)
+    @Transactional
     public ProjectResponse getProjectById(Long id) {
         Project project = findProjectOrThrow(id);
+        if (project.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY && !org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId()) && projectTargetProfileResolver != null) {
+            com.apms.domain.profile.CompanyProfile shell = projectTargetProfileResolver.getOrCreateProjectProfileShell(project, project.getCreatedById());
+            if (shell != null && !shell.getCompanyId().equals(project.getTargetCompanyProfileId())) {
+                project.setTargetCompanyProfileId(shell.getCompanyId());
+                project = projectRepository.save(project);
+            }
+        }
         List<ProjectMember> members = projectMemberRepository.findByProject_Id(id);
         return toResponse(project, members);
     }
@@ -869,11 +882,16 @@ public class ProjectService {
             }
         }
 
+        String targetProfileId = project.getTargetCompanyProfileId();
+        if (!org.springframework.util.StringUtils.hasText(targetProfileId) && projectTargetProfileResolver != null) {
+            targetProfileId = projectTargetProfileResolver.resolveTargetProfileId(project);
+        }
+
         return ProjectResponse.builder()
                 .id(project.getId())
                 .projectName(project.getProjectName())
                 .projectType(project.getProjectType())
-                .targetCompanyProfileId(project.getTargetCompanyProfileId())
+                .targetCompanyProfileId(targetProfileId)
                 .targetCompanyName(project.getTargetCompanyName())
                 .targetCompanyTaxCode(project.getTargetCompanyTaxCode())
                 .targetRelationshipType(project.getTargetRelationshipType())

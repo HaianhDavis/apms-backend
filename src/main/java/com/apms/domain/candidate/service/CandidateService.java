@@ -64,7 +64,7 @@ public class CandidateService {
     // ─────────────────────────────────────────────
 
     private static final java.util.Set<String> STAFF_REVIEWABLE_FIELDS = java.util.Set.of(
-        "identity.legalName", "identity.tradeName", "identity.taxCode",
+        "identity.tradeName",
         "contact.address", "contact.website", "contact.emails", "contact.phones",
         "business.businessModel", "business.industries", "business.markets", "business.targetCustomers", "business.products",
         "companySize.employeeTier", "companySize.employeeCount", "companySize.revenueTier"
@@ -113,7 +113,7 @@ public class CandidateService {
     public CandidateResponse createManualCandidate(Long projectId, Long taskId, Long creatorId) {
         LocalDateTime now = LocalDateTime.now();
 
-        projectRepository.findById(projectId)
+        com.apms.domain.project.Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new com.apms.common.exception.ResourceNotFoundException("Project not found: " + projectId));
 
         int nextSeq = getNextDraftSequence(taskId);
@@ -128,6 +128,8 @@ public class CandidateService {
                 .revisionNumber(1)
                 .documentVersion(0L)
                 .identity(CompanyCandidate.Identity.builder()
+                        .legalName(project.getTargetCompanyName())
+                        .taxCode(project.getTargetCompanyTaxCode())
                         .build())
                 .business(CompanyCandidate.Business.builder()
                         .industries(new java.util.ArrayList<>())
@@ -877,7 +879,7 @@ public class CandidateService {
         if (request.getFields() != null) {
             for (java.util.Map.Entry<String, com.apms.domain.candidate.dto.CandidateReviewRequest.FieldReviewUpdate> entry : request.getFields().entrySet()) {
                 String fieldPath = entry.getKey();
-                if (!STAFF_REVIEWABLE_FIELDS.contains(fieldPath)) {
+                if (!STAFF_REVIEWABLE_FIELDS.contains(fieldPath) && CandidateFieldAccessor.getDefinition(fieldPath) == null) {
                     throw new BusinessValidationException("Unknown or unsupported candidate review field: " + fieldPath);
                 }
                 String mapKey = com.apms.domain.ai.service.FieldKeyCodec.encode(fieldPath);

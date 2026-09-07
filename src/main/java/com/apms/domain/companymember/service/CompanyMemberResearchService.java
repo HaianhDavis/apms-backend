@@ -12,6 +12,10 @@ import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.companymember.CompanyMemberResearchDraft;
 import com.apms.domain.companymember.CompanyMemberResearchItem;
 import com.apms.domain.companymember.dto.CompanyMemberResearchDraftRequest;
+import com.apms.domain.companymember.dto.MemberImageUploadResponse;
+import com.apms.domain.document.service.StorageService;
+import org.springframework.core.io.Resource;
+import org.springframework.web.multipart.MultipartFile;
 import com.apms.domain.companymember.dto.CompanyMemberResearchDraftResponse;
 import com.apms.domain.companymember.dto.CompanyMemberResearchItemRequest;
 import com.apms.domain.companymember.repository.CompanyMemberResearchDraftRepository;
@@ -54,6 +58,7 @@ public class CompanyMemberResearchService {
     private final ProjectTaskSubmissionService submissionService;
     private final ProjectTaskSubmissionRepository submissionRepository;
     private final AuditLogService auditLogService;
+    private final StorageService storageService;
 
     @Transactional
     public CompanyMemberResearchDraftResponse saveDraft(Long projectId, Long taskId, CompanyMemberResearchDraftRequest request) {
@@ -97,6 +102,42 @@ public class CompanyMemberResearchService {
                 .orElseThrow(() -> new ResourceNotFoundException("Draft not found for task: " + taskId));
 
         return toResponse(draft);
+    }
+
+    public MemberImageUploadResponse uploadImage(Long projectId, Long taskId, MultipartFile file) {
+        UserDetailsImpl currentUser = getCurrentUser();
+        validateTaskAndAccess(projectId, taskId, currentUser, true);
+
+        long maxImageSizeBytes = 2 * 1024 * 1024; // 2 MB
+        if (file == null || file.isEmpty()) {
+            throw new BusinessValidationException("Image file cannot be empty");
+        }
+        if (file.getSize() > maxImageSizeBytes) {
+            throw new BusinessValidationException("Image size exceeds limit of 2 MB");
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || (!contentType.equals("image/jpeg") && !contentType.equals("image/png") && !contentType.equals("image/webp"))) {
+            throw new BusinessValidationException("Only JPEG, PNG, and WebP images are allowed");
+        }
+
+        String filename = storageService.store(file);
+        String imageUrl = String.format("/api/v1/projects/%d/tasks/%d/company-members/images/%s", projectId, taskId, filename);
+
+        auditLogService.log(currentUser.getId(), AuditAction.COMPANY_MEMBER_RESEARCH_DRAFT_UPDATED, "CompanyMemberResearchDraft", null, "Image uploaded: " + filename);
+
+        return MemberImageUploadResponse.builder()
+                .imageUrl(imageUrl)
+                .filename(filename)
+                .build();
+    }
+
+    public Resource getImage(String filename) {
+        try {
+            return storageService.loadAsResource(filename);
+        } catch (Exception e) {
+            throw new ResourceNotFoundException("Image not found: " + filename);
+        }
     }
 
     @Transactional

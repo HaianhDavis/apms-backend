@@ -23,6 +23,7 @@ public interface CompanyProfileVersionRepository extends MongoRepository<Company
     @Query("{ 'companyProfileId': ?0, '$or': [ { 'version': ?1 }, { 'versionLabel': ?1 } ] }")
     Optional<CompanyProfileVersion> findByCompanyProfileIdAndVersionOrVersionLabel(String companyProfileId, String version);
 
+    boolean existsByCompanyProfileId(String companyProfileId);
     boolean existsByCreatedFromProposalId(String createdFromProposalId);
     boolean existsByCompanyProfileIdAndCreatedFromProjectId(String companyProfileId, Long createdFromProjectId);
     List<CompanyProfileVersion> findByCompanyProfileIdOrderByCreatedAtDesc(String companyProfileId);
