@@ -12,9 +12,14 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
+import java.time.DateTimeException;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Component
 @Slf4j
@@ -32,6 +37,11 @@ public class ContractExtractionNormalizer {
         if (candidate.getParties() != null) {
             for (AiContractPartyCandidate p : candidate.getParties()) {
                 if (p != null && StringUtils.hasText(p.getLegalName())) {
+                    String partyEvidence = normalizePartyEvidence(p, docText);
+                    boolean isNa = isNaText(p.getLegalName());
+                    ContractFieldQualityStatus status = isNa
+                            ? ContractFieldQualityStatus.VALID
+                            : evaluateQuality(p.getConfidence(), p.getSourcePage(), totalPages, partyEvidence, docText);
                     parties.add(ContractParty.builder()
                             .id(UUID.randomUUID().toString())
                             .legalName(p.getLegalName().trim())
@@ -40,9 +50,9 @@ public class ContractExtractionNormalizer {
                             .representative(cleanText(p.getRepresentative()))
                             .role(cleanText(p.getRole()))
                             .sourcePage(validatePage(p.getSourcePage(), totalPages))
-                            .evidence(cleanText(p.getEvidence()))
+                            .evidence(partyEvidence)
                             .confidence(p.getConfidence())
-                            .qualityStatus(evaluateQuality(p.getConfidence(), p.getSourcePage(), totalPages, p.getEvidence(), docText))
+                            .qualityStatus(status)
                             .verificationStatus(ContractFieldVerificationStatus.UNVERIFIED)
                             .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
                             .build());
@@ -54,36 +64,25 @@ public class ContractExtractionNormalizer {
         LocalDate effective = parseDate(candidate.getEffectiveDate());
         LocalDate expiry = parseDate(candidate.getExpiryDate());
 
-        ContractFieldQualityStatus expiryQuality = evaluateQuality(
-                candidate.getExpiryDate() != null ? candidate.getExpiryDate().getConfidence() : 0.0,
-                candidate.getExpiryDate() != null ? candidate.getExpiryDate().getSourcePage() : null,
-                totalPages,
-                candidate.getExpiryDate() != null ? candidate.getExpiryDate().getEvidence() : null,
-                docText
-        );
-        if (effective != null && expiry != null && expiry.isBefore(effective)) {
-            expiryQuality = ContractFieldQualityStatus.NEEDS_REVIEW;
+        ExtractedContractField<LocalDate> signingField = buildDateField(signing, candidate.getSigningDate(), totalPages, docText);
+        ExtractedContractField<LocalDate> effectiveField = buildDateField(effective, candidate.getEffectiveDate(), totalPages, docText);
+        ExtractedContractField<LocalDate> expiryField = buildDateField(expiry, candidate.getExpiryDate(), totalPages, docText);
+
+        if (expiryField != null && effective != null && expiry != null && expiry.isBefore(effective)) {
+            expiryField.setQualityStatus(ContractFieldQualityStatus.NEEDS_REVIEW);
         }
 
         return CommonContractData.builder()
                 .contractTitle(normalizeStringField(candidate.getContractTitle(), totalPages, docText))
                 .contractNumber(normalizeStringField(candidate.getContractNumber(), totalPages, docText))
-                .signingDate(buildDateField(signing, candidate.getSigningDate(), totalPages, docText))
-                .effectiveDate(buildDateField(effective, candidate.getEffectiveDate(), totalPages, docText))
-                .expiryDate(ExtractedContractField.<LocalDate>builder()
-                        .value(expiry)
-                        .sourcePage(candidate.getExpiryDate() != null ? validatePage(candidate.getExpiryDate().getSourcePage(), totalPages) : null)
-                        .evidence(candidate.getExpiryDate() != null ? cleanText(candidate.getExpiryDate().getEvidence()) : null)
-                        .confidence(candidate.getExpiryDate() != null ? candidate.getExpiryDate().getConfidence() : null)
-                        .qualityStatus(expiryQuality)
-                        .verificationStatus(ContractFieldVerificationStatus.UNVERIFIED)
-                        .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
-                        .build())
+                .signingDate(signingField)
+                .effectiveDate(effectiveField)
+                .expiryDate(expiryField)
                 .term(normalizeStringField(candidate.getTerm(), totalPages, docText))
                 .parties(parties)
                 .purpose(normalizeStringField(candidate.getPurpose(), totalPages, docText))
                 .contractValue(normalizeContractValue(candidate.getContractValue(), totalPages, docText))
-                .governingLaw(normalizeStringField(candidate.getGoverningLaw(), totalPages, docText))
+                .governingLaw(normalizeGoverningLawField(candidate.getGoverningLaw(), totalPages, docText))
                 .build();
     }
 
@@ -555,19 +554,120 @@ public class ContractExtractionNormalizer {
         return ContractStatus.UNKNOWN;
     }
 
+    public boolean isNaText(String str) {
+        if (!StringUtils.hasText(str)) return true;
+        String s = str.trim().toUpperCase();
+        return s.equals("N/A") || s.equals("NA") || s.equals("KHÔNG CÓ") || s.equals("CHƯA CÓ THÔNG TIN") || s.equals("—") || s.equals("-");
+    }
+
     public ExtractedContractField<String> normalizeStringField(AiContractFieldCandidate candidate, int totalPages, String docText) {
         if (candidate == null || !StringUtils.hasText(candidate.getValue())) {
             return null;
         }
+        String val = candidate.getValue().trim();
+        boolean isNa = isNaText(val);
+        ContractFieldQualityStatus status = isNa
+                ? ContractFieldQualityStatus.VALID
+                : evaluateQuality(candidate.getConfidence(), candidate.getSourcePage(), totalPages, candidate.getEvidence(), docText);
+
         return ExtractedContractField.<String>builder()
-                .value(candidate.getValue().trim())
+                .value(val)
                 .sourcePage(validatePage(candidate.getSourcePage(), totalPages))
                 .evidence(cleanText(candidate.getEvidence()))
                 .confidence(candidate.getConfidence())
-                .qualityStatus(evaluateQuality(candidate.getConfidence(), candidate.getSourcePage(), totalPages, candidate.getEvidence(), docText))
+                .qualityStatus(status)
                 .verificationStatus(ContractFieldVerificationStatus.UNVERIFIED)
                 .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
                 .build();
+    }
+
+    public ExtractedContractField<String> normalizeGoverningLawField(AiContractFieldCandidate candidate, int totalPages, String docText) {
+        if (candidate == null || !StringUtils.hasText(candidate.getValue())) {
+            return null;
+        }
+        String normalizedValue = normalizeGoverningLawValue(candidate.getValue());
+        boolean isNa = isNaText(normalizedValue);
+        ContractFieldQualityStatus status = isNa
+                ? ContractFieldQualityStatus.VALID
+                : evaluateQuality(candidate.getConfidence(), candidate.getSourcePage(), totalPages, candidate.getEvidence(), docText);
+
+        return ExtractedContractField.<String>builder()
+                .value(normalizedValue)
+                .sourcePage(validatePage(candidate.getSourcePage(), totalPages))
+                .evidence(cleanText(candidate.getEvidence()))
+                .confidence(candidate.getConfidence())
+                .qualityStatus(status)
+                .verificationStatus(ContractFieldVerificationStatus.UNVERIFIED)
+                .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
+                .build();
+    }
+
+    public String normalizeGoverningLawValue(String raw) {
+        if (!StringUtils.hasText(raw)) return null;
+        return Arrays.stream(raw.split("\\|"))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .collect(Collectors.joining(" | "));
+    }
+
+    public String normalizePartyEvidence(AiContractPartyCandidate p, String docText) {
+        if (p == null) return null;
+        String baseEvidence = cleanText(p.getEvidence());
+        List<String> parts = new ArrayList<>();
+        if (StringUtils.hasText(baseEvidence)) {
+            for (String s : baseEvidence.split("\\|")) {
+                String trimmed = s.trim();
+                if (StringUtils.hasText(trimmed)) {
+                    parts.add(trimmed);
+                }
+            }
+        }
+
+        if (StringUtils.hasText(docText)) {
+            // 1. Tax code
+            if (StringUtils.hasText(p.getTaxCode()) && !"N/A".equalsIgnoreCase(p.getTaxCode().trim())) {
+                String cleanTax = p.getTaxCode().trim();
+                boolean covered = parts.stream().anyMatch(seg -> seg.contains(cleanTax));
+                if (!covered) {
+                    String snippet = findSnippetAround(docText, cleanTax, 40);
+                    if (snippet != null) parts.add(snippet);
+                }
+            }
+            // 2. Representative
+            if (StringUtils.hasText(p.getRepresentative()) && !"N/A".equalsIgnoreCase(p.getRepresentative().trim())) {
+                String repName = p.getRepresentative().replaceAll("\\(.*\\)", "").trim();
+                String target = StringUtils.hasText(repName) ? repName : p.getRepresentative().trim();
+                boolean covered = parts.stream().anyMatch(seg -> seg.toLowerCase().contains(target.toLowerCase()));
+                if (!covered) {
+                    String snippet = findSnippetAround(docText, target, 60);
+                    if (snippet != null) parts.add(snippet);
+                }
+            }
+            // 3. Address
+            if (StringUtils.hasText(p.getAddress()) && !"N/A".equalsIgnoreCase(p.getAddress().trim())) {
+                String[] addrParts = p.getAddress().split("[,;-]");
+                String target = addrParts.length > 0 && addrParts[0].trim().length() > 4 ? addrParts[0].trim() : p.getAddress().trim();
+                boolean covered = parts.stream().anyMatch(seg -> seg.toLowerCase().contains(target.toLowerCase()));
+                if (!covered) {
+                    String snippet = findSnippetAround(docText, target, 70);
+                    if (snippet != null) parts.add(snippet);
+                }
+            }
+        }
+
+        if (parts.isEmpty()) {
+            return baseEvidence;
+        }
+        return String.join(" | ", parts);
+    }
+
+    private String findSnippetAround(String docText, String query, int maxLen) {
+        if (!StringUtils.hasText(docText) || !StringUtils.hasText(query)) return null;
+        int idx = docText.toLowerCase().indexOf(query.toLowerCase());
+        if (idx < 0) return null;
+        int start = Math.max(0, idx - 15);
+        int end = Math.min(docText.length(), idx + query.length() + maxLen);
+        return docText.substring(start, end).replaceAll("[\\r\\n]+", " ").replaceAll("\\s+", " ").trim();
     }
 
     public ExtractedContractField<ContractValue> normalizeContractValue(AiContractValueCandidate candidate, int totalPages, String docText) {
@@ -583,25 +683,30 @@ public class ContractExtractionNormalizer {
                 .rawAmountText(cleanText(candidate.getRawAmount()))
                 .build();
 
+        boolean isNa = (amount == null && (candidate.getRawAmount() == null || isNaText(candidate.getRawAmount())));
+        ContractFieldQualityStatus status = isNa
+                ? ContractFieldQualityStatus.VALID
+                : evaluateQuality(candidate.getConfidence(), candidate.getSourcePage(), totalPages, candidate.getEvidence(), docText);
+
         return ExtractedContractField.<ContractValue>builder()
                 .value(cv)
                 .sourcePage(validatePage(candidate.getSourcePage(), totalPages))
                 .evidence(cleanText(candidate.getEvidence()))
                 .confidence(candidate.getConfidence())
-                .qualityStatus(evaluateQuality(candidate.getConfidence(), candidate.getSourcePage(), totalPages, candidate.getEvidence(), docText))
+                .qualityStatus(status)
                 .verificationStatus(ContractFieldVerificationStatus.UNVERIFIED)
                 .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
                 .build();
     }
 
     private ExtractedContractField<LocalDate> buildDateField(LocalDate date, AiContractFieldCandidate candidate, int totalPages, String docText) {
-        if (candidate == null && date == null) return null;
+        if (candidate == null || date == null) return null;
         return ExtractedContractField.<LocalDate>builder()
                 .value(date)
-                .sourcePage(candidate != null ? validatePage(candidate.getSourcePage(), totalPages) : null)
-                .evidence(candidate != null ? cleanText(candidate.getEvidence()) : null)
-                .confidence(candidate != null ? candidate.getConfidence() : null)
-                .qualityStatus(evaluateQuality(candidate != null ? candidate.getConfidence() : null, candidate != null ? candidate.getSourcePage() : null, totalPages, candidate != null ? candidate.getEvidence() : null, docText))
+                .sourcePage(validatePage(candidate.getSourcePage(), totalPages))
+                .evidence(cleanText(candidate.getEvidence()))
+                .confidence(candidate.getConfidence())
+                .qualityStatus(evaluateQuality(candidate.getConfidence(), candidate.getSourcePage(), totalPages, candidate.getEvidence(), docText))
                 .verificationStatus(ContractFieldVerificationStatus.UNVERIFIED)
                 .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
                 .build();
@@ -621,8 +726,22 @@ public class ContractExtractionNormalizer {
             String normEvidence = evidence.replaceAll("\\s+", " ").trim().toLowerCase();
             String normDoc = docText.replaceAll("\\s+", " ").trim().toLowerCase();
             if (!normDoc.contains(normEvidence) && normEvidence.length() > 5) {
-                // If evidence is not contained in document text
-                return ContractFieldQualityStatus.NEEDS_REVIEW;
+                // If evidence is composed of multiple segments joined by |, ..., or newlines
+                String[] segments = evidence.split("[\\|\\n]|\\.{3,}");
+                boolean hasMatchedSegment = false;
+                int longSegmentsCount = 0;
+                for (String seg : segments) {
+                    String cleanSeg = seg.replaceAll("\\s+", " ").trim().toLowerCase();
+                    if (cleanSeg.length() > 5) {
+                        longSegmentsCount++;
+                        if (normDoc.contains(cleanSeg)) {
+                            hasMatchedSegment = true;
+                        }
+                    }
+                }
+                if (longSegmentsCount <= 1 || !hasMatchedSegment) {
+                    return ContractFieldQualityStatus.NEEDS_REVIEW;
+                }
             }
         }
         return ContractFieldQualityStatus.VALID;
@@ -683,15 +802,61 @@ public class ContractExtractionNormalizer {
         }
     }
 
+    private static final Pattern VIETNAMESE_DATE_WORDS_PATTERN = Pattern.compile(
+            "(?:ngày\\s+)?(\\d{1,2})\\s+tháng\\s+(\\d{1,2})\\s+năm\\s+(\\d{4})",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    private static final List<DateTimeFormatter> DATE_FORMATTERS = List.of(
+            DateTimeFormatter.ISO_LOCAL_DATE,
+            DateTimeFormatter.ofPattern("d/M/yyyy"),
+            DateTimeFormatter.ofPattern("d-M-yyyy"),
+            DateTimeFormatter.ofPattern("d.M.yyyy"),
+            DateTimeFormatter.ofPattern("yyyy/M/d"),
+            DateTimeFormatter.ofPattern("yyyy.M.d")
+    );
+
     public LocalDate parseDate(AiContractFieldCandidate candidate) {
         if (candidate == null || !StringUtils.hasText(candidate.getValue())) return null;
-        String val = candidate.getValue().trim();
-        try {
-            return LocalDate.parse(val);
-        } catch (DateTimeParseException e) {
-            log.debug("Could not parse date '{}' as ISO date", val);
-            return null;
+        return parseDateString(candidate.getValue());
+    }
+
+    public LocalDate parseDateString(String raw) {
+        if (!StringUtils.hasText(raw)) return null;
+        String val = raw.trim();
+
+        // 1. Check Vietnamese words format: (ngày) DD tháng MM năm YYYY
+        Matcher vnMatcher = VIETNAMESE_DATE_WORDS_PATTERN.matcher(val);
+        if (vnMatcher.find()) {
+            try {
+                int day = Integer.parseInt(vnMatcher.group(1));
+                int month = Integer.parseInt(vnMatcher.group(2));
+                int year = Integer.parseInt(vnMatcher.group(3));
+                return LocalDate.of(year, month, day);
+            } catch (DateTimeException e) {
+                log.debug("Invalid day/month/year in Vietnamese date string: {}", val);
+            }
         }
+
+        // Clean prefix "ngày", "Ngày", "date:" if present before standard formats
+        String cleaned = val.replaceFirst("^(?i)(?:ngày|date)[:\\s]+", "").trim();
+
+        // 2. ISO timestamp or date prefix (e.g. 2023-10-15 or 2023-10-15T00:00:00)
+        if (cleaned.length() >= 10 && cleaned.charAt(4) == '-' && cleaned.charAt(7) == '-') {
+            try {
+                return LocalDate.parse(cleaned.substring(0, 10), DateTimeFormatter.ISO_LOCAL_DATE);
+            } catch (DateTimeParseException ignored) {}
+        }
+
+        // 3. Pattern formatters
+        for (DateTimeFormatter formatter : DATE_FORMATTERS) {
+            try {
+                return LocalDate.parse(cleaned, formatter);
+            } catch (DateTimeParseException ignored) {}
+        }
+
+        log.debug("Could not parse date '{}' into LocalDate", raw);
+        return null;
     }
 
     private String cleanText(String str) {

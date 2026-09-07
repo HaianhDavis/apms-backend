@@ -47,6 +47,9 @@ public class ContractExtractionService {
     @Value("${app.ai.gemini.model:gemini-3.6-flash}")
     private String geminiModel;
 
+    @Value("${app.ai.gemini.max-output-tokens:32768}")
+    private int maxOutputTokens = 32768;
+
     @Value("${app.storage.upload-dir:uploads/}")
     private String storagePath;
 
@@ -123,7 +126,19 @@ public class ContractExtractionService {
                     log.info("Sending contract PDF to Gemini Multimodal for classification: {}", pdfFile.getName());
                     String responseJson = callGeminiMultimodal(promptTemplate, "application/pdf", base64);
                     if (responseJson != null) {
-                        return parseResponse(responseJson, AiContractClassificationCandidate.class);
+                        try {
+                            return parseResponse(responseJson, AiContractClassificationCandidate.class);
+                        } catch (BusinessValidationException bve) {
+                            if ("AI_RECITATION_FILTER".equals(bve.getErrorCode())) {
+                                log.warn("Gemini hit RECITATION filter on classification. Retrying with anti-recitation directive...");
+                                String retryPrompt = promptTemplate + "\n\nCRITICAL ANTI-RECITATION INSTRUCTION: Provide concise reasoning only. Do not quote verbatim text.";
+                                String retryJson = callGeminiMultimodal(retryPrompt, "application/pdf", base64, 0.2);
+                                if (retryJson != null) {
+                                    return parseResponse(retryJson, AiContractClassificationCandidate.class);
+                                }
+                            }
+                            throw bve;
+                        }
                     }
                 }
             } catch (BusinessValidationException bve) {
@@ -145,14 +160,24 @@ public class ContractExtractionService {
 
         String fullPrompt = promptTemplate + "\n\n=== DOCUMENT TEXT ===\n" + docText;
         String responseJson = callGemini(fullPrompt);
-        return parseResponse(responseJson, AiContractClassificationCandidate.class);
+        try {
+            return parseResponse(responseJson, AiContractClassificationCandidate.class);
+        } catch (BusinessValidationException bve) {
+            if ("AI_RECITATION_FILTER".equals(bve.getErrorCode())) {
+                log.warn("Gemini hit RECITATION filter on text classification. Retrying with anti-recitation directive...");
+                String retryPrompt = fullPrompt + "\n\nCRITICAL ANTI-RECITATION INSTRUCTION: Provide concise reasoning only. Do not quote verbatim text.";
+                String retryJson = callGemini(retryPrompt, 0.2);
+                return parseResponse(retryJson, AiContractClassificationCandidate.class);
+            }
+            throw bve;
+        }
     }
 
     /**
      * Stage 2: Structured Common Contract Data Extraction
      */
     public AiContractExtractionCandidate extractStructuredContract(RawDocument doc, ContractType confirmedType) {
-        String promptTemplate = loadPrompt("ai-prompts/contract-extraction.prompt.md");
+        String promptTemplate = buildStructuredContractPrompt(confirmedType);
         BusinessValidationException lastAiException = null;
 
         // Try Multimodal API first if PDF file is available on disk
@@ -165,7 +190,19 @@ public class ContractExtractionService {
                     log.info("Sending contract PDF to Gemini Multimodal for extraction: {}", pdfFile.getName());
                     String responseJson = callGeminiMultimodal(promptTemplate, "application/pdf", base64);
                     if (responseJson != null) {
-                        return parseResponse(responseJson, AiContractExtractionCandidate.class);
+                        try {
+                            return parseResponse(responseJson, AiContractExtractionCandidate.class);
+                        } catch (BusinessValidationException bve) {
+                            if ("AI_RECITATION_FILTER".equals(bve.getErrorCode())) {
+                                log.warn("Gemini hit RECITATION filter on multimodal extraction. Retrying with anti-recitation directive...");
+                                String retryPrompt = promptTemplate + "\n\nCRITICAL ANTI-RECITATION DIRECTIVE: The previous attempt was blocked by Google's copyright recitation filter. You MUST strictly limit all evidence quotes to ultra-short snippets (< 15 words) and summarize all descriptions concisely. Do NOT reproduce verbatim text paragraphs.";
+                                String retryJson = callGeminiMultimodal(retryPrompt, "application/pdf", base64, 0.2);
+                                if (retryJson != null) {
+                                    return parseResponse(retryJson, AiContractExtractionCandidate.class);
+                                }
+                            }
+                            throw bve;
+                        }
                     }
                 }
             } catch (BusinessValidationException bve) {
@@ -187,7 +224,26 @@ public class ContractExtractionService {
 
         String fullPrompt = promptTemplate + "\n\n=== DOCUMENT TEXT ===\n" + docText;
         String responseJson = callGemini(fullPrompt);
-        return parseResponse(responseJson, AiContractExtractionCandidate.class);
+        try {
+            return parseResponse(responseJson, AiContractExtractionCandidate.class);
+        } catch (BusinessValidationException bve) {
+            if ("AI_RECITATION_FILTER".equals(bve.getErrorCode())) {
+                log.warn("Gemini hit RECITATION filter on text extraction. Retrying with anti-recitation directive...");
+                String retryPrompt = fullPrompt + "\n\nCRITICAL ANTI-RECITATION DIRECTIVE: The previous attempt was blocked by Google's copyright recitation filter. You MUST strictly limit all evidence quotes to ultra-short snippets (< 15 words) and summarize all descriptions concisely. Do NOT reproduce verbatim text paragraphs.";
+                String retryJson = callGemini(retryPrompt, 0.2);
+                return parseResponse(retryJson, AiContractExtractionCandidate.class);
+            }
+            throw bve;
+        }
+    }
+
+    public String buildStructuredContractPrompt(ContractType confirmedType) {
+        String promptTemplate = loadPrompt("ai-prompts/contract-extraction.prompt.md");
+        String subtypeSchema = "";
+        if (confirmedType != null && confirmedType != ContractType.UNKNOWN) {
+            subtypeSchema = getSubtypeSchemaSpecification(confirmedType);
+        }
+        return promptTemplate.replace("{{SUBTYPE_SCHEMA}}", subtypeSchema != null ? subtypeSchema.trim() : "").trim();
     }
 
     public int getDocumentPageCount(RawDocument doc) {
@@ -411,6 +467,10 @@ public class ContractExtractionService {
     }
 
     private String callGemini(String fullPrompt) {
+        return callGemini(fullPrompt, 0.0);
+    }
+
+    private String callGemini(String fullPrompt, double temperature) {
         String cleanKey = getCleanApiKey();
         String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + cleanKey;
 
@@ -421,7 +481,9 @@ public class ContractExtractionService {
                         ))
                 ),
                 "generationConfig", Map.of(
-                        "responseMimeType", "application/json"
+                        "responseMimeType", "application/json",
+                        "temperature", temperature,
+                        "maxOutputTokens", maxOutputTokens
                 )
         );
 
@@ -480,6 +542,10 @@ public class ContractExtractionService {
     }
 
     private String callGeminiMultimodal(String prompt, String mimeType, String base64Data) {
+        return callGeminiMultimodal(prompt, mimeType, base64Data, 0.0);
+    }
+
+    private String callGeminiMultimodal(String prompt, String mimeType, String base64Data, double temperature) {
         String cleanKey = getCleanApiKey();
         String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + cleanKey;
 
@@ -494,7 +560,9 @@ public class ContractExtractionService {
                         ))
                 ),
                 "generationConfig", Map.of(
-                        "responseMimeType", "application/json"
+                        "responseMimeType", "application/json",
+                        "temperature", temperature,
+                        "maxOutputTokens", maxOutputTokens
                 )
         );
 
@@ -554,7 +622,7 @@ public class ContractExtractionService {
         return null;
     }
 
-    private <T> T parseResponse(String responseJson, Class<T> clazz) {
+    <T> T parseResponse(String responseJson, Class<T> clazz) {
         if (responseJson == null || responseJson.isBlank()) {
             throw new BusinessValidationException("AI_RESPONSE_EMPTY", "AI returned an empty response.");
         }
@@ -566,24 +634,60 @@ public class ContractExtractionService {
                 throw new BusinessValidationException("AI_NO_CANDIDATES", "AI returned no candidate responses.");
             }
 
-            Map<String, Object> content = (Map<String, Object>) candidates.get(0).get("content");
-            List<Map<String, Object>> parts = (List<Map<String, Object>>) content.get("parts");
+            Map<String, Object> candidate0 = candidates.get(0);
+            String finishReason = (String) candidate0.get("finishReason");
+            if ("MAX_TOKENS".equalsIgnoreCase(finishReason)) {
+                log.error("Gemini response was truncated due to MAX_TOKENS limit. Response: {}", responseJson);
+                throw new BusinessValidationException("AI_TOKEN_LIMIT_EXCEEDED",
+                        "Phản hồi từ AI bị cắt ngắn do vượt quá giới hạn token (MAX_TOKENS).");
+            }
+
+            Map<String, Object> content = (Map<String, Object>) candidate0.get("content");
+            List<Map<String, Object>> parts = content != null ? (List<Map<String, Object>>) content.get("parts") : null;
             if (parts == null || parts.isEmpty()) {
-                throw new BusinessValidationException("AI_EMPTY_PARTS", "AI response parts are empty.");
+                if ("RECITATION".equalsIgnoreCase(finishReason)) {
+                    log.warn("Gemini output was blocked by RECITATION filter: {}", candidate0.get("finishMessage"));
+                    throw new BusinessValidationException("AI_RECITATION_FILTER",
+                            "Nội dung bị bộ lọc bản quyền AI (RECITATION) chặn do trích dẫn quá nhiều văn bản gốc từ tài liệu công khai.");
+                }
+                if ("SAFETY".equalsIgnoreCase(finishReason)) {
+                    log.warn("Gemini output was blocked by SAFETY filter: {}", candidate0.get("finishMessage"));
+                    throw new BusinessValidationException("AI_SAFETY_FILTER",
+                            "Nội dung bị bộ lọc an toàn của AI chặn.");
+                }
+                throw new BusinessValidationException("AI_EMPTY_PARTS", "AI response parts are empty (finishReason: " + finishReason + ").");
             }
 
             String text = (String) parts.get(0).get("text");
             if (text != null) {
                 text = text.trim();
-                if (text.startsWith("```json")) {
-                    text = text.substring(7);
-                } else if (text.startsWith("```")) {
-                    text = text.substring(3);
+                int jsonFenceStart = text.indexOf("```json");
+                if (jsonFenceStart != -1) {
+                    int contentStart = jsonFenceStart + 7;
+                    int fenceEnd = text.indexOf("```", contentStart);
+                    if (fenceEnd != -1) {
+                        text = text.substring(contentStart, fenceEnd).trim();
+                    } else {
+                        text = text.substring(contentStart).trim();
+                    }
+                } else {
+                    int generalFenceStart = text.indexOf("```");
+                    if (generalFenceStart != -1) {
+                        int contentStart = generalFenceStart + 3;
+                        int fenceEnd = text.indexOf("```", contentStart);
+                        if (fenceEnd != -1) {
+                            text = text.substring(contentStart, fenceEnd).trim();
+                        } else {
+                            text = text.substring(contentStart).trim();
+                        }
+                    }
                 }
-                if (text.endsWith("```")) {
-                    text = text.substring(0, text.length() - 3);
+
+                int firstBrace = text.indexOf('{');
+                int lastBrace = text.lastIndexOf('}');
+                if (firstBrace != -1 && lastBrace != -1 && lastBrace >= firstBrace) {
+                    text = text.substring(firstBrace, lastBrace + 1).trim();
                 }
-                text = text.trim();
             }
             return objectMapper.readValue(text, clazz);
         } catch (BusinessValidationException e) {

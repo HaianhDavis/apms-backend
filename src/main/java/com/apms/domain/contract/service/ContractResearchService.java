@@ -356,12 +356,25 @@ public class ContractResearchService {
         ContractResearch research = getResearchEntity(taskId);
         ContractEntry entry = findContractOrThrow(research, contractId);
 
-        // Focus purely on Common Contract Data
+        // Focus on Common Contract Data and active Subtype Data
         entry.setCooperationAgreementData(null);
         entry.setPartnershipAgreementData(null);
         entry.setJointVentureAgreementData(null);
         entry.setBusinessCooperationContractData(null);
         entry.setCommonData(common);
+
+        // Normalize active subtype data according to confirmedType
+        switch (confirmedType) {
+            case COOPERATION_AGREEMENT -> entry.setCooperationAgreementData(
+                    normalizer.normalizeCooperationData(extractionCandidate.getCooperationAgreementData(), totalPages, docText));
+            case PARTNERSHIP_AGREEMENT -> entry.setPartnershipAgreementData(
+                    normalizer.normalizePartnershipData(extractionCandidate.getPartnershipAgreementData(), totalPages, docText));
+            case JOINT_VENTURE_AGREEMENT -> entry.setJointVentureAgreementData(
+                    normalizer.normalizeJointVentureData(extractionCandidate.getJointVentureAgreementData(), totalPages, docText));
+            case BUSINESS_COOPERATION_CONTRACT -> entry.setBusinessCooperationContractData(
+                    normalizer.normalizeBccData(extractionCandidate.getBusinessCooperationContractData(), totalPages, docText));
+            default -> {}
+        }
 
         // Evaluate Target Company Match
         String targetCompanyName = getTargetCompanyName(taskId);
@@ -495,7 +508,12 @@ public class ContractResearchService {
             }
             entry.setCommonData(newCommon);
 
-            // Normalize subtype data
+            // Reset and normalize subtype data
+            entry.setCooperationAgreementData(null);
+            entry.setPartnershipAgreementData(null);
+            entry.setJointVentureAgreementData(null);
+            entry.setBusinessCooperationContractData(null);
+
             switch (confirmedType) {
                 case COOPERATION_AGREEMENT -> entry.setCooperationAgreementData(
                         normalizer.normalizeCooperationData(candidate.getCooperationAgreementData(), totalPages, docText));
@@ -507,6 +525,22 @@ public class ContractResearchService {
                         normalizer.normalizeBccData(candidate.getBusinessCooperationContractData(), totalPages, docText));
                 default -> {}
             }
+
+            // Evaluate Target Company Match
+            String targetCompanyName = getTargetCompanyName(taskId);
+            CompanyMatchStatus matchStatus = companyMatcher.evaluateCompanyMatch(targetCompanyName, newCommon.getParties());
+            entry.setCompanyMatchStatus(matchStatus);
+            if (!Boolean.TRUE.equals(entry.getCompanyMatchConfirmed())) {
+                entry.setCompanyMatchConfirmed(matchStatus == CompanyMatchStatus.MATCH);
+            }
+
+            // Derive deterministic contract status
+            LocalDate effective = newCommon.getEffectiveDate() != null ? newCommon.getEffectiveDate().getValue() : null;
+            LocalDate expiry = newCommon.getExpiryDate() != null ? newCommon.getExpiryDate().getValue() : null;
+            ContractStatus derivedStatus = normalizer.deriveContractStatus(effective, expiry, false);
+            entry.setDerivedContractStatus(derivedStatus);
+            entry.setStatusDerivedAt(LocalDateTime.now());
+            entry.setStatusDerivationReason("Derived from effectiveDate (" + effective + ") and expiryDate (" + expiry + ")");
 
             entry.setExtractionStatus(ContractExtractionStatus.COMPLETED);
             entry.setExtractionStage(ContractExtractionStage.SAVING_RESULTS);
@@ -1301,8 +1335,16 @@ public class ContractResearchService {
         return false;
     }
 
+    private boolean hasFieldValue(ExtractedContractField<?> field) {
+        if (field == null || field.getValue() == null) return false;
+        if (field.getValue() instanceof String s) {
+            return !s.isBlank();
+        }
+        return true;
+    }
+
     private boolean isFieldUnresolved(ExtractedContractField<?> field) {
-        return field != null
+        return hasFieldValue(field)
                 && field.getQualityStatus() == ContractFieldQualityStatus.NEEDS_REVIEW
                 && field.getVerificationStatus() == ContractFieldVerificationStatus.UNVERIFIED;
     }
@@ -1329,7 +1371,7 @@ public class ContractResearchService {
     }
 
     private boolean isFieldUnverified(ExtractedContractField<?> field) {
-        return field != null && field.getVerificationStatus() != ContractFieldVerificationStatus.VERIFIED;
+        return hasFieldValue(field) && field.getVerificationStatus() != ContractFieldVerificationStatus.VERIFIED;
     }
 
     private void validateContractEditable(ContractResearch research, ContractEntry entry) {

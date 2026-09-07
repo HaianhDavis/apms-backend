@@ -144,4 +144,146 @@ class ContractExtractionNormalizerTest {
         assertThat(data.getProfitDistribution()).hasSize(1);
         assertThat(data.getProfitDistribution().get(0).getPercentage()).isEqualByComparingTo("51.0");
     }
+
+    @Test
+    @DisplayName("Governing Law: Preserves full composite components without data loss")
+    void normalizeGoverningLawValue_PreservesCompositeComponents() {
+        String input = "Pháp luật Việt Nam | Trọng tài tại Trung tâm Trọng tài Quốc tế Việt Nam (VIAC) | Ưu tiên thương lượng trong vòng 30 ngày";
+        String normalized = normalizer.normalizeGoverningLawValue(input);
+
+        assertThat(normalized).isEqualTo(input);
+    }
+
+    @Test
+    @DisplayName("Governing Law: Trims whitespace around pipe separators")
+    void normalizeGoverningLawValue_CleansWhitespace() {
+        String input = "  Pháp luật Việt Nam   |   Trọng tài tại VIAC   |   Thương lượng 30 ngày  ";
+        String normalized = normalizer.normalizeGoverningLawValue(input);
+
+        assertThat(normalized).isEqualTo("Pháp luật Việt Nam | Trọng tài tại VIAC | Thương lượng 30 ngày");
+    }
+
+    @Test
+    @DisplayName("Governing Law: Single values preserved without fabricating missing components")
+    void normalizeGoverningLawValue_PreservesSingleValues() {
+        // Law only
+        assertThat(normalizer.normalizeGoverningLawValue("Pháp luật Việt Nam"))
+                .isEqualTo("Pháp luật Việt Nam");
+
+        // Court only (does not fabricate Vietnamese law)
+        assertThat(normalizer.normalizeGoverningLawValue("Tòa án có thẩm quyền"))
+                .isEqualTo("Tòa án có thẩm quyền");
+
+        // Arbitration only (does not fabricate negotiation)
+        assertThat(normalizer.normalizeGoverningLawValue("Trọng tài tại VIAC"))
+                .isEqualTo("Trọng tài tại VIAC");
+    }
+
+    @Test
+    @DisplayName("Governing Law: Full CommonData normalization retains composite value and evidence")
+    void normalizeCommonData_RetainsGoverningLawComposite() {
+        String compositeVal = "Pháp luật Việt Nam | Trọng tài tại Trung tâm Trọng tài Quốc tế Việt Nam (VIAC) | Ưu tiên thương lượng trong vòng 30 ngày";
+        String evidence = "Hợp đồng được điều chỉnh theo pháp luật Việt Nam. Tranh chấp được giải quyết tại VIAC.";
+        String docText = "=== PAGE 23 ===\n" + evidence;
+
+        AiCommonContractCandidate candidate = AiCommonContractCandidate.builder()
+                .contractTitle(AiContractFieldCandidate.builder().value("Hợp đồng nạo vét duy tu").sourcePage(1).evidence("Hợp đồng nạo vét").confidence(0.95).build())
+                .governingLaw(AiContractFieldCandidate.builder()
+                        .value(compositeVal)
+                        .sourcePage(23)
+                        .evidence(evidence)
+                        .confidence(0.95)
+                        .build())
+                .build();
+
+        CommonContractData common = normalizer.normalizeCommonData(candidate, 24, docText);
+
+        assertThat(common).isNotNull();
+        assertThat(common.getGoverningLaw()).isNotNull();
+        assertThat(common.getGoverningLaw().getValue()).isEqualTo(compositeVal);
+        assertThat(common.getGoverningLaw().getSourcePage()).isEqualTo(23);
+        assertThat(common.getGoverningLaw().getQualityStatus()).isEqualTo(ContractFieldQualityStatus.VALID);
+    }
+
+    @Test
+    @DisplayName("Quality Evaluation: Supports multi-segment evidence joined by pipe or ellipsis")
+    void evaluateQuality_SupportsMultiSegmentEvidence() {
+        String docText = "=== PAGE 1 ===\nĐiều 18: Hợp đồng được điều chỉnh bởi pháp luật Việt Nam.\nMột số điều khoản khác...\n=== PAGE 2 ===\nĐiều 20: Tranh chấp được giải quyết tại VIAC.";
+        String multiEvidence = "Điều 18: Hợp đồng được điều chỉnh bởi pháp luật Việt Nam. | Điều 20: Tranh chấp được giải quyết tại VIAC.";
+
+        ContractFieldQualityStatus status = normalizer.evaluateQuality(0.95, 1, 2, multiEvidence, docText);
+        assertThat(status).isEqualTo(ContractFieldQualityStatus.VALID);
+    }
+
+    @Test
+    @DisplayName("Date Parsing: Supports various Vietnamese and international date formats")
+    void parseDateString_SupportsMultipleFormats() {
+        // Standard ISO
+        assertThat(normalizer.parseDateString("2019-09-09")).isEqualTo(LocalDate.of(2019, 9, 9));
+        // ISO Timestamp
+        assertThat(normalizer.parseDateString("2019-09-09T14:30:00")).isEqualTo(LocalDate.of(2019, 9, 9));
+        // Vietnamese DD/MM/YYYY
+        assertThat(normalizer.parseDateString("09/09/2019")).isEqualTo(LocalDate.of(2019, 9, 9));
+        assertThat(normalizer.parseDateString("5/6/2023")).isEqualTo(LocalDate.of(2023, 6, 5));
+        // DD-MM-YYYY & DD.MM.YYYY
+        assertThat(normalizer.parseDateString("09-09-2019")).isEqualTo(LocalDate.of(2019, 9, 9));
+        assertThat(normalizer.parseDateString("09.09.2019")).isEqualTo(LocalDate.of(2019, 9, 9));
+        // Vietnamese natural words: ngày DD tháng MM năm YYYY
+        assertThat(normalizer.parseDateString("ngày 09 tháng 09 năm 2019")).isEqualTo(LocalDate.of(2019, 9, 9));
+        assertThat(normalizer.parseDateString("Ngày 5 tháng 12 năm 2024")).isEqualTo(LocalDate.of(2024, 12, 5));
+        // Prefixed with 'ngày'
+        assertThat(normalizer.parseDateString("ngày 15/10/2023")).isEqualTo(LocalDate.of(2023, 10, 15));
+        // Null / empty / invalid
+        assertThat(normalizer.parseDateString(null)).isNull();
+        assertThat(normalizer.parseDateString("")).isNull();
+        assertThat(normalizer.parseDateString("không xác định")).isNull();
+    }
+
+    @Test
+    @DisplayName("Date Parsing: Candidate wrapping delegates correctly to parseDateString")
+    void parseDate_CandidateWrapping() {
+        AiContractFieldCandidate candidate = AiContractFieldCandidate.builder()
+                .value("ngày 09 tháng 09 năm 2019")
+                .sourcePage(1)
+                .build();
+        assertThat(normalizer.parseDate(candidate)).isEqualTo(LocalDate.of(2019, 9, 9));
+    }
+
+    @Test
+    @DisplayName("Date Normalization: Null or blank expiryDate returns null without generating phantom NEEDS_REVIEW")
+    void normalizeCommonData_NullOrBlankExpiryDate_ReturnsNull() {
+        // Case 1: Candidate has no expiryDate at all
+        AiCommonContractCandidate candidateWithoutExpiry = AiCommonContractCandidate.builder()
+                .contractTitle(AiContractFieldCandidate.builder().value("Hợp đồng hợp tác").sourcePage(1).evidence("Hợp đồng").confidence(0.95).build())
+                .signingDate(AiContractFieldCandidate.builder().value("2023-01-01").sourcePage(1).evidence("2023-01-01").confidence(0.95).build())
+                .build();
+
+        CommonContractData common1 = normalizer.normalizeCommonData(candidateWithoutExpiry, 5, "=== PAGE 1 ===\nHợp đồng 2023-01-01");
+        assertThat(common1.getExpiryDate()).isNull();
+        assertThat(common1.getSigningDate()).isNotNull();
+        assertThat(common1.getEffectiveDate()).isNull();
+
+        // Case 2: Candidate has expiryDate with empty/unparseable string
+        AiCommonContractCandidate candidateWithBlankExpiry = AiCommonContractCandidate.builder()
+                .contractTitle(AiContractFieldCandidate.builder().value("Hợp đồng hợp tác").sourcePage(1).evidence("Hợp đồng").confidence(0.95).build())
+                .expiryDate(AiContractFieldCandidate.builder().value("").sourcePage(1).evidence("").confidence(0.0).build())
+                .build();
+
+        CommonContractData common2 = normalizer.normalizeCommonData(candidateWithBlankExpiry, 5, "=== PAGE 1 ===\nHợp đồng");
+        assertThat(common2.getExpiryDate()).isNull();
+    }
+
+    @Test
+    @DisplayName("Date Normalization: Expiry before effective date flags NEEDS_REVIEW")
+    void normalizeCommonData_ExpiryBeforeEffective_FlagsNeedsReview() {
+        AiCommonContractCandidate candidate = AiCommonContractCandidate.builder()
+                .contractTitle(AiContractFieldCandidate.builder().value("Hợp đồng").sourcePage(1).evidence("Hợp đồng").confidence(0.95).build())
+                .effectiveDate(AiContractFieldCandidate.builder().value("2024-01-01").sourcePage(1).evidence("2024-01-01").confidence(0.95).build())
+                .expiryDate(AiContractFieldCandidate.builder().value("2023-01-01").sourcePage(1).evidence("2023-01-01").confidence(0.95).build())
+                .build();
+
+        CommonContractData common = normalizer.normalizeCommonData(candidate, 5, "=== PAGE 1 ===\nHợp đồng 2024-01-01 2023-01-01");
+        assertThat(common.getExpiryDate()).isNotNull();
+        assertThat(common.getExpiryDate().getQualityStatus()).isEqualTo(ContractFieldQualityStatus.NEEDS_REVIEW);
+    }
 }
