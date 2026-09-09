@@ -31,11 +31,33 @@ public class FinancialResearchApprovalHandler implements ProjectTaskSubmissionAp
 
     @Override
     public void handleApproval(ProjectTaskSubmission submission, Long reviewerId, String reviewNote) {
-        throw new UnsupportedOperationException("Financial Research must be reviewed at the individual report level.");
+        if (submission.getProjectTask() != null) {
+            Long taskId = submission.getProjectTask().getId();
+            researchRepository.findByTaskId(taskId).ifPresent(res -> {
+                res.setStatus(FinancialResearchStatus.APPROVED);
+                res.setReviewedBy(reviewerId);
+                res.setReviewedAt(LocalDateTime.now());
+                if (reviewNote != null) {
+                    res.setReviewReason(reviewNote);
+                }
+                researchRepository.save(res);
+            });
+        }
     }
 
     @Override
     public void handleRejection(ProjectTaskSubmission submission, Long reviewerId, String reviewNote) {
-        throw new UnsupportedOperationException("Financial Research must be reviewed at the individual report level.");
+        if (submission.getProjectTask() != null) {
+            Long taskId = submission.getProjectTask().getId();
+            researchRepository.findByTaskId(taskId).ifPresent(res -> {
+                res.setStatus(FinancialResearchStatus.CHANGES_REQUESTED);
+                res.setReviewedBy(reviewerId);
+                res.setReviewedAt(LocalDateTime.now());
+                if (reviewNote != null) {
+                    res.setReviewReason(reviewNote);
+                }
+                researchRepository.save(res);
+            });
+        }
     }
 }

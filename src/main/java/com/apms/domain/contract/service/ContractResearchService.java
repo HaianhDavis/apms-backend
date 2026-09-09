@@ -54,6 +54,7 @@ public class ContractResearchService {
     private final ProjectTaskSubmissionRepository projectTaskSubmissionRepository;
     private final CompanyProfileRepository companyProfileRepository;
     private final UserProfileRepository userProfileRepository;
+    private final com.apms.domain.user.repository.sql.AccountRepository accountRepository;
     private final ContractExtractionService extractionService;
     private final ContractExtractionNormalizer normalizer;
     private final ContractCompanyMatcher companyMatcher;
@@ -684,8 +685,8 @@ public class ContractResearchService {
 
     private void setAllFieldsVerificationStatus(ContractEntry entry, ContractFieldVerificationStatus status) {
         List<String> scalarFields = List.of(
-            "common.contractNumber", "common.signingDate", "common.effectiveDate",
-            "common.expiryDate", "common.contractValue", "common.governingLaw", "common.purpose"
+            "common.contractTitle", "common.contractNumber", "common.signingDate", "common.effectiveDate",
+            "common.expiryDate", "common.term", "common.contractValue", "common.governingLaw", "common.purpose"
         );
         for (String fieldPath : scalarFields) {
             applyScalarFieldVerification(entry, fieldPath, status);
@@ -699,6 +700,9 @@ public class ContractResearchService {
             }
         }
         if (entry.getCooperationAgreementData() != null) {
+            applyScalarFieldVerification(entry, "cooperationscope", status);
+            applyScalarFieldVerification(entry, "informationsharing", status);
+            applyScalarFieldVerification(entry, "coordinationmechanism", status);
             if (entry.getCooperationAgreementData().getResponsibilities() != null) {
                 for (com.apms.domain.contract.model.PartyResponsibility r : entry.getCooperationAgreementData().getResponsibilities()) {
                     if (r.getId() != null) applyArrayItemVerification(entry, "responsibilities", r.getId(), status);
@@ -711,6 +715,11 @@ public class ContractResearchService {
             }
         }
         if (entry.getPartnershipAgreementData() != null) {
+            applyScalarFieldVerification(entry, "partnershipscope", status);
+            applyScalarFieldVerification(entry, "benefitsharing", status);
+            applyScalarFieldVerification(entry, "salesormarketrights", status);
+            applyScalarFieldVerification(entry, "relationshipgovernance", status);
+            applyScalarFieldVerification(entry, "exclusivity", status);
             if (entry.getPartnershipAgreementData().getPartnerRoles() != null) {
                 for (com.apms.domain.contract.model.PartnerRole pr : entry.getPartnershipAgreementData().getPartnerRoles()) {
                     if (pr.getId() != null) applyArrayItemVerification(entry, "partnerroles", pr.getId(), status);
@@ -728,6 +737,9 @@ public class ContractResearchService {
             }
         }
         if (entry.getJointVentureAgreementData() != null) {
+            applyScalarFieldVerification(entry, "jointventurename", status);
+            applyScalarFieldVerification(entry, "jointventurepurpose", status);
+            applyScalarFieldVerification(entry, "governancestructure", status);
             if (entry.getJointVentureAgreementData().getCapitalContributions() != null) {
                 for (com.apms.domain.contract.model.CapitalContribution c : entry.getJointVentureAgreementData().getCapitalContributions()) {
                     if (c.getId() != null) applyArrayItemVerification(entry, "capitalcontributions", c.getId(), status);
@@ -760,6 +772,11 @@ public class ContractResearchService {
             }
         }
         if (entry.getBusinessCooperationContractData() != null) {
+            applyScalarFieldVerification(entry, "businessscope", status);
+            applyScalarFieldVerification(entry, "managementmechanism", status);
+            applyScalarFieldVerification(entry, "financialmanagement", status);
+            applyScalarFieldVerification(entry, "assetownership", status);
+            applyScalarFieldVerification(entry, "terminationsettlement", status);
             if (entry.getBusinessCooperationContractData().getContributions() != null) {
                 for (com.apms.domain.contract.model.BccContribution c : entry.getBusinessCooperationContractData().getContributions()) {
                     if (c.getId() != null) applyArrayItemVerification(entry, "contributions", c.getId(), status);
@@ -981,13 +998,20 @@ public class ContractResearchService {
             }
         }
 
-        if (allDecided) {
+        if (allDecided || anyChangesRequested) {
+            com.apms.domain.user.Account reviewerAccount = accountRepository != null ? accountRepository.findById(userId).orElse(null) : null;
             if (anyChangesRequested) {
                 submission.setStatus(SubmissionStatus.REVISION_REQUESTED);
             } else {
                 submission.setStatus(SubmissionStatus.APPROVED);
             }
+            submission.setReviewedByAccount(reviewerAccount);
             submission.setReviewedAt(LocalDateTime.now());
+            if (StringUtils.hasText(req.getReason())) {
+                submission.setReviewComment(req.getReason());
+            } else if (!StringUtils.hasText(submission.getReviewComment())) {
+                submission.setReviewComment(anyChangesRequested ? "Contract changes requested" : "Contracts approved");
+            }
             projectTaskSubmissionRepository.save(submission);
 
             // Package Precedence Evaluation
@@ -1086,6 +1110,7 @@ public class ContractResearchService {
         boolean anyChangesRequested = false;
         boolean anyPendingReview = false;
         boolean anyApproved = false;
+        boolean anyDraft = false;
 
         for (ContractEntry c : research.getContracts()) {
             if (c.getReviewStatus() == ContractEntryReviewStatus.CHANGES_REQUESTED) {
@@ -1094,11 +1119,14 @@ public class ContractResearchService {
                 anyPendingReview = true;
             } else if (c.getReviewStatus() == ContractEntryReviewStatus.APPROVED) {
                 anyApproved = true;
+            } else if (c.getReviewStatus() == ContractEntryReviewStatus.DRAFT) {
+                anyDraft = true;
             }
         }
 
         if (anyChangesRequested) return ContractResearchStatus.CHANGES_REQUESTED;
         if (anyPendingReview) return ContractResearchStatus.SUBMITTED;
+        if (anyDraft) return ContractResearchStatus.DRAFT;
         if (anyApproved) return ContractResearchStatus.APPROVED;
 
         return ContractResearchStatus.DRAFT;
@@ -1354,7 +1382,7 @@ public class ContractResearchService {
             CommonContractData c = entry.getCommonData();
             if (isFieldUnverified(c.getContractNumber())
                     || isFieldUnverified(c.getSigningDate()) || isFieldUnverified(c.getEffectiveDate())
-                    || isFieldUnverified(c.getExpiryDate())
+                    || isFieldUnverified(c.getExpiryDate()) || isFieldUnverified(c.getTerm())
                     || isFieldUnverified(c.getPurpose()) || isFieldUnverified(c.getContractValue())
                     || isFieldUnverified(c.getGoverningLaw())) {
                 return true;
@@ -1774,8 +1802,14 @@ public class ContractResearchService {
                 } else {
                     entry.getCommonData().getExpiryDate().setVerificationStatus(status);
                 }
-            } else if (path.endsWith("term") && entry.getCommonData().getTerm() != null) {
-                entry.getCommonData().getTerm().setVerificationStatus(status);
+            } else if (path.endsWith("term")) {
+                if (entry.getCommonData().getTerm() == null) {
+                    if (status == ContractFieldVerificationStatus.VERIFIED) {
+                        entry.getCommonData().setTerm(ExtractedContractField.<String>builder().value("").qualityStatus(ContractFieldQualityStatus.VALID).verificationStatus(status).build());
+                    }
+                } else {
+                    entry.getCommonData().getTerm().setVerificationStatus(status);
+                }
             } else if (path.endsWith("purpose")) {
                 if (entry.getCommonData().getPurpose() == null) {
                     if (status == ContractFieldVerificationStatus.VERIFIED) {

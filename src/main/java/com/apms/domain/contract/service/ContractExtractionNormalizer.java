@@ -557,7 +557,10 @@ public class ContractExtractionNormalizer {
     public boolean isNaText(String str) {
         if (!StringUtils.hasText(str)) return true;
         String s = str.trim().toUpperCase();
-        return s.equals("N/A") || s.equals("NA") || s.equals("KHÔNG CÓ") || s.equals("CHƯA CÓ THÔNG TIN") || s.equals("—") || s.equals("-");
+        return s.equals("N/A") || s.equals("NA") || s.equals("NONE") || s.equals("NULL")
+                || s.equals("KHÔNG CÓ") || s.equals("CHƯA CÓ THÔNG TIN")
+                || s.startsWith("KHÔNG QUY ĐỊNH") || s.startsWith("KHÔNG CÓ THÔNG TIN") || s.startsWith("TÀI LIỆU KHÔNG")
+                || s.equals("—") || s.equals("-");
     }
 
     public ExtractedContractField<String> normalizeStringField(AiContractFieldCandidate candidate, int totalPages, String docText) {
@@ -571,10 +574,10 @@ public class ContractExtractionNormalizer {
                 : evaluateQuality(candidate.getConfidence(), candidate.getSourcePage(), totalPages, candidate.getEvidence(), docText);
 
         return ExtractedContractField.<String>builder()
-                .value(val)
-                .sourcePage(validatePage(candidate.getSourcePage(), totalPages))
-                .evidence(cleanText(candidate.getEvidence()))
-                .confidence(candidate.getConfidence())
+                .value(isNa ? "N/A" : val)
+                .sourcePage(isNa ? null : validatePage(candidate.getSourcePage(), totalPages))
+                .evidence(isNa ? null : cleanText(candidate.getEvidence()))
+                .confidence(isNa ? null : candidate.getConfidence())
                 .qualityStatus(status)
                 .verificationStatus(ContractFieldVerificationStatus.UNVERIFIED)
                 .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
@@ -592,10 +595,10 @@ public class ContractExtractionNormalizer {
                 : evaluateQuality(candidate.getConfidence(), candidate.getSourcePage(), totalPages, candidate.getEvidence(), docText);
 
         return ExtractedContractField.<String>builder()
-                .value(normalizedValue)
-                .sourcePage(validatePage(candidate.getSourcePage(), totalPages))
-                .evidence(cleanText(candidate.getEvidence()))
-                .confidence(candidate.getConfidence())
+                .value(isNa ? "N/A" : normalizedValue)
+                .sourcePage(isNa ? null : validatePage(candidate.getSourcePage(), totalPages))
+                .evidence(isNa ? null : cleanText(candidate.getEvidence()))
+                .confidence(isNa ? null : candidate.getConfidence())
                 .qualityStatus(status)
                 .verificationStatus(ContractFieldVerificationStatus.UNVERIFIED)
                 .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)
@@ -684,15 +687,18 @@ public class ContractExtractionNormalizer {
                 .build();
 
         boolean isNa = (amount == null && (candidate.getRawAmount() == null || isNaText(candidate.getRawAmount())));
+        if (isNa) {
+            cv.setRawAmountText("N/A");
+        }
         ContractFieldQualityStatus status = isNa
                 ? ContractFieldQualityStatus.VALID
                 : evaluateQuality(candidate.getConfidence(), candidate.getSourcePage(), totalPages, candidate.getEvidence(), docText);
 
         return ExtractedContractField.<ContractValue>builder()
                 .value(cv)
-                .sourcePage(validatePage(candidate.getSourcePage(), totalPages))
-                .evidence(cleanText(candidate.getEvidence()))
-                .confidence(candidate.getConfidence())
+                .sourcePage(isNa ? null : validatePage(candidate.getSourcePage(), totalPages))
+                .evidence(isNa ? null : cleanText(candidate.getEvidence()))
+                .confidence(isNa ? null : candidate.getConfidence())
                 .qualityStatus(status)
                 .verificationStatus(ContractFieldVerificationStatus.UNVERIFIED)
                 .inputMethod(ContractFieldInputMethod.AI_EXTRACTED)

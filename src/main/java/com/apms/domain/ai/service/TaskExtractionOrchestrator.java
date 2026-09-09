@@ -57,6 +57,8 @@ public class TaskExtractionOrchestrator {
     private final ProjectRepository projectRepository;
     private final DocumentCompanyConsistencyValidator companyConsistencyValidator;
     private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
+    private final com.apms.domain.financial.service.DocumentCompanyMatcher companyMatcher;
+    private final CompanyIdentityDetectionService identityDetectionService;
 
     @Value("${app.storage.upload-dir:uploads/}")
     private String uploadDir;
@@ -136,23 +138,28 @@ public class TaskExtractionOrchestrator {
                     companyConsistencyValidator.validate(documentsForValidation, targetCompanyName, targetTaxCode);
 
             if (!validationResult.isValid()) {
-                log.warn("Document company validation failed for task {}: {}", taskId, validationResult.getMessage());
+                if ("DOCUMENT_TARGET_COMPANY_MISMATCH".equals(validationResult.getErrorCode())
+                        && task.getTaskType() == com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION) {
+                    log.info("Document target company mismatch detected for task {}. Continuing extraction as allowed for COMPANY_DATA_PREPARATION.", taskId);
+                } else {
+                    log.warn("Document company validation failed for task {}: {}", taskId, validationResult.getMessage());
 
-                Map<String, Object> details = new java.util.LinkedHashMap<>();
-                if (validationResult.getDocuments() != null) {
-                    details.put("documents", validationResult.getDocuments());
-                }
-                if (validationResult.getConflicts() != null) {
-                    details.put("conflicts", validationResult.getConflicts());
-                }
-                if (validationResult.getAmbiguousDocuments() != null && !validationResult.getAmbiguousDocuments().isEmpty()) {
-                    details.put("ambiguousDocuments", validationResult.getAmbiguousDocuments());
-                }
+                    Map<String, Object> details = new java.util.LinkedHashMap<>();
+                    if (validationResult.getDocuments() != null) {
+                        details.put("documents", validationResult.getDocuments());
+                    }
+                    if (validationResult.getConflicts() != null) {
+                        details.put("conflicts", validationResult.getConflicts());
+                    }
+                    if (validationResult.getAmbiguousDocuments() != null && !validationResult.getAmbiguousDocuments().isEmpty()) {
+                        details.put("ambiguousDocuments", validationResult.getAmbiguousDocuments());
+                    }
 
-                throw new com.apms.common.exception.BusinessValidationException(
-                        validationResult.getErrorCode(),
-                        validationResult.getMessage(),
-                        details);
+                    throw new com.apms.common.exception.BusinessValidationException(
+                            validationResult.getErrorCode(),
+                            validationResult.getMessage(),
+                            details);
+                }
             }
             log.info("Document company validation passed for task {}. Resolved: {}", taskId, validationResult.getResolvedCompanyName());
         }
@@ -199,6 +206,36 @@ public class TaskExtractionOrchestrator {
             RawExtractionOutput output = geminiProvider.extract(combinedText.toString());
             Project project = projectRepository.findById(projectId)
                     .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + projectId));
+
+            // Capture raw detected company name BEFORE applying project target overrides
+            String detectedCompanyName = null;
+            if (output != null && output.getExtractedData() != null) {
+                if (org.springframework.util.StringUtils.hasText(output.getExtractedData().getLegalName())) {
+                    detectedCompanyName = output.getExtractedData().getLegalName().trim();
+                } else if (org.springframework.util.StringUtils.hasText(output.getExtractedData().getTradeName())) {
+                    detectedCompanyName = output.getExtractedData().getTradeName().trim();
+                }
+            }
+
+            if (!org.springframework.util.StringUtils.hasText(detectedCompanyName)) {
+                for (String rawDocId : rawDocumentIds) {
+                    RawDocument doc = rawDocumentRepository.findById(rawDocId).orElse(null);
+                    if (doc != null) {
+                        com.apms.domain.ai.dto.DocumentCompanyIdentity docIdentity = identityDetectionService.detectIdentity(doc);
+                        if (docIdentity != null && org.springframework.util.StringUtils.hasText(docIdentity.getLegalName())) {
+                            detectedCompanyName = docIdentity.getLegalName().trim();
+                            break;
+                        }
+                    }
+                }
+            }
+
+            String targetCompanyName = project.getTargetCompanyName();
+            com.apms.domain.financial.DocumentCompanyValidationStatus companyMatchStatus =
+                    companyMatcher.evaluateCompanyMatch(detectedCompanyName, targetCompanyName);
+
+            boolean companyMatchConfirmed = (companyMatchStatus == com.apms.domain.financial.DocumentCompanyValidationStatus.MATCH);
+
             applyProjectControlledIdentity(output, project);
             removeAnalysisExtractionFields(output);
 
@@ -272,6 +309,11 @@ public class TaskExtractionOrchestrator {
                     .draftSequence(nextSeq)
                     .sourceDocumentIds(rawDocumentIds)
                     .status(CandidateStatus.DRAFT)
+                    .companyMatchStatus(companyMatchStatus)
+                    .companyMatchConfirmed(companyMatchConfirmed)
+                    .companyMatchConfirmedBy(null)
+                    .companyMatchConfirmedAt(null)
+                    .detectedCompanyName(detectedCompanyName)
                     .identity(mapIdentity(output.getExtractedData(), project))
                     .business(mapBusiness(output.getExtractedData()))
                     .contact(mapContact(output.getExtractedData()))

@@ -7,6 +7,7 @@ import com.apms.domain.candidate.dto.CandidateResponse;
 import com.apms.domain.candidate.dto.RejectCandidateRequest;
 import com.apms.domain.candidate.dto.UpdateCandidateRequest;
 import com.apms.domain.candidate.service.CandidateService;
+import com.apms.domain.contract.dto.ConfirmCompanyMatchRequest;
 import com.apms.security.UserDetailsImpl;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -155,6 +156,25 @@ public class CandidateController {
 
         return ResponseEntity.ok(ApiResponse.success(
                 candidateService.submitCandidate(candidateId, currentUser.getId()), "Candidate submitted for review"));
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/v1/candidates/{candidateId}/confirm-company
+    // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER
+    // ─────────────────────────────────────────────
+    @PostMapping("/candidates/{candidateId}/confirm-company")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'SYSTEM_ADMIN') and @projectSecurity.canModifyCandidate(#candidateId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> confirmCompanyMatch(
+            @PathVariable String candidateId,
+            @Valid @RequestBody ConfirmCompanyMatchRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        CandidateResponse response = candidateService.confirmCompanyMatch(
+                candidateId,
+                request.isConfirmed(),
+                currentUser != null ? currentUser.getId() : null
+        );
+        return ResponseEntity.ok(ApiResponse.success(response, "Company match confirmation updated successfully"));
     }
 
     // ─────────────────────────────────────────────

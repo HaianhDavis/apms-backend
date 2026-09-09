@@ -19,6 +19,11 @@ public class CandidateResponse {
     private String draftName;
     private Integer draftSequence;
     private CandidateStatus status;
+    private com.apms.domain.financial.DocumentCompanyValidationStatus companyMatchStatus;
+    private Boolean companyMatchConfirmed;
+    private Long companyMatchConfirmedBy;
+    private java.time.LocalDateTime companyMatchConfirmedAt;
+    private String detectedCompanyName;
     private RelationshipType suggestedRelationshipType;
     private Double relationshipConfidenceScore;
     private RelationshipType relationshipTypeOverride;

@@ -14,6 +14,9 @@ public interface ProjectTaskRepository extends JpaRepository<ProjectTask, Long>,
 
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"project", "assignedToAccount"})
     java.util.List<ProjectTask> findByProject_Id(Long projectId);
+
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"project", "assignedToAccount", "keyResult"})
+    java.util.List<ProjectTask> findByProject_IdAndAssignedToAccount_Id(Long projectId, Long accountId);
     
     int countByProjectIdAndStatusIn(Long projectId, java.util.Collection<com.apms.common.enums.TaskStatus> statuses);
     java.util.List<ProjectTask> findByProjectIdAndTaskTypeAndTargetCompanyProfileIdIsNull(Long projectId, com.apms.common.enums.TaskType taskType);

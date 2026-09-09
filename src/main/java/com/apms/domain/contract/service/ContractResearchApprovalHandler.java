@@ -22,11 +22,33 @@ public class ContractResearchApprovalHandler implements ProjectTaskSubmissionApp
 
     @Override
     public void handleApproval(ProjectTaskSubmission submission, Long reviewerId, String reviewNote) {
-        throw new UnsupportedOperationException("Contract Research must be reviewed at the individual contract level.");
+        if (submission.getProjectTask() != null) {
+            Long taskId = submission.getProjectTask().getId();
+            contractResearchRepository.findByTaskId(taskId).ifPresent(res -> {
+                res.setStatus(com.apms.domain.contract.enums.ContractResearchStatus.APPROVED);
+                res.setReviewedBy(reviewerId);
+                res.setReviewedAt(java.time.LocalDateTime.now());
+                if (reviewNote != null) {
+                    res.setReviewReason(reviewNote);
+                }
+                contractResearchRepository.save(res);
+            });
+        }
     }
 
     @Override
     public void handleRejection(ProjectTaskSubmission submission, Long reviewerId, String reviewNote) {
-        throw new UnsupportedOperationException("Contract Research must be reviewed at the individual contract level.");
+        if (submission.getProjectTask() != null) {
+            Long taskId = submission.getProjectTask().getId();
+            contractResearchRepository.findByTaskId(taskId).ifPresent(res -> {
+                res.setStatus(com.apms.domain.contract.enums.ContractResearchStatus.CHANGES_REQUESTED);
+                res.setReviewedBy(reviewerId);
+                res.setReviewedAt(java.time.LocalDateTime.now());
+                if (reviewNote != null) {
+                    res.setReviewReason(reviewNote);
+                }
+                contractResearchRepository.save(res);
+            });
+        }
     }
 }

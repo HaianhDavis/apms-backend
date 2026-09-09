@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -29,6 +31,8 @@ public class DocumentContext {
     private DocumentCompanyValidationStatus companyValidation;
     @Builder.Default
     private Boolean companyVerifiedByStaff = false;
+    private Long companyVerifiedByStaffId;
+    private LocalDateTime companyVerifiedAt;
 
     private DocumentPeriodValidationStatus periodValidation;
     @Builder.Default

@@ -61,5 +61,11 @@ public class DashboardController {
         return ResponseEntity.ok(ApiResponse.success(List.of()));
     }
 
-
+    @GetMapping("/manager/review-history")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<List<com.apms.domain.dashboard.dto.ManagerReviewHistoryItemResponse>>> getManagerReviewHistory(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
+        Long managerId = currentUser != null ? currentUser.getId() : null;
+        return ResponseEntity.ok(ApiResponse.success(dashboardService.getManagerReviewHistory(managerId)));
+    }
 }

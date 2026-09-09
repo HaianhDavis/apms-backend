@@ -37,6 +37,10 @@ class CandidateServiceManagerReviewTest {
     @Mock private com.apms.domain.project.fieldapproval.FieldApprovalService fieldApprovalService;
     @Mock private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     @Mock private com.apms.domain.project.repository.sql.ProjectTaskRepository projectTaskRepository;
+    @Mock private com.apms.domain.document.repository.mongo.RawDocumentRepository rawDocumentRepository;
+    @Mock private com.apms.domain.candidate.repository.mongo.CandidateDraftSequenceRepository draftSequenceRepository;
+    @Mock private com.apms.domain.audit.service.AuditLogService auditLogService;
+    @Mock private com.apms.domain.financial.service.DocumentCompanyMatcher companyMatcher;
 
     @InjectMocks
     private CandidateService candidateService;

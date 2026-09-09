@@ -6,6 +6,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
+
 @Data
 @Builder
 @NoArgsConstructor
@@ -25,6 +27,8 @@ public class DocumentContextResponse {
     private String industryContext;
     private DocumentCompanyValidationStatus companyValidation;
     private Boolean companyVerifiedByStaff;
+    private Long companyVerifiedByStaffId;
+    private LocalDateTime companyVerifiedAt;
     private DocumentPeriodValidationStatus periodValidation;
     private Boolean periodVerifiedByStaff;
 }

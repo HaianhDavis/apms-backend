@@ -19,9 +19,9 @@ You will receive text from a contract with page boundaries marked as `=== PAGE N
      * For string/date fields: set `"value": "N/A"`.
      * For `contractValue`: set `"rawAmount": "N/A"`, `"normalizedAmount": null`, `"currency": "VND"`.
      * For `parties`: if taxCode, address, or representative is not stated (e.g. state agency, public university, academic faculty/department without separate tax code), set that attribute to `"N/A"`.
-     * `sourcePage`: set to `1` (or page where the section is omitted).
-     * `evidence`: provide a brief note such as `"Tài liệu không quy định"` or `"Không có thông tin trong văn bản"`.
-     * `confidence`: `0.95`.
+     * `sourcePage`: `null`.
+     * `evidence`: `null`. CRITICAL: If a field is not stated or is "N/A", DO NOT provide evidence or explanatory text (such as "Tài liệu không quy định", "Không có thông tin"). Evidence is strictly for verbatim quotes supporting extracted data; if there is no data, evidence MUST be `null`.
+     * `confidence`: `null`.
    - **DO NOT return `null` for `value` when missing**: Always return `"N/A"` so that staff can see which fields need manual entry and can edit them later.
 
 ## Field Extraction Specifications & Business Rules

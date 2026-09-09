@@ -1,12 +1,16 @@
 package com.apms.domain.financial.controller;
 
+import com.apms.domain.contract.dto.ConfirmCompanyMatchRequest;
 import com.apms.domain.financial.dto.CreateFinancialMetricRequest;
 import com.apms.domain.financial.dto.CreateFinancialReportRequest;
 import com.apms.domain.financial.dto.FinancialResearchResponse;
 import com.apms.domain.financial.dto.UpdateFinancialMetricRequest;
 import com.apms.domain.financial.service.FinancialResearchService;
+import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -67,6 +71,18 @@ public class FinancialResearchController {
         return ResponseEntity.ok(researchService.cancelExtraction(projectId, taskId, reportId));
     }
 
+    @PostMapping("/projects/{projectId}/tasks/{taskId}/financial-research/reports/{reportId}/confirm-company")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') or hasRole('BUSINESS_DEVELOPMENT_MANAGER') or hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<FinancialResearchResponse> confirmCompanyMatch(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String reportId,
+            @RequestBody ConfirmCompanyMatchRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        Long userId = currentUser != null ? currentUser.getId() : null;
+        return ResponseEntity.ok(researchService.confirmCompanyMatch(projectId, taskId, reportId, request.isConfirmed(), userId));
+    }
+
     @PostMapping("/projects/{projectId}/tasks/{taskId}/financial-research/metrics")
     public ResponseEntity<FinancialResearchResponse> addManualMetric(
             @PathVariable Long projectId,
@@ -114,6 +130,14 @@ public class FinancialResearchController {
             @PathVariable Long taskId,
             @PathVariable String reportId) {
         return ResponseEntity.ok(researchService.verifyAllMetricsForReport(projectId, taskId, reportId));
+    }
+
+    @PostMapping("/projects/{projectId}/tasks/{taskId}/financial-research/reports/{reportId}/unverify-all")
+    public ResponseEntity<FinancialResearchResponse> unverifyAllMetrics(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String reportId) {
+        return ResponseEntity.ok(researchService.unverifyAllMetricsForReport(projectId, taskId, reportId));
     }
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/financial-research/reports/{reportId}/review")

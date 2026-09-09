@@ -36,6 +36,12 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.apms.domain.financial.DocumentCompanyValidationStatus;
+import com.apms.domain.financial.service.DocumentCompanyMatcher;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -58,6 +64,7 @@ public class CandidateService {
     private final RawDocumentRepository rawDocumentRepository;
     private final com.apms.domain.candidate.repository.mongo.CandidateDraftSequenceRepository draftSequenceRepository;
     private final com.apms.domain.audit.service.AuditLogService auditLogService;
+    private final DocumentCompanyMatcher companyMatcher;
 
     // ─────────────────────────────────────────────
     // CREATE (from AI)
@@ -127,6 +134,9 @@ public class CandidateService {
                 .status(CandidateStatus.DRAFT)
                 .revisionNumber(1)
                 .documentVersion(0L)
+                .detectedCompanyName(project.getTargetCompanyName())
+                .companyMatchStatus(DocumentCompanyValidationStatus.MATCH)
+                .companyMatchConfirmed(true)
                 .identity(CompanyCandidate.Identity.builder()
                         .legalName(project.getTargetCompanyName())
                         .taxCode(project.getTargetCompanyTaxCode())
@@ -246,6 +256,17 @@ public class CandidateService {
         int nextSeq = getNextDraftSequence(tid);
         String draftName = "Draft " + nextSeq;
 
+        String rawDetectedCompanyName = null;
+        if (extractedData != null) {
+            if (org.springframework.util.StringUtils.hasText(extractedData.getLegalName())) {
+                rawDetectedCompanyName = extractedData.getLegalName().trim();
+            } else if (org.springframework.util.StringUtils.hasText(extractedData.getTradeName())) {
+                rawDetectedCompanyName = extractedData.getTradeName().trim();
+            }
+        }
+        DocumentCompanyValidationStatus companyMatchStatus = companyMatcher.evaluateCompanyMatch(rawDetectedCompanyName, project.getTargetCompanyName());
+        boolean companyMatchConfirmed = (companyMatchStatus == DocumentCompanyValidationStatus.MATCH);
+
         // 3. Create Candidate
         CompanyCandidate candidate = CompanyCandidate.builder()
                 .projectId(projectId)
@@ -258,6 +279,9 @@ public class CandidateService {
                 .candidateOrder(1)
                 .revisionNumber(1)
                 .status(CandidateStatus.DRAFT)
+                .detectedCompanyName(rawDetectedCompanyName)
+                .companyMatchStatus(companyMatchStatus)
+                .companyMatchConfirmed(companyMatchConfirmed)
                 .suggestedRelationshipType(suggestedRel)
                 .relationshipConfidenceScore(confidence)
                 .relationshipSuggestion(suggestion)
@@ -523,6 +547,10 @@ public class CandidateService {
 
         if (candidate.getStatus() != CandidateStatus.DRAFT && candidate.getStatus() != CandidateStatus.CORRECTED && candidate.getStatus() != CandidateStatus.REVISION_REQUIRED) {
             throw new BusinessValidationException("Only DRAFT, CORRECTED, or REVISION_REQUIRED candidates can be submitted");
+        }
+
+        if (requiresCompanyConfirmation(candidate)) {
+            throw new BusinessValidationException("COMPANY_MATCH_UNCONFIRMED", "Candidate requires company match confirmation before submission.");
         }
 
         // Validate that all populated/extracted fields have been CONFIRMED by staff
@@ -1382,6 +1410,96 @@ public class CandidateService {
         }
     }
 
+    public DocumentCompanyValidationStatus resolveCompanyMatchStatus(CompanyCandidate candidate) {
+        if (candidate == null) {
+            return DocumentCompanyValidationStatus.UNKNOWN;
+        }
+        if (candidate.getCompanyMatchStatus() != null) {
+            return candidate.getCompanyMatchStatus();
+        }
+        // Fallback for legacy candidates: evaluate detectedCompanyName vs targetCompanyName
+        if (org.springframework.util.StringUtils.hasText(candidate.getDetectedCompanyName()) && candidate.getProjectId() != null) {
+            try {
+                Long projectId = Long.valueOf(candidate.getProjectId());
+                Optional<Project> projectOpt = projectRepository.findById(projectId);
+                if (projectOpt.isPresent() && org.springframework.util.StringUtils.hasText(projectOpt.get().getTargetCompanyName())) {
+                    return companyMatcher.evaluateCompanyMatch(candidate.getDetectedCompanyName(), projectOpt.get().getTargetCompanyName());
+                }
+            } catch (Exception e) {
+                log.warn("Failed to resolve company match status for candidate {}: {}", candidate.getId(), e.getMessage());
+            }
+        }
+        return DocumentCompanyValidationStatus.UNKNOWN;
+    }
+
+    public boolean requiresCompanyConfirmation(CompanyCandidate candidate) {
+        if (candidate == null) {
+            return false;
+        }
+        DocumentCompanyValidationStatus status = resolveCompanyMatchStatus(candidate);
+        if (status == DocumentCompanyValidationStatus.MATCH) {
+            return false;
+        }
+        return !Boolean.TRUE.equals(candidate.getCompanyMatchConfirmed());
+    }
+
+    @Transactional
+    public CandidateResponse confirmCompanyMatch(String candidateId, boolean confirmed, Long currentUserId) {
+        CompanyCandidate candidate = findCandidateOrThrow(candidateId);
+
+        if (candidate.getStatus() == CandidateStatus.APPROVED) {
+            throw new BusinessValidationException("CANDIDATE_APPROVED_IMMUTABLE", "Approved candidate is immutable and cannot be modified.");
+        }
+        if (candidate.getStatus() == CandidateStatus.PENDING_REVIEW) {
+            throw new BusinessValidationException("CANDIDATE_IN_REVIEW", "Candidate is currently under review and cannot be modified.");
+        }
+
+        if (currentUserId != null && candidate.getProjectId() != null) {
+            Long projectId = Long.valueOf(candidate.getProjectId());
+            if (!projectRepository.existsByIdAndMembersAccountId(projectId, currentUserId)) {
+                throw new AccessDeniedException("User is not a member of this project");
+            }
+            if (candidate.getTaskId() != null) {
+                projectTaskRepository.findById(candidate.getTaskId()).ifPresent(task -> {
+                    boolean isAssigned = task.getAssignedToAccount() != null && task.getAssignedToAccount().getId().equals(currentUserId);
+                    Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+                    boolean isManager = auth != null && auth.getAuthorities().stream()
+                            .anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DEVELOPMENT_MANAGER")
+                                    || a.getAuthority().equals("ROLE_SYSTEM_ADMIN")
+                                    || a.getAuthority().equals("ROLE_ADMIN"));
+                    if (!isAssigned && !isManager) {
+                        throw new AccessDeniedException("Only the assigned staff or manager can confirm company match for this task");
+                    }
+                });
+            }
+        }
+
+        if (confirmed) {
+            candidate.setCompanyMatchConfirmed(true);
+            candidate.setCompanyMatchConfirmedBy(currentUserId);
+            candidate.setCompanyMatchConfirmedAt(LocalDateTime.now());
+        } else {
+            candidate.setCompanyMatchConfirmed(false);
+            candidate.setCompanyMatchConfirmedBy(null);
+            candidate.setCompanyMatchConfirmedAt(null);
+        }
+
+        if (candidate.getMetadata() != null) {
+            candidate.getMetadata().setUpdatedAt(LocalDateTime.now());
+        }
+        candidate = candidateRepository.save(candidate);
+
+        auditLogService.log(
+                currentUserId,
+                AuditAction.PROJECT_TASK_UPDATED,
+                "CompanyCandidate",
+                candidateId,
+                (confirmed ? "Confirmed" : "Unconfirmed") + " company match for candidate " + (candidate.getDraftName() != null ? candidate.getDraftName() : candidateId)
+        );
+
+        return toResponse(candidate);
+    }
+
     private CandidateResponse toResponse(CompanyCandidate c) {
         Double confidenceScore = resolveCandidateConfidence(c);
 
@@ -1396,6 +1514,13 @@ public class CandidateService {
         }
         decodedFieldResults = applyFieldApprovalsToDecodedResults(c, decodedFieldResults);
         applyProjectControlledIdentityToResponse(c, decodedFieldResults);
+
+        DocumentCompanyValidationStatus resolvedStatus = resolveCompanyMatchStatus(c);
+        Boolean isConfirmed = (resolvedStatus == DocumentCompanyValidationStatus.MATCH)
+                ? Boolean.TRUE
+                : (c.getCompanyMatchConfirmed() != null ? c.getCompanyMatchConfirmed() : false);
+        Long confirmedBy = (resolvedStatus == DocumentCompanyValidationStatus.MATCH) ? null : c.getCompanyMatchConfirmedBy();
+        LocalDateTime confirmedAt = (resolvedStatus == DocumentCompanyValidationStatus.MATCH) ? null : c.getCompanyMatchConfirmedAt();
 
         return CandidateResponse.builder()
                 .id(c.getId())
@@ -1437,6 +1562,11 @@ public class CandidateService {
                 .scorePreview(c.getScorePreview())
                 .aiMetadata(c.getAiMetadata())
                 .metadata(c.getMetadata())
+                .companyMatchStatus(resolvedStatus)
+                .companyMatchConfirmed(isConfirmed)
+                .companyMatchConfirmedBy(confirmedBy)
+                .companyMatchConfirmedAt(confirmedAt)
+                .detectedCompanyName(c.getDetectedCompanyName())
                 .build();
     }
 

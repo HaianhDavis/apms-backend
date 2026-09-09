@@ -7,6 +7,8 @@ import com.apms.domain.project.dto.CreateProjectTaskRequest;
 import com.apms.domain.project.dto.ProjectTaskActivityResponse;
 import com.apms.domain.project.dto.ProjectTaskResponse;
 import com.apms.domain.project.dto.ProjectTaskWorkbenchResponse;
+import com.apms.domain.project.dto.StaffWorkHistoryItemResponse;
+import com.apms.domain.project.dto.TaskHistoryDetailResponse;
 import com.apms.domain.project.dto.UpdateProjectTaskRequest;
 import com.apms.domain.project.service.ProjectTaskService;
 import com.apms.security.UserDetailsImpl;
@@ -119,5 +121,22 @@ public class ProjectTaskController {
             @PathVariable Long taskId) {
 
         return ResponseEntity.ok(ApiResponse.success(projectTaskService.releaseTask(projectId, taskId), "Task released successfully"));
+    }
+
+    @GetMapping("/my-history")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMember(#projectId)")
+    public ResponseEntity<ApiResponse<java.util.List<StaffWorkHistoryItemResponse>>> getMyWorkHistory(
+            @PathVariable Long projectId) {
+
+        return ResponseEntity.ok(ApiResponse.success(projectTaskService.getMyWorkHistory(projectId)));
+    }
+
+    @GetMapping("/{taskId}/history")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#projectId))")
+    public ResponseEntity<ApiResponse<TaskHistoryDetailResponse>> getTaskHistory(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId) {
+
+        return ResponseEntity.ok(ApiResponse.success(projectTaskService.getTaskHistory(projectId, taskId)));
     }
 }

@@ -27,6 +27,14 @@ import com.apms.domain.financial.dto.FinancialResearchResponse;
 import com.apms.domain.financial.service.FinancialResearchService;
 import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
 import com.apms.domain.profile.repository.mongo.CompanyProfileUpdateProposalRepository;
+import com.apms.domain.project.dto.StaffWorkHistoryItemResponse;
+import com.apms.domain.project.dto.TaskTimelineEventResponse;
+import com.apms.domain.project.dto.TaskHistoryDetailResponse;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
 import com.apms.domain.project.ProjectTaskSubmission;
 import com.apms.domain.candidate.CompanyCandidate;
@@ -887,6 +895,290 @@ public class ProjectTaskService {
         // Re-fetch to return the updated state
         task = projectTaskRepository.findById(taskId).orElseThrow();
         return toResponse(task);
+    }
+
+    @Transactional(readOnly = true)
+    public List<StaffWorkHistoryItemResponse> getMyWorkHistory(Long projectId) {
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) {
+            throw new AccessDeniedException("Unauthorized");
+        }
+
+        projectRepository.findById(projectId)
+                .orElseThrow(() -> new ResourceNotFoundException("Project not found"));
+
+        if (!projectRepository.existsByIdAndMembersAccountId(projectId, currentUser.getId())
+                && !projectRepository.existsByIdAndCreatedByAccountId(projectId, currentUser.getId())) {
+            throw new AccessDeniedException("You must be a member of the project to view work history");
+        }
+
+        List<ProjectTask> myTasks = projectTaskRepository.findByProject_IdAndAssignedToAccount_Id(projectId, currentUser.getId());
+        if (myTasks.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<Long> taskIds = myTasks.stream().map(ProjectTask::getId).toList();
+        List<ProjectTaskSubmission> allSubmissions = submissionRepository.findByProjectTask_IdIn(taskIds);
+
+        Map<Long, List<ProjectTaskSubmission>> submissionsByTaskId = allSubmissions.stream()
+                .collect(Collectors.groupingBy(s -> s.getProjectTask().getId()));
+
+        List<String> taskIdStrings = taskIds.stream().map(String::valueOf).toList();
+        List<AuditLog> claimLogs = auditLogRepository.findAll((root, query, cb) -> cb.and(
+                cb.equal(root.get("action"), AuditAction.PROJECT_TASK_CLAIMED),
+                cb.equal(root.get("entityType"), "ProjectTask"),
+                root.get("entityId").in(taskIdStrings)
+        ));
+        Map<Long, LocalDateTime> claimedAtMap = new HashMap<>();
+        for (AuditLog audit : claimLogs) {
+            try {
+                Long tid = Long.valueOf(audit.getEntityId());
+                claimedAtMap.putIfAbsent(tid, audit.getTimestamp());
+            } catch (NumberFormatException ignored) {}
+        }
+
+        List<StaffWorkHistoryItemResponse> result = new ArrayList<>();
+        for (ProjectTask task : myTasks) {
+            List<ProjectTaskSubmission> taskSubs = submissionsByTaskId.getOrDefault(task.getId(), Collections.emptyList());
+
+            int revisionCount = (int) taskSubs.stream()
+                    .filter(s -> s.getStatus() == SubmissionStatus.CHANGES_REQUESTED
+                            || s.getStatus() == SubmissionStatus.REVISION_REQUESTED)
+                    .count();
+
+            LocalDateTime claimedAt = claimedAtMap.get(task.getId());
+            if (claimedAt == null) {
+                claimedAt = task.getCreatedAt();
+            }
+
+            LocalDateTime lastSubmittedAt = taskSubs.stream()
+                    .map(ProjectTaskSubmission::getSubmittedAt)
+                    .filter(Objects::nonNull)
+                    .max(LocalDateTime::compareTo)
+                    .orElse(null);
+
+            LocalDateTime completedAt = task.getCompletedAt();
+
+            String latestReviewStatus = null;
+            ProjectTaskSubmission latestSub = taskSubs.stream()
+                    .max(Comparator.comparing(ProjectTaskSubmission::getId))
+                    .orElse(null);
+            if (latestSub != null) {
+                latestReviewStatus = latestSub.getStatus() != null ? latestSub.getStatus().name() : null;
+            }
+
+            LocalDateTime lastActivityAt = claimedAt;
+            if (lastSubmittedAt != null && (lastActivityAt == null || lastSubmittedAt.isAfter(lastActivityAt))) {
+                lastActivityAt = lastSubmittedAt;
+            }
+            if (latestSub != null && latestSub.getReviewedAt() != null && (lastActivityAt == null || latestSub.getReviewedAt().isAfter(lastActivityAt))) {
+                lastActivityAt = latestSub.getReviewedAt();
+            }
+            if (completedAt != null && (lastActivityAt == null || completedAt.isAfter(lastActivityAt))) {
+                lastActivityAt = completedAt;
+            }
+            if (task.getUpdatedAt() != null && (lastActivityAt == null || task.getUpdatedAt().isAfter(lastActivityAt))) {
+                lastActivityAt = task.getUpdatedAt();
+            }
+
+            String deliverable = "Deliverable";
+            if (task.getKeyResult() != null && task.getKeyResult().getName() != null) {
+                deliverable = task.getKeyResult().getName();
+            } else if (task.getTaskType() != null) {
+                deliverable = formatDeliverableName(task.getTaskType());
+            }
+
+            result.add(StaffWorkHistoryItemResponse.builder()
+                    .taskId(task.getId())
+                    .taskCode("APMS-" + task.getId())
+                    .title(task.getTitle())
+                    .description(task.getDescription())
+                    .deliverable(deliverable)
+                    .taskType(task.getTaskType())
+                    .priority(task.getPriority())
+                    .status(task.getStatus())
+                    .latestReviewStatus(latestReviewStatus)
+                    .claimedAt(claimedAt)
+                    .lastSubmittedAt(lastSubmittedAt)
+                    .completedAt(completedAt)
+                    .revisionCount(revisionCount)
+                    .lastActivityAt(lastActivityAt)
+                    .build());
+        }
+
+        result.sort((a, b) -> {
+            LocalDateTime aTime = a.getLastActivityAt() != null ? a.getLastActivityAt() : LocalDateTime.MIN;
+            LocalDateTime bTime = b.getLastActivityAt() != null ? b.getLastActivityAt() : LocalDateTime.MIN;
+            return bTime.compareTo(aTime);
+        });
+
+        return result;
+    }
+
+    @Transactional(readOnly = true)
+    public TaskHistoryDetailResponse getTaskHistory(Long projectId, Long taskId) {
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) {
+            throw new AccessDeniedException("Unauthorized");
+        }
+
+        ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
+
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new BusinessValidationException("Task does not belong to specified project");
+        }
+
+        boolean isStaff = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        boolean isAdmin = hasRole(currentUser, SystemRole.SYSTEM_ADMIN);
+        boolean isManager = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER) || hasRole(currentUser, SystemRole.BUSINESS_OWNER);
+
+        if (isStaff && !isAdmin && !isManager) {
+            if (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(currentUser.getId())) {
+                throw new AccessDeniedException("Staff can only view history of tasks assigned to them");
+            }
+        }
+
+        List<ProjectTaskSubmission> submissions = new ArrayList<>(submissionRepository.findByProjectTask_Id(taskId));
+        submissions.sort(Comparator.comparing(ProjectTaskSubmission::getId));
+
+        int revisionCount = (int) submissions.stream()
+                .filter(s -> s.getStatus() == SubmissionStatus.CHANGES_REQUESTED
+                        || s.getStatus() == SubmissionStatus.REVISION_REQUESTED)
+                .count();
+
+        List<AuditLog> claimLogs = auditLogRepository.findAll((root, query, cb) -> cb.and(
+                cb.equal(root.get("action"), AuditAction.PROJECT_TASK_CLAIMED),
+                cb.equal(root.get("entityType"), "ProjectTask"),
+                cb.equal(root.get("entityId"), String.valueOf(taskId))
+        ));
+        LocalDateTime claimedAt = claimLogs.stream()
+                .map(AuditLog::getTimestamp)
+                .filter(Objects::nonNull)
+                .min(LocalDateTime::compareTo)
+                .orElse(task.getCreatedAt());
+
+        LocalDateTime lastSubmittedAt = submissions.stream()
+                .map(ProjectTaskSubmission::getSubmittedAt)
+                .filter(Objects::nonNull)
+                .max(LocalDateTime::compareTo)
+                .orElse(null);
+
+        String staffName = formatAccountName(task.getAssignedToAccount(), "Staff");
+
+        List<TaskTimelineEventResponse> activities = new ArrayList<>();
+
+        activities.add(TaskTimelineEventResponse.builder()
+                .type("TASK_CLAIMED")
+                .submissionNumber(null)
+                .title("Task taken")
+                .detail("You started working on this task.")
+                .note(null)
+                .actorId(task.getAssignedToAccount() != null ? task.getAssignedToAccount().getId() : null)
+                .actorName(staffName)
+                .occurredAt(claimedAt)
+                .build());
+
+        int subNumber = 0;
+        for (ProjectTaskSubmission sub : submissions) {
+            subNumber++;
+            String submitterName = formatAccountName(sub.getSubmittedByAccount(), staffName);
+
+            String subTitle = subNumber == 1 ? "Submitted for review" : "Resubmitted";
+            String subDetail = "Submission #" + subNumber;
+            if (sub.getSubmittedRevisionNumber() != null) {
+                subDetail += " (Rev. " + sub.getSubmittedRevisionNumber() + ")";
+            }
+
+            activities.add(TaskTimelineEventResponse.builder()
+                    .type(subNumber == 1 ? "SUBMITTED" : "RESUBMITTED")
+                    .submissionNumber(subNumber)
+                    .title(subTitle)
+                    .detail(subDetail)
+                    .note(sub.getNote())
+                    .actorId(sub.getSubmittedByAccount() != null ? sub.getSubmittedByAccount().getId() : null)
+                    .actorName(submitterName)
+                    .occurredAt(sub.getSubmittedAt() != null ? sub.getSubmittedAt() : sub.getCreatedAt())
+                    .build());
+
+            if (sub.getReviewedAt() != null) {
+                String reviewerName = formatAccountName(sub.getReviewedByAccount(), "Manager");
+
+                if (sub.getStatus() == SubmissionStatus.CHANGES_REQUESTED || sub.getStatus() == SubmissionStatus.REVISION_REQUESTED) {
+                    activities.add(TaskTimelineEventResponse.builder()
+                            .type("REVISION_REQUESTED")
+                            .submissionNumber(subNumber)
+                            .title("Revision requested")
+                            .detail("Reviewed by: " + reviewerName)
+                            .note(sub.getReviewComment())
+                            .actorId(sub.getReviewedByAccount() != null ? sub.getReviewedByAccount().getId() : null)
+                            .actorName(reviewerName)
+                            .occurredAt(sub.getReviewedAt())
+                            .build());
+                } else if (sub.getStatus() == SubmissionStatus.APPROVED) {
+                    activities.add(TaskTimelineEventResponse.builder()
+                            .type("APPROVED")
+                            .submissionNumber(subNumber)
+                            .title("Approved")
+                            .detail("Reviewed by: " + reviewerName + ". Task completed.")
+                            .note(sub.getReviewComment())
+                            .actorId(sub.getReviewedByAccount() != null ? sub.getReviewedByAccount().getId() : null)
+                            .actorName(reviewerName)
+                            .occurredAt(sub.getReviewedAt())
+                            .build());
+                }
+            }
+        }
+
+        activities.sort((a, b) -> {
+            LocalDateTime aTime = a.getOccurredAt() != null ? a.getOccurredAt() : LocalDateTime.MIN;
+            LocalDateTime bTime = b.getOccurredAt() != null ? b.getOccurredAt() : LocalDateTime.MIN;
+            return aTime.compareTo(bTime);
+        });
+
+        String deliverable = "Deliverable";
+        if (task.getKeyResult() != null && task.getKeyResult().getName() != null) {
+            deliverable = task.getKeyResult().getName();
+        } else if (task.getTaskType() != null) {
+            deliverable = formatDeliverableName(task.getTaskType());
+        }
+
+        return TaskHistoryDetailResponse.builder()
+                .taskId(task.getId())
+                .taskCode("APMS-" + task.getId())
+                .title(task.getTitle())
+                .description(task.getDescription())
+                .deliverable(deliverable)
+                .taskType(task.getTaskType())
+                .priority(task.getPriority())
+                .status(task.getStatus())
+                .revisionCount(revisionCount)
+                .claimedAt(claimedAt)
+                .lastSubmittedAt(lastSubmittedAt)
+                .completedAt(task.getCompletedAt())
+                .activities(activities)
+                .build();
+    }
+
+    private String formatDeliverableName(TaskType type) {
+        if (type == null) return "Deliverable";
+        switch (type) {
+            case COMPANY_DATA_PREPARATION: return "Basic Company Information";
+            case FINANCIAL_RESEARCH: return "Financial Information";
+            case COMPANY_MEMBER_RESEARCH: return "Management Members";
+            case PARTNER_CONTRACT_COLLECTION: return "Contract Information";
+            case COMPANY_NEWS_RESEARCH: return "Company News Research";
+            case ROLE_EVALUATION: return "Role Evaluation";
+            default: return type.name().replace('_', ' ');
+        }
+    }
+
+    private String formatAccountName(Account account, String fallback) {
+        if (account == null) return fallback;
+        if (account.getEmail() != null && !account.getEmail().isBlank()) {
+            return account.getEmail().split("@")[0];
+        }
+        return fallback;
     }
 
     private UserDetailsImpl getCurrentUser() {

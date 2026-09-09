@@ -273,4 +273,16 @@ public class ProjectController {
         
         return ResponseEntity.ok(ApiResponse.success(response, "Visibility updated successfully via project governance"));
     }
+
+    // ─────────────────────────────────────────────
+    // GET /api/v1/projects/{id}/review-history
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF, SYSTEM_ADMIN (must be member or owner)
+    // ─────────────────────────────────────────────
+    @GetMapping("/{id}/review-history")
+    @Operation(summary = "Get review and approval history for this project")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMemberOrOwner(#id))")
+    public ResponseEntity<ApiResponse<List<com.apms.domain.dashboard.dto.ManagerReviewHistoryItemResponse>>> getProjectReviewHistory(
+            @PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success(projectService.getProjectReviewHistory(id)));
+    }
 }

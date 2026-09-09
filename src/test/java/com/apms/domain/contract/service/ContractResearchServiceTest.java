@@ -121,7 +121,7 @@ class ContractResearchServiceTest {
         assertThat(created.getTitle()).isEqualTo("Cooperation Contract 2026");
         assertThat(created.getReviewStatus()).isEqualTo(ContractEntryReviewStatus.DRAFT);
         assertThat(created.getExtractionStatus()).isEqualTo(ContractExtractionStatus.NOT_EXTRACTED);
-        assertThat(created.getDeclaredContractType()).isNull(); // AUTO_DETECT maps to null
+        assertThat(created.getDeclaredContractType()).isEqualTo(ContractType.COOPERATION_AGREEMENT);
     }
 
     @Test
@@ -473,5 +473,50 @@ class ContractResearchServiceTest {
         assertThat(partyA.getVerificationStatus()).isEqualTo(ContractFieldVerificationStatus.VERIFIED);
         assertThat(partyA.getQualityStatus()).isEqualTo(ContractFieldQualityStatus.NEEDS_REVIEW); // Preserved
         assertThat(partyB.getLegalName()).isEqualTo("Company B"); // Untouched
+    }
+
+    @Test
+    @DisplayName("Verify all contract fields updates all common scalar fields including term and parties to VERIFIED")
+    void verifyAllContractFields_VerifiesAllFieldsIncludingTerm() {
+        ContractParty partyA = ContractParty.builder().id("party-1").legalName("Company A").verificationStatus(ContractFieldVerificationStatus.UNVERIFIED).build();
+        CommonContractData common = CommonContractData.builder()
+                .contractNumber(ExtractedContractField.<String>builder().value("HD-001").verificationStatus(ContractFieldVerificationStatus.UNVERIFIED).build())
+                .term(ExtractedContractField.<String>builder().value("12 months").verificationStatus(ContractFieldVerificationStatus.UNVERIFIED).build())
+                .signingDate(ExtractedContractField.<LocalDate>builder().value(LocalDate.of(2025, 1, 1)).verificationStatus(ContractFieldVerificationStatus.UNVERIFIED).build())
+                .effectiveDate(ExtractedContractField.<LocalDate>builder().value(LocalDate.of(2025, 1, 1)).verificationStatus(ContractFieldVerificationStatus.UNVERIFIED).build())
+                .expiryDate(ExtractedContractField.<LocalDate>builder().value(LocalDate.of(2026, 1, 1)).verificationStatus(ContractFieldVerificationStatus.UNVERIFIED).build())
+                .purpose(ExtractedContractField.<String>builder().value("Cooperation").verificationStatus(ContractFieldVerificationStatus.UNVERIFIED).build())
+                .governingLaw(ExtractedContractField.<String>builder().value("Vietnam").verificationStatus(ContractFieldVerificationStatus.UNVERIFIED).build())
+                .parties(new ArrayList<>(List.of(partyA)))
+                .build();
+
+        ContractEntry c1 = ContractEntry.builder()
+                .id("c-1")
+                .reviewStatus(ContractEntryReviewStatus.DRAFT)
+                .commonData(common)
+                .build();
+
+        ContractResearch research = ContractResearch.builder()
+                .id("res-1")
+                .taskId(taskId)
+                .contracts(new ArrayList<>(List.of(c1)))
+                .build();
+
+        when(contractResearchRepository.findByTaskId(taskId)).thenReturn(Optional.of(research));
+        when(contractResearchRepository.save(any(ContractResearch.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ContractResearchResponse response = contractResearchService.verifyAllContractFields(taskId, "c-1", staffId);
+
+        assertThat(response).isNotNull();
+        ContractEntry updated = response.getContracts().get(0);
+        assertThat(updated.getCommonData().getTerm().getVerificationStatus()).isEqualTo(ContractFieldVerificationStatus.VERIFIED);
+        assertThat(updated.getCommonData().getContractNumber().getVerificationStatus()).isEqualTo(ContractFieldVerificationStatus.VERIFIED);
+        assertThat(updated.getCommonData().getParties().get(0).getVerificationStatus()).isEqualTo(ContractFieldVerificationStatus.VERIFIED);
+
+        // Test unverifyAllContractFields
+        contractResearchService.unverifyAllContractFields(taskId, "c-1", staffId);
+        assertThat(updated.getCommonData().getTerm().getVerificationStatus()).isEqualTo(ContractFieldVerificationStatus.UNVERIFIED);
+        assertThat(updated.getCommonData().getContractNumber().getVerificationStatus()).isEqualTo(ContractFieldVerificationStatus.UNVERIFIED);
+        assertThat(updated.getCommonData().getParties().get(0).getVerificationStatus()).isEqualTo(ContractFieldVerificationStatus.UNVERIFIED);
     }
 }

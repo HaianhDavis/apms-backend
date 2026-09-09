@@ -8,6 +8,7 @@ import com.apms.domain.document.repository.mongo.RawDocumentRepository;
 import com.apms.domain.financial.*;
 import com.apms.domain.financial.dto.*;
 import com.apms.domain.financial.repository.FinancialResearchRepository;
+import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.domain.project.repository.sql.ProjectTaskRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,10 +47,13 @@ public class FinancialResearchService {
     private final FinancialResearchRepository researchRepository;
     private final RawDocumentRepository documentRepository;
     private final ProjectTaskRepository projectTaskRepository;
+    private final ProjectRepository projectRepository;
+    private final DocumentCompanyMatcher companyMatcher;
     private final com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository submissionRepository;
     private final FinancialExtractionService extractionService;
     private final AuditLogService auditLogService;
     private final com.apms.domain.user.repository.sql.UserProfileRepository userProfileRepository;
+    private final com.apms.domain.user.repository.sql.AccountRepository accountRepository;
 
     @Autowired
     @Lazy
@@ -783,6 +787,140 @@ public class FinancialResearchService {
         return toResponse(research);
     }
 
+    public FinancialResearchResponse unverifyAllMetricsForReport(Long projectId, Long taskId, String reportId) {
+        FinancialResearch research = researchRepository.findByTaskId(taskId)
+                .orElseThrow(() -> new BusinessValidationException("Research not found"));
+
+        FinancialReportEntry report = research.getReports().stream()
+                .filter(r -> r.getId().equals(reportId))
+                .findFirst()
+                .orElseThrow(() -> new BusinessValidationException("Report not found"));
+
+        if (research.getStatus() == FinancialResearchStatus.SUBMITTED || research.getStatus() == FinancialResearchStatus.APPROVED) {
+            throw new BusinessValidationException("Cannot modify metrics in a submitted or approved research package.");
+        }
+        if (report.getReviewStatus() == FinancialReportReviewStatus.APPROVED) {
+            throw new BusinessValidationException("Cannot modify metrics for an approved report.");
+        }
+
+        if (research.getMetrics() != null && !research.getMetrics().isEmpty()) {
+            for (FinancialMetric metric : research.getMetrics()) {
+                boolean belongs = (metric.getSource() != null && reportId.equals(metric.getSource().getReportEntryId())) ||
+                        (metric.getSource() != null && metric.getSource().getDocumentId() != null && metric.getSource().getDocumentId().equals(report.getDocumentId())) ||
+                        (metric.getPeriod() != null && report.getReportingPeriod() != null &&
+                         java.util.Objects.equals(metric.getPeriod().getYear(), report.getReportingPeriod().getYear()) &&
+                         metric.getPeriod().getPeriod() != null && report.getReportingPeriod().getPeriod() != null &&
+                         metric.getPeriod().getPeriod().trim().equalsIgnoreCase(report.getReportingPeriod().getPeriod().trim()));
+
+                if (belongs) {
+                    metric.setVerificationStatus(MetricVerificationStatus.UNVERIFIED);
+                }
+            }
+        }
+
+        research = researchRepository.save(research);
+        return toResponse(research);
+    }
+
+    @Transactional
+    public FinancialResearchResponse confirmCompanyMatch(
+            Long projectId,
+            Long taskId,
+            String reportId,
+            boolean confirmed,
+            Long currentUserId) {
+
+        com.apms.domain.project.ProjectTask task = projectTaskRepository.findWithProjectById(taskId)
+                .orElseThrow(() -> new BusinessValidationException("Task not found: " + taskId));
+
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new BusinessValidationException("Task does not belong to the specified project");
+        }
+
+        if (task.getTaskType() != com.apms.common.enums.TaskType.FINANCIAL_RESEARCH) {
+            throw new BusinessValidationException("Task type must be FINANCIAL_RESEARCH");
+        }
+
+        if (currentUserId != null) {
+            if (!projectRepository.existsByIdAndMembersAccountId(projectId, currentUserId)) {
+                throw new AccessDeniedException("User is not a member of this project");
+            }
+            UserDetailsImpl currentUser = getCurrentUserDetails();
+            boolean isManager = currentUser != null && currentUser.getAuthorities().stream()
+                    .anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DEVELOPMENT_MANAGER")
+                            || a.getAuthority().equals("ROLE_SYSTEM_ADMIN")
+                            || a.getAuthority().equals("ROLE_ADMIN"));
+            boolean isAssigned = task.getAssignedToAccount() != null && task.getAssignedToAccount().getId().equals(currentUserId);
+            if (!isAssigned && !isManager) {
+                throw new AccessDeniedException("Only the assigned staff or manager can confirm company match for this task");
+            }
+        }
+
+        if (task.getStatus() == com.apms.common.enums.TaskStatus.DONE || task.getStatus() == com.apms.common.enums.TaskStatus.CANCELLED) {
+            throw new BusinessValidationException("Task is not in an editable state");
+        }
+
+        FinancialResearch research = researchRepository.findByTaskId(taskId)
+                .orElseThrow(() -> new BusinessValidationException("Financial research entity not found for task " + taskId));
+
+        if (!research.getProjectId().equals(projectId)) {
+            throw new BusinessValidationException("Financial research entity does not belong to the specified project");
+        }
+
+        FinancialReportEntry report = research.getReports().stream()
+                .filter(r -> r.getId().equals(reportId))
+                .findFirst()
+                .orElseThrow(() -> new BusinessValidationException("Report not found: " + reportId));
+
+        if (research.getStatus() == FinancialResearchStatus.SUBMITTED) {
+            throw new BusinessValidationException("REPORT_IN_REVIEW", "Report is currently under Manager review and cannot be modified.");
+        }
+        if (research.getStatus() == FinancialResearchStatus.APPROVED || report.getReviewStatus() == FinancialReportReviewStatus.APPROVED) {
+            throw new BusinessValidationException("REPORT_APPROVED_IMMUTABLE", "Approved report is immutable and cannot be modified.");
+        }
+
+        if (report.getDocumentContext() == null) {
+            report.setDocumentContext(DocumentContext.builder()
+                    .companyValidation(DocumentCompanyValidationStatus.UNKNOWN)
+                    .build());
+        }
+
+        if (confirmed) {
+            report.getDocumentContext().setCompanyVerifiedByStaff(true);
+            report.getDocumentContext().setCompanyVerifiedByStaffId(currentUserId);
+            report.getDocumentContext().setCompanyVerifiedAt(LocalDateTime.now());
+        } else {
+            report.getDocumentContext().setCompanyVerifiedByStaff(false);
+            report.getDocumentContext().setCompanyVerifiedByStaffId(null);
+            report.getDocumentContext().setCompanyVerifiedAt(null);
+        }
+
+        report.setUpdatedAt(LocalDateTime.now());
+        research.setUpdatedAt(LocalDateTime.now());
+        research = researchRepository.save(research);
+
+        auditLogService.log(
+                currentUserId,
+                AuditAction.PROJECT_TASK_UPDATED,
+                "ProjectTask",
+                taskId.toString(),
+                (confirmed ? "Confirmed" : "Unconfirmed") + " company match for report " + report.getTitle()
+        );
+
+        return toResponse(research);
+    }
+
+    public static boolean requiresCompanyConfirmation(DocumentContext context) {
+        if (context == null) {
+            return false;
+        }
+        DocumentCompanyValidationStatus status = context.getCompanyValidation() != null
+                ? context.getCompanyValidation()
+                : DocumentCompanyValidationStatus.UNKNOWN;
+        return status != DocumentCompanyValidationStatus.MATCH
+                && !Boolean.TRUE.equals(context.getCompanyVerifiedByStaff());
+    }
+
     public FinancialResearchResponse submitForReview(Long projectId, Long taskId, Long submitterId, List<String> selectedReportIds) {
         FinancialResearch research = researchRepository.findByTaskId(taskId)
                 .orElseThrow(() -> new BusinessValidationException("Research not found"));
@@ -814,6 +952,13 @@ public class FinancialResearchService {
                     
             if (report.getExtractionStatus() != ExtractionStatus.EXTRACTED && report.getExtractionStatus() != ExtractionStatus.NEEDS_REVIEW) {
                 throw new BusinessValidationException("Cannot submit report that has not been extracted: " + report.getTitle());
+            }
+
+            if (requiresCompanyConfirmation(report.getDocumentContext())) {
+                throw new BusinessValidationException(
+                        "COMPANY_MATCH_UNCONFIRMED",
+                        "Báo cáo '" + report.getTitle() + "' yêu cầu xác nhận công ty mục tiêu trước khi nộp cho Manager."
+                );
             }
             
             long reportMetricCount = research.getMetrics().stream()
@@ -1102,34 +1247,47 @@ public class FinancialResearchService {
             }
         }
 
-        if (currentSubmissionReviewed) {
+        final Set<String> submittedReportIdSet = new HashSet<>(
+                research.getSubmittedReportIds() != null ? research.getSubmittedReportIds() : Collections.emptyList());
+
+        boolean anyChangesRequested = research.getReports().stream()
+                .filter(r -> submittedReportIdSet.isEmpty() || submittedReportIdSet.contains(r.getId()))
+                .anyMatch(r -> r.getReviewStatus() == FinancialReportReviewStatus.CHANGES_REQUESTED);
+
+        if (anyChangesRequested) {
+            research.setStatus(FinancialResearchStatus.CHANGES_REQUESTED);
+            com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(taskId).orElse(null);
+            if (task != null) {
+                task.setStatus(com.apms.common.enums.TaskStatus.IN_PROGRESS);
+                task.setCompletedAt(null);
+                projectTaskRepository.save(task);
+            }
+            com.apms.domain.user.Account reviewerAccount = accountRepository != null ? accountRepository.findById(reviewerId).orElse(null) : null;
+            LocalDateTime now = LocalDateTime.now();
+            String reasonText = org.springframework.util.StringUtils.hasText(request.getReason()) ? request.getReason() : report.getReviewComment();
+            submissionRepository.findByProjectTask_Id(taskId).stream()
+                    .filter(s -> s.getStatus() == com.apms.common.enums.SubmissionStatus.IN_REVIEW
+                            || s.getStatus() == com.apms.common.enums.SubmissionStatus.CHANGES_REQUESTED)
+                    .forEach(s -> {
+                        s.setStatus(com.apms.common.enums.SubmissionStatus.CHANGES_REQUESTED);
+                        s.setReviewedByAccount(reviewerAccount);
+                        s.setReviewedAt(now);
+                        if (org.springframework.util.StringUtils.hasText(reasonText)) {
+                            s.setReviewComment(reasonText);
+                        }
+                        submissionRepository.save(s);
+                    });
+        } else if (currentSubmissionReviewed) {
             com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(taskId).orElseThrow();
-            final Set<String> submittedReportIdSet = new HashSet<>(
-                    research.getSubmittedReportIds() != null ? research.getSubmittedReportIds() : Collections.emptyList());
-            
-            boolean anyChangesRequested = research.getReports().stream()
-                    .filter(r -> submittedReportIdSet.contains(r.getId()))
-                    .anyMatch(r -> r.getReviewStatus() == FinancialReportReviewStatus.CHANGES_REQUESTED);
-            
             boolean anyPending = research.getReports().stream()
                     .filter(r -> submittedReportIdSet.contains(r.getId()))
                     .anyMatch(r -> r.getReviewStatus() == FinancialReportReviewStatus.PENDING_REVIEW);
-            
+
             boolean anyApproved = research.getReports().stream()
                     .filter(r -> submittedReportIdSet.contains(r.getId()))
                     .anyMatch(r -> r.getReviewStatus() == FinancialReportReviewStatus.APPROVED);
 
-            if (anyChangesRequested) {
-                research.setStatus(FinancialResearchStatus.CHANGES_REQUESTED);
-                task.setStatus(com.apms.common.enums.TaskStatus.IN_PROGRESS);
-                task.setCompletedAt(null);
-                submissionRepository.findByProjectTask_Id(taskId).stream()
-                        .filter(s -> s.getStatus() == com.apms.common.enums.SubmissionStatus.IN_REVIEW)
-                        .forEach(s -> {
-                            s.setStatus(com.apms.common.enums.SubmissionStatus.CHANGES_REQUESTED);
-                            submissionRepository.save(s);
-                        });
-            } else if (!anyPending && anyApproved) {
+            if (!anyPending && anyApproved) {
                 research.setStatus(FinancialResearchStatus.APPROVED);
                 String targetProfileId = task.getTargetCompanyProfileId() != null
                         ? task.getTargetCompanyProfileId()
@@ -1138,14 +1296,24 @@ public class FinancialResearchService {
                     research.setCompanyProfileId(targetProfileId);
                 }
                 task.setStatus(com.apms.common.enums.TaskStatus.DONE);
+                com.apms.domain.user.Account reviewerAccount = accountRepository != null ? accountRepository.findById(reviewerId).orElse(null) : null;
+                LocalDateTime now = LocalDateTime.now();
                 submissionRepository.findByProjectTask_Id(taskId).stream()
-                        .filter(s -> s.getStatus() == com.apms.common.enums.SubmissionStatus.IN_REVIEW)
+                        .filter(s -> s.getStatus() == com.apms.common.enums.SubmissionStatus.IN_REVIEW
+                                || s.getStatus() == com.apms.common.enums.SubmissionStatus.APPROVED)
                         .forEach(s -> {
                             s.setStatus(com.apms.common.enums.SubmissionStatus.APPROVED);
+                            s.setReviewedByAccount(reviewerAccount);
+                            s.setReviewedAt(now);
+                            if (org.springframework.util.StringUtils.hasText(request.getReason())) {
+                                s.setReviewComment(request.getReason());
+                            } else if (!org.springframework.util.StringUtils.hasText(s.getReviewComment())) {
+                                s.setReviewComment("Financial reports approved");
+                            }
                             submissionRepository.save(s);
                         });
+                projectTaskRepository.save(task);
             }
-            projectTaskRepository.save(task);
         } else {
             research.setStatus(FinancialResearchStatus.SUBMITTED);
         }
@@ -1175,17 +1343,8 @@ public class FinancialResearchService {
         if (candidate == null) {
             candidate = new AiFinancialDocumentContextCandidate();
         }
-        DocumentCompanyValidationStatus companyValidation = DocumentCompanyValidationStatus.UNKNOWN;
-        if (targetCompanyName != null && candidate.getCompanyName() != null) {
-            if (candidate.getCompanyName().equalsIgnoreCase(targetCompanyName)) {
-                companyValidation = DocumentCompanyValidationStatus.MATCH;
-            } else if (candidate.getCompanyName().toLowerCase().contains(targetCompanyName.toLowerCase()) ||
-                       targetCompanyName.toLowerCase().contains(candidate.getCompanyName().toLowerCase())) {
-                companyValidation = DocumentCompanyValidationStatus.POSSIBLE_MATCH;
-            } else {
-                companyValidation = DocumentCompanyValidationStatus.MISMATCH;
-            }
-        }
+        DocumentCompanyValidationStatus companyValidation = companyMatcher.evaluateCompanyMatch(candidate.getCompanyName(), targetCompanyName);
+        boolean isMatch = (companyValidation == DocumentCompanyValidationStatus.MATCH);
         
         DocumentPeriodValidationStatus periodValidation = DocumentPeriodValidationStatus.UNKNOWN;
         if (targetPeriod != null && candidate.getYear() != null && candidate.getPeriodType() != null) {
@@ -1210,6 +1369,9 @@ public class FinancialResearchService {
                 .statementScope(candidate.getStatementScope())
                 .industryContext(candidate.getIndustryContext())
                 .companyValidation(companyValidation)
+                .companyVerifiedByStaff(isMatch)
+                .companyVerifiedByStaffId(null)
+                .companyVerifiedAt(null)
                 .periodValidation(periodValidation)
                 .build();
     }

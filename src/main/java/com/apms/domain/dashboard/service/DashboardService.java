@@ -34,6 +34,7 @@ public class DashboardService {
     private final OwnerOrganizationService ownerOrganizationService;
     private final CompanyRelationshipClosenessRepository closenessRepository;
     private final ExternalDataRepository externalDataRepository;
+    private final com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository submissionRepository;
 
     @Transactional(readOnly = true)
     public DashboardSummaryDto getSummary(Long managerId) {
@@ -274,5 +275,39 @@ public class DashboardService {
 
     public List<GraphCompanyDto> getPotentialPartners() {
         return graphService.getCompaniesByRelationshipType("POTENTIAL_PARTNER_OF");
+    }
+
+    @Transactional(readOnly = true)
+    public List<ManagerReviewHistoryItemResponse> getManagerReviewHistory(Long managerId) {
+        if (managerId == null) {
+            return Collections.emptyList();
+        }
+        List<com.apms.domain.project.ProjectTaskSubmission> submissions = submissionRepository.findReviewHistoryByManagerId(managerId);
+        return submissions.stream().map(s -> {
+            com.apms.domain.project.ProjectTask task = s.getProjectTask();
+            com.apms.domain.project.Project project = s.getProject();
+            com.apms.domain.user.Account submitter = s.getSubmittedByAccount();
+            com.apms.domain.user.Account reviewer = s.getReviewedByAccount();
+
+            return ManagerReviewHistoryItemResponse.builder()
+                    .submissionId(s.getId())
+                    .projectId(project != null ? project.getId() : null)
+                    .projectName(project != null ? project.getProjectName() : "Unknown Project")
+                    .targetCompanyName(project != null ? project.getTargetCompanyName() : null)
+                    .taskId(task != null ? task.getId() : null)
+                    .taskTitle(task != null ? task.getTitle() : "Unknown Task")
+                    .taskType(task != null ? task.getTaskType() : null)
+                    .submissionType(s.getSubmissionType())
+                    .submittedRevisionNumber(s.getSubmittedRevisionNumber())
+                    .submittedByUserId(submitter != null ? submitter.getId() : null)
+                    .submittedByName(submitter != null ? submitter.getEmail() : null)
+                    .submittedAt(s.getSubmittedAt())
+                    .status(s.getStatus())
+                    .reviewedByUserId(reviewer != null ? reviewer.getId() : null)
+                    .reviewedByName(reviewer != null ? reviewer.getEmail() : "Manager")
+                    .reviewedAt(s.getReviewedAt())
+                    .reviewComment(s.getReviewComment())
+                    .build();
+        }).collect(Collectors.toList());
     }
 }

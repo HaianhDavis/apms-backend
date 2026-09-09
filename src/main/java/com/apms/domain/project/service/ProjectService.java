@@ -64,6 +64,15 @@ public class ProjectService {
     private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
     private final ProjectTargetProfileResolver projectTargetProfileResolver;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository companyCandidateRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apms.domain.financial.repository.FinancialResearchRepository financialResearchRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apms.domain.contract.repository.mongo.ContractResearchRepository contractResearchRepository;
+
     // ─────────────────────────────────────────────
     // CREATE
     // ─────────────────────────────────────────────
@@ -1022,5 +1031,262 @@ public class ProjectService {
                 throw new com.apms.common.exception.BusinessValidationException("TAX_CODE_CONFLICT", "Project tax code (" + targetTaxCode + ") conflicts with existing profile tax code (" + existingTaxCode + "). Please review company identity.");
             }
         }
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.apms.domain.dashboard.dto.ManagerReviewHistoryItemResponse> getProjectReviewHistory(Long projectId) {
+        if (projectId == null) {
+            return java.util.Collections.emptyList();
+        }
+
+        List<com.apms.domain.project.ProjectTaskSubmission> submissions = projectTaskSubmissionRepository.findReviewHistoryByProjectId(projectId);
+        List<com.apms.domain.dashboard.dto.ManagerReviewHistoryItemResponse> items = new ArrayList<>();
+        java.util.Set<String> processedCandidateIds = new java.util.HashSet<>();
+
+        for (com.apms.domain.project.ProjectTaskSubmission s : submissions) {
+            com.apms.domain.project.ProjectTask task = s.getProjectTask();
+            Project project = s.getProject();
+            Account submitter = s.getSubmittedByAccount();
+            Account reviewer = s.getReviewedByAccount();
+
+            String targetName = null;
+            if (StringUtils.hasText(s.getTargetEntityId())) {
+                if ("CompanyCandidate".equals(s.getTargetEntityType())) {
+                    processedCandidateIds.add(s.getTargetEntityId());
+                    if (companyCandidateRepository != null) {
+                        try {
+                            java.util.Optional<com.apms.domain.candidate.CompanyCandidate> candOpt =
+                                    companyCandidateRepository.findById(s.getTargetEntityId());
+                            if (candOpt.isPresent()) {
+                                com.apms.domain.candidate.CompanyCandidate cand = candOpt.get();
+                                if (cand.getIdentity() != null && StringUtils.hasText(cand.getIdentity().getLegalName())) {
+                                    targetName = cand.getIdentity().getLegalName();
+                                } else if (StringUtils.hasText(cand.getDraftName())) {
+                                    targetName = cand.getDraftName();
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.debug("Could not lookup candidate name for submission {}: {}", s.getId(), e.getMessage());
+                        }
+                    }
+                }
+            }
+
+            String comment = s.getReviewComment();
+            LocalDateTime reviewedAt = s.getReviewedAt();
+            String reviewerName = reviewer != null ? reviewer.getEmail() : null;
+
+            // 1. Fallback / Enrichment for Financial Research
+            boolean isFinancial = s.getSubmissionType() == com.apms.common.enums.SubmissionType.FINANCIAL_RESEARCH
+                    || (task != null && task.getTaskType() == com.apms.common.enums.TaskType.FINANCIAL_RESEARCH);
+            if (financialResearchRepository != null && task != null && isFinancial) {
+                try {
+                    var frOpt = financialResearchRepository.findByTaskId(task.getId());
+                    if (frOpt.isPresent()) {
+                        var fr = frOpt.get();
+                        if (fr.getReports() != null) {
+                            var matchedReport = fr.getReports().stream()
+                                    .filter(r -> r.getReviewStatus() == com.apms.domain.financial.FinancialReportReviewStatus.CHANGES_REQUESTED
+                                            || (StringUtils.hasText(r.getReviewComment()) && r.getReviewedAt() != null))
+                                    .sorted((a, b) -> {
+                                        if (a.getReviewedAt() != null && b.getReviewedAt() != null) {
+                                            return b.getReviewedAt().compareTo(a.getReviewedAt());
+                                        }
+                                        return 0;
+                                    })
+                                    .findFirst()
+                                    .orElse(null);
+                            if (matchedReport != null) {
+                                if (!StringUtils.hasText(comment)) {
+                                    comment = matchedReport.getReviewComment();
+                                }
+                                if (reviewedAt == null) {
+                                    reviewedAt = matchedReport.getReviewedAt();
+                                }
+                                if (!StringUtils.hasText(reviewerName)) {
+                                    reviewerName = matchedReport.getReviewedByName();
+                                }
+                                if (!StringUtils.hasText(targetName)) {
+                                    targetName = matchedReport.getTitle();
+                                }
+                            }
+                        }
+                        if (reviewedAt == null) {
+                            reviewedAt = fr.getReviewedAt();
+                        }
+                        if (!StringUtils.hasText(comment) && StringUtils.hasText(fr.getReviewReason())) {
+                            comment = fr.getReviewReason();
+                        }
+                    }
+                } catch (Exception e) {
+                    log.debug("Could not enrich financial review history: {}", e.getMessage());
+                }
+            }
+
+            // 2. Fallback / Enrichment for Contract Research
+            boolean isContract = s.getSubmissionType() == com.apms.common.enums.SubmissionType.PARTNER_CONTRACT_COLLECTION
+                    || (task != null && task.getTaskType() == com.apms.common.enums.TaskType.PARTNER_CONTRACT_COLLECTION);
+            if (contractResearchRepository != null && task != null && isContract) {
+                try {
+                    var crOpt = contractResearchRepository.findByTaskId(task.getId());
+                    if (crOpt.isPresent()) {
+                        var cr = crOpt.get();
+                        if (cr.getContracts() != null) {
+                            var matchedContract = cr.getContracts().stream()
+                                    .filter(c -> c.getReviewStatus() == com.apms.domain.contract.enums.ContractEntryReviewStatus.CHANGES_REQUESTED
+                                            || (StringUtils.hasText(c.getReviewComment()) && c.getReviewedAt() != null))
+                                    .sorted((a, b) -> {
+                                        if (a.getReviewedAt() != null && b.getReviewedAt() != null) {
+                                            return b.getReviewedAt().compareTo(a.getReviewedAt());
+                                        }
+                                        return 0;
+                                    })
+                                    .findFirst()
+                                    .orElse(null);
+                            if (matchedContract != null) {
+                                if (!StringUtils.hasText(comment)) {
+                                    comment = matchedContract.getReviewComment();
+                                }
+                                if (reviewedAt == null) {
+                                    reviewedAt = matchedContract.getReviewedAt();
+                                }
+                                if (!StringUtils.hasText(reviewerName)) {
+                                    reviewerName = matchedContract.getReviewedByName();
+                                }
+                                if (!StringUtils.hasText(targetName)) {
+                                    targetName = matchedContract.getTitle() != null ? matchedContract.getTitle() : matchedContract.getDocumentName();
+                                }
+                            }
+                        }
+                        if (reviewedAt == null) {
+                            reviewedAt = cr.getReviewedAt();
+                        }
+                    }
+                } catch (Exception e) {
+                    log.debug("Could not enrich contract review history: {}", e.getMessage());
+                }
+            }
+
+            if (!StringUtils.hasText(targetName) && project != null && StringUtils.hasText(project.getTargetCompanyName())) {
+                targetName = project.getTargetCompanyName();
+            }
+
+            // 3. Resolve human-readable Display Names
+            String submitterDisplayName = null;
+            if (submitter != null) {
+                submitterDisplayName = userProfileRepository.findByAccountId(submitter.getId())
+                        .map(p -> ((p.getFirstName() != null ? p.getFirstName() : "") + " " + (p.getLastName() != null ? p.getLastName() : "")).trim())
+                        .filter(StringUtils::hasText)
+                        .orElse(submitter.getEmail());
+            }
+
+            String reviewerDisplayName = null;
+            if (reviewer != null) {
+                reviewerDisplayName = userProfileRepository.findByAccountId(reviewer.getId())
+                        .map(p -> ((p.getFirstName() != null ? p.getFirstName() : "") + " " + (p.getLastName() != null ? p.getLastName() : "")).trim())
+                        .filter(StringUtils::hasText)
+                        .orElse(reviewer.getEmail());
+            } else if (StringUtils.hasText(reviewerName)) {
+                reviewerDisplayName = reviewerName;
+            } else if (reviewedAt != null) {
+                reviewerDisplayName = "Manager";
+            }
+
+            items.add(com.apms.domain.dashboard.dto.ManagerReviewHistoryItemResponse.builder()
+                    .submissionId(s.getId())
+                    .projectId(project != null ? project.getId() : projectId)
+                    .projectName(project != null ? project.getProjectName() : null)
+                    .targetCompanyName(project != null ? project.getTargetCompanyName() : null)
+                    .taskId(task != null ? task.getId() : null)
+                    .taskTitle(task != null ? task.getTitle() : "Task")
+                    .taskType(task != null ? task.getTaskType() : null)
+                    .submissionType(s.getSubmissionType())
+                    .targetEntityType(s.getTargetEntityType())
+                    .targetEntityId(s.getTargetEntityId())
+                    .targetEntityName(targetName)
+                    .submittedRevisionNumber(s.getSubmittedRevisionNumber())
+                    .submittedByUserId(submitter != null ? submitter.getId() : null)
+                    .submittedByName(submitterDisplayName != null ? submitterDisplayName : (submitter != null ? submitter.getEmail() : null))
+                    .submittedAt(s.getSubmittedAt())
+                    .status(s.getStatus())
+                    .reviewedByUserId(reviewer != null ? reviewer.getId() : null)
+                    .reviewedByName(reviewerDisplayName)
+                    .reviewedAt(reviewedAt)
+                    .reviewComment(comment)
+                    .note(s.getNote())
+                    .build());
+        }
+
+        // Also incorporate any CompanyCandidate from Mongo that has review activity not represented in submissions
+        if (companyCandidateRepository != null) {
+            try {
+                List<com.apms.domain.candidate.CompanyCandidate> candidates =
+                        companyCandidateRepository.findByProjectId(String.valueOf(projectId), org.springframework.data.domain.Pageable.unpaged()).getContent();
+                for (com.apms.domain.candidate.CompanyCandidate c : candidates) {
+                    if (c.getId() != null && !processedCandidateIds.contains(c.getId())) {
+                        boolean hasReviewActivity = c.getStatus() == com.apms.common.enums.CandidateStatus.APPROVED
+                                || c.getStatus() == com.apms.common.enums.CandidateStatus.REVISION_REQUIRED
+                                || c.getStatus() == com.apms.common.enums.CandidateStatus.REJECTED
+                                || c.getStatus() == com.apms.common.enums.CandidateStatus.PENDING_REVIEW;
+                        if (hasReviewActivity) {
+                            com.apms.common.enums.SubmissionStatus mappedStatus = switch (c.getStatus()) {
+                                case APPROVED -> com.apms.common.enums.SubmissionStatus.APPROVED;
+                                case REVISION_REQUIRED -> com.apms.common.enums.SubmissionStatus.CHANGES_REQUESTED;
+                                case REJECTED -> com.apms.common.enums.SubmissionStatus.REJECTED;
+                                case PENDING_REVIEW -> com.apms.common.enums.SubmissionStatus.IN_REVIEW;
+                                default -> com.apms.common.enums.SubmissionStatus.DRAFT;
+                            };
+
+                            String candName = c.getIdentity() != null && StringUtils.hasText(c.getIdentity().getLegalName())
+                                    ? c.getIdentity().getLegalName()
+                                    : (StringUtils.hasText(c.getDraftName()) ? c.getDraftName() : "Candidate #" + (c.getCandidateOrder() != null ? c.getCandidateOrder() : c.getId().substring(Math.max(0, c.getId().length() - 6))));
+
+                            LocalDateTime reviewedDate = null;
+                            String revComment = null;
+                            String revByName = null;
+                            if (c.getReview() != null) {
+                                reviewedDate = c.getReview().getReviewedAt();
+                                revComment = c.getReview().getRejectionReason();
+                                revByName = c.getReview().getReviewedBy();
+                            }
+                            if (reviewedDate == null && c.getStatus() == com.apms.common.enums.CandidateStatus.APPROVED) {
+                                reviewedDate = c.getLastSubmittedAt();
+                            }
+
+                            items.add(com.apms.domain.dashboard.dto.ManagerReviewHistoryItemResponse.builder()
+                                    .submissionId(null)
+                                    .projectId(projectId)
+                                    .taskId(c.getTaskId())
+                                    .taskTitle("Basic Company Information")
+                                    .taskType(com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION)
+                                    .submissionType(com.apms.common.enums.SubmissionType.COMPANY_CANDIDATE)
+                                    .targetEntityType("CompanyCandidate")
+                                    .targetEntityId(c.getId())
+                                    .targetEntityName(candName)
+                                    .submittedRevisionNumber(c.getRevisionNumber())
+                                    .submittedAt(c.getLastSubmittedAt())
+                                    .status(mappedStatus)
+                                    .reviewedByName(revByName != null ? revByName : (reviewedDate != null ? "Manager" : null))
+                                    .reviewedAt(reviewedDate)
+                                    .reviewComment(revComment)
+                                    .build());
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Could not check legacy candidates for project {}: {}", projectId, e.getMessage());
+            }
+        }
+
+        items.sort((a, b) -> {
+            LocalDateTime timeA = a.getReviewedAt() != null ? a.getReviewedAt() : a.getSubmittedAt();
+            LocalDateTime timeB = b.getReviewedAt() != null ? b.getReviewedAt() : b.getSubmittedAt();
+            if (timeA == null && timeB == null) return 0;
+            if (timeA == null) return 1;
+            if (timeB == null) return -1;
+            return timeB.compareTo(timeA);
+        });
+
+        return items;
     }
 }
