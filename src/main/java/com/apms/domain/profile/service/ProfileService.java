@@ -274,7 +274,7 @@ public class ProfileService {
         if (newIdentity != null) {
             // Project target identity is authoritative; fallback to existing profile identity
             if (StringUtils.hasText(project.getTargetCompanyTaxCode())) {
-                newIdentity.setTaxCode(project.getTargetCompanyTaxCode());
+                newIdentity.setTaxCode(project.getTargetCompanyTaxCode().replaceAll("[\\s\\-]", "").trim());
             } else if (StringUtils.hasText(profile.getIdentity() != null ? profile.getIdentity().getTaxCode() : null)) {
                 newIdentity.setTaxCode(profile.getIdentity().getTaxCode());
             }
@@ -293,7 +293,7 @@ public class ProfileService {
         
         // Safe propagation from Project
         if (!StringUtils.hasText(profile.getIdentity().getTaxCode()) && StringUtils.hasText(project.getTargetCompanyTaxCode())) {
-            profile.getIdentity().setTaxCode(project.getTargetCompanyTaxCode());
+            profile.getIdentity().setTaxCode(project.getTargetCompanyTaxCode().replaceAll("[\\s\\-]", "").trim());
             log.info("Populated missing profile taxCode from Project target identity");
         }
         if (!StringUtils.hasText(profile.getIdentity().getLegalName()) && StringUtils.hasText(project.getTargetCompanyName())) {
@@ -480,6 +480,34 @@ public class ProfileService {
     @Transactional(readOnly = true)
     public java.util.List<String> getDistinctIndustries() {
         return mongoTemplate.findDistinct("business.industries", CompanyProfile.class, String.class);
+    }
+
+    /**
+     * Get unique relationship types across all authoritative profiles that are not deleted or hidden.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<String> getDistinctRelationshipTypes(boolean excludeOwner, Long managerId) {
+        String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+        Criteria criteria = Criteria.where("isDeleted").ne(true).and("isHidden").ne(true);
+        if (managerId != null) {
+            criteria.orOperator(
+                    Criteria.where("metadata.createdBy").is(managerId.toString()),
+                    Criteria.where("responsibleManagerId").is(managerId)
+            );
+        }
+
+        List<CompanyProfile> profiles = mongoTemplate.find(Query.query(criteria), CompanyProfile.class);
+        Set<String> distinctTypes = new LinkedHashSet<>();
+        for (CompanyProfile p : profiles) {
+            if (excludeOwner && ownerCompanyId != null && ownerCompanyId.equals(p.getCompanyId())) {
+                continue;
+            }
+            String rel = resolveRelationshipType(p.getCompanyId());
+            if (StringUtils.hasText(rel)) {
+                distinctTypes.add(rel.trim());
+            }
+        }
+        return new ArrayList<>(distinctTypes);
     }
 
     /**
@@ -708,9 +736,7 @@ public class ProfileService {
             throw new org.springframework.security.access.AccessDeniedException("You are not responsible for this company profile.");
         }
 
-        if (!"APPROVED".equals(profile.getReviewStatus())) {
-            throw new com.apms.common.exception.BusinessValidationException("Only APPROVED company profiles can be edited.");
-        }
+        // Verification status (APPROVED vs UNVERIFIED) does not block authorized Manager direct profile editing
 
         // Optimistic concurrency / Stale write check
         CompanyProfileVersionHelper.VersionState currentVersion = CompanyProfileVersionHelper.resolveVersion(profile);
@@ -761,7 +787,9 @@ public class ProfileService {
         if (request.getIndustries() != null) profile.getBusiness().setIndustries(request.getIndustries());
         if (request.getMarkets() != null) profile.getBusiness().setMarkets(request.getMarkets());
         if (request.getTargetCustomers() != null) profile.getBusiness().setTargetCustomers(request.getTargetCustomers());
-        if (request.getProductsServices() != null) {
+        if (request.getProducts() != null) {
+            profile.getBusiness().setProducts(request.getProducts());
+        } else if (request.getProductsServices() != null) {
             java.util.List<CompanyProfile.Product> prods = request.getProductsServices().stream()
                     .map(name -> CompanyProfile.Product.builder().name(name).build())
                     .collect(java.util.stream.Collectors.toList());
@@ -1259,7 +1287,7 @@ public class ProfileService {
 
                 if (isAdmin || isResponsibleManager) {
                     canManageVisibility = true;
-                    if ("APPROVED".equals(p.getReviewStatus())) {
+                    if (!Boolean.TRUE.equals(p.getIsDeleted())) {
                         canEdit = true;
                     }
                 }

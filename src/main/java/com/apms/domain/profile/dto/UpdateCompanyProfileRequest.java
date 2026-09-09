@@ -35,6 +35,7 @@ public class UpdateCompanyProfileRequest {
     private List<String> markets;
     private List<String> targetCustomers;
     private List<String> productsServices;
+    private List<CompanyProfile.Product> products;
     private String description;
     private String businessModel;
 

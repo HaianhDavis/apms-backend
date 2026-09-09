@@ -59,7 +59,7 @@ public class DashboardService {
 
         List<CompanyProfile> allExceptOwner = profileRepository.findAll().stream()
             .filter(p -> !ownerCompanyId.equals(p.getCompanyId()))
-            .filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()))
+            .filter(p -> !Boolean.TRUE.equals(p.getIsHidden()) && !Boolean.TRUE.equals(p.getIsDeleted()))
             .filter(p -> {
                 if (managerId == null) return true;
                 boolean isCreator = p.getMetadata() != null && managerId.toString().equals(p.getMetadata().getCreatedBy());
