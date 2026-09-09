@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -47,6 +48,9 @@ public class TrackedCompanyController {
     private final TrackedCompanyCache companyCache;
     private final CrawlerScheduler crawlerScheduler;
     private final CrawlerConfig crawlerConfig;
+    private final org.springframework.data.mongodb.core.MongoTemplate mongoTemplate;
+    private final com.apms.common.security.StaffCompanyScopeEvaluator companyScope;
+    private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
 
     // ═══════════════════════════════════════════════
     // Tracked Company CRUD
@@ -54,11 +58,61 @@ public class TrackedCompanyController {
 
     @GetMapping("/tracked-companies")
     public ResponseEntity<List<TrackedCompanyResponse>> listAll(
-            @RequestParam(required = false, defaultValue = "false") boolean activeOnly) {
+            @RequestParam(required = false, defaultValue = "false") boolean activeOnly,
+            @RequestParam(required = false, defaultValue = "false") boolean withNewsOnly) {
 
         List<TrackedCompany> companies = activeOnly
                 ? trackedCompanyRepository.findByIsActiveTrue()
                 : trackedCompanyRepository.findAll();
+
+        List<com.apms.domain.profile.CompanyProfile> allProfiles = companyProfileRepository.findAll();
+        Map<String, com.apms.domain.profile.CompanyProfile> profileById = allProfiles.stream()
+                .filter(p -> p.getId() != null)
+                .collect(Collectors.toMap(com.apms.domain.profile.CompanyProfile::getId, p -> p, (a, b) -> a));
+
+        // Filter by profile visibility (exclude deleted or hidden profiles from user-facing filters)
+        companies = companies.stream()
+                .filter(c -> {
+                    com.apms.domain.profile.CompanyProfile p = profileById.get(c.getId());
+                    if (p != null) {
+                        return !Boolean.TRUE.equals(p.getIsDeleted()) && !Boolean.TRUE.equals(p.getIsHidden());
+                    }
+                    return true;
+                })
+                .collect(Collectors.toList());
+
+        // Enforce staff company scope if caller is STAFF
+        if (companyScope != null && companyScope.isCurrentUserStaff()) {
+            Set<String> allowedIds = companyScope.allowedCompanyIds();
+            if (allowedIds != null) {
+                companies = companies.stream()
+                        .filter(c -> {
+                            if (allowedIds.contains(c.getId())) return true;
+                            com.apms.domain.profile.CompanyProfile p = profileById.get(c.getId());
+                            return p != null && p.getCompanyId() != null && allowedIds.contains(p.getCompanyId());
+                        })
+                        .collect(Collectors.toList());
+            }
+        }
+
+        if (withNewsOnly) {
+            List<String> matchedCompanyNames = mongoTemplate.findDistinct(
+                    new org.springframework.data.mongodb.core.query.Query(), "matchedCompanies.companyName", CrawledArticle.class, String.class);
+            List<String> matchedCompanyIds = mongoTemplate.findDistinct(
+                    new org.springframework.data.mongodb.core.query.Query(), "matchedCompanies.companyId", CrawledArticle.class, String.class);
+
+            java.util.Set<String> matchedSet = new java.util.HashSet<>();
+            if (matchedCompanyNames != null) {
+                matchedCompanyNames.forEach(n -> matchedSet.add(n.toLowerCase()));
+            }
+            if (matchedCompanyIds != null) {
+                matchedSet.addAll(matchedCompanyIds);
+            }
+
+            companies = companies.stream()
+                    .filter(c -> matchedSet.contains(c.getId()) || (c.getCompanyName() != null && matchedSet.contains(c.getCompanyName().toLowerCase())))
+                    .collect(Collectors.toList());
+        }
 
         List<TrackedCompanyResponse> responses = companies.stream()
                 .map(this::toResponse)
@@ -261,9 +315,21 @@ public class TrackedCompanyController {
     // ═══════════════════════════════════════════════
 
     private TrackedCompanyResponse toResponse(TrackedCompany company) {
+        String displayName = company.getDisplayName();
+        if ((displayName == null || displayName.isBlank()) && company.getId() != null) {
+            com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findById(company.getId()).orElse(null);
+            if (profile != null) {
+                displayName = profile.resolveDisplayName();
+            }
+        }
+        if (displayName == null || displayName.isBlank()) {
+            displayName = company.getCompanyName();
+        }
+
         return TrackedCompanyResponse.builder()
                 .id(company.getId())
-                .companyName(company.getCompanyName())
+                .companyName(displayName)
+                .displayName(displayName)
                 .aliases(company.getAliases())
                 .subsidiaries(company.getSubsidiaries())
                 .products(company.getProducts())

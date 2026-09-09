@@ -28,6 +28,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -40,6 +42,8 @@ public class ExternalDataService {
     private final MongoTemplate mongoTemplate;
     private final AuditLogService auditLogService;
     private final com.apms.domain.crawler.repository.TrackedCompanyRepository trackedCompanyRepository;
+    private final com.apms.common.security.StaffCompanyScopeEvaluator companyScope;
+    private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
 
     public Page<ExternalDataItemResponse> getExternalData(
             ExternalDataCategory category,
@@ -60,19 +64,139 @@ public class ExternalDataService {
             criteria.and("sourceName").is(source);
         }
 
+        List<com.apms.domain.crawler.domain.TrackedCompany> activeCompanies = trackedCompanyRepository.findByIsActiveTrue();
+
+        List<com.apms.domain.profile.CompanyProfile> allProfiles = companyProfileRepository.findAll();
+        Map<String, com.apms.domain.profile.CompanyProfile> profileById = allProfiles.stream()
+                .filter(p -> p.getId() != null)
+                .collect(Collectors.toMap(com.apms.domain.profile.CompanyProfile::getId, p -> p, (a, b) -> a));
+
+        // Exclude deleted or hidden profiles from user-facing news
+        activeCompanies = activeCompanies.stream()
+                .filter(c -> {
+                    com.apms.domain.profile.CompanyProfile p = profileById.get(c.getId());
+                    if (p != null) {
+                        return !Boolean.TRUE.equals(p.getIsDeleted()) && !Boolean.TRUE.equals(p.getIsHidden());
+                    }
+                    return true;
+                })
+                .collect(Collectors.toList());
+
+        // Enforce staff company scope if caller is STAFF
+        if (companyScope != null && companyScope.isCurrentUserStaff()) {
+            Set<String> allowedIds = companyScope.allowedCompanyIds();
+            if (allowedIds != null) {
+                activeCompanies = activeCompanies.stream()
+                        .filter(c -> {
+                            if (allowedIds.contains(c.getId())) return true;
+                            com.apms.domain.profile.CompanyProfile p = profileById.get(c.getId());
+                            return p != null && p.getCompanyId() != null && allowedIds.contains(p.getCompanyId());
+                        })
+                        .collect(Collectors.toList());
+            }
+        }
+
+        List<String> validIds = activeCompanies.stream()
+                .map(com.apms.domain.crawler.domain.TrackedCompany::getId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toList());
+        List<String> validNames = activeCompanies.stream()
+                .map(com.apms.domain.crawler.domain.TrackedCompany::getCompanyName)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toList());
+
         if (StringUtils.hasText(companyName)) {
+            String queryCompany = companyName.trim();
+            com.apms.domain.profile.CompanyProfile targetProfile = companyProfileRepository.findById(queryCompany)
+                    .or(() -> companyProfileRepository.findByCompanyId(queryCompany))
+                    .or(() -> companyProfileRepository.findAll().stream()
+                            .filter(p -> p.getIdentity() != null && (
+                                    queryCompany.equalsIgnoreCase(p.getIdentity().getTradeName()) ||
+                                    queryCompany.equalsIgnoreCase(p.getIdentity().getLegalName())
+                            ))
+                            .findFirst())
+                    .orElse(null);
+
+            com.apms.domain.crawler.domain.TrackedCompany targetTc = null;
+            if (targetProfile != null) {
+                targetTc = trackedCompanyRepository.findById(targetProfile.getId()).orElse(null);
+            }
+            if (targetTc == null) {
+                targetTc = trackedCompanyRepository.findById(queryCompany)
+                        .or(() -> trackedCompanyRepository.findByCompanyNameIgnoreCase(queryCompany))
+                        .orElse(null);
+                if (targetTc != null && targetProfile == null) {
+                    targetProfile = companyProfileRepository.findById(targetTc.getId()).orElse(null);
+                }
+            }
+
+            // Check if caller is authorized to view this company
+            if (companyScope != null && companyScope.isCurrentUserStaff()) {
+                String targetId = targetProfile != null ? targetProfile.getId() : (targetTc != null ? targetTc.getId() : queryCompany);
+                boolean authorized = activeCompanies.stream().anyMatch(c -> c.getId().equals(targetId));
+                if (!authorized) {
+                    return Page.empty(pageable);
+                }
+            }
+
             List<Criteria> orCriterias = new ArrayList<>();
-            orCriterias.add(Criteria.where("matchedCompanies.companyName").regex(companyName.trim(), "i"));
-            
-            trackedCompanyRepository.findByCompanyNameIgnoreCase(companyName.trim()).ifPresent(tc -> {
-                if (tc.getAliases() != null) {
-                    for (String alias : tc.getAliases()) {
-                        orCriterias.add(Criteria.where("matchedCompanies.companyName").regex(alias.trim(), "i"));
+            java.util.Set<String> searchStrings = new java.util.HashSet<>();
+            searchStrings.add(queryCompany);
+
+            if (targetProfile != null) {
+                if (targetProfile.getId() != null) {
+                    orCriterias.add(Criteria.where("matchedCompanies.companyId").is(targetProfile.getId()));
+                }
+                if (targetProfile.getCompanyId() != null) {
+                    orCriterias.add(Criteria.where("matchedCompanies.companyId").is(targetProfile.getCompanyId()));
+                }
+                if (targetProfile.getIdentity() != null) {
+                    if (StringUtils.hasText(targetProfile.getIdentity().getTradeName())) {
+                        searchStrings.add(targetProfile.getIdentity().getTradeName().trim());
+                    }
+                    if (StringUtils.hasText(targetProfile.getIdentity().getLegalName())) {
+                        searchStrings.add(targetProfile.getIdentity().getLegalName().trim());
                     }
                 }
-            });
-            
+            }
+            if (targetTc != null) {
+                if (targetTc.getId() != null) {
+                    orCriterias.add(Criteria.where("matchedCompanies.companyId").is(targetTc.getId()));
+                }
+                if (StringUtils.hasText(targetTc.getCompanyName())) {
+                    searchStrings.add(targetTc.getCompanyName().trim());
+                }
+                if (StringUtils.hasText(targetTc.getDisplayName())) {
+                    searchStrings.add(targetTc.getDisplayName().trim());
+                }
+                if (targetTc.getAliases() != null) {
+                    for (String alias : targetTc.getAliases()) {
+                        if (StringUtils.hasText(alias)) {
+                            searchStrings.add(alias.trim());
+                        }
+                    }
+                }
+            }
+
+            for (String str : searchStrings) {
+                orCriterias.add(Criteria.where("matchedCompanies.companyName").regex("^" + java.util.regex.Pattern.quote(str) + "$", "i"));
+                orCriterias.add(Criteria.where("matchedCompanies.companyName").regex(java.util.regex.Pattern.quote(str), "i"));
+            }
+
             criteria.andOperator(new Criteria().orOperator(orCriterias.toArray(new Criteria[0])));
+        } else if (!activeCompanies.isEmpty()) {
+            List<Criteria> canonicalOr = new ArrayList<>();
+            if (!validIds.isEmpty()) {
+                canonicalOr.add(Criteria.where("matchedCompanies.companyId").in(validIds));
+            }
+            if (!validNames.isEmpty()) {
+                canonicalOr.add(Criteria.where("matchedCompanies.companyName").in(validNames));
+            }
+            if (!canonicalOr.isEmpty()) {
+                criteria.andOperator(new Criteria().orOperator(canonicalOr.toArray(new Criteria[0])));
+            }
+        } else {
+            return Page.empty(pageable);
         }
 
         if (StringUtils.hasText(keyword)) {
@@ -217,8 +341,64 @@ public class ExternalDataService {
         }
 
         String companyName = null;
+        String companyId = null;
         if (item.getMatchedCompanies() != null && !item.getMatchedCompanies().isEmpty()) {
-            companyName = item.getMatchedCompanies().get(0).getCompanyName();
+            List<com.apms.domain.crawler.domain.TrackedCompany> activeTc = trackedCompanyRepository.findByIsActiveTrue();
+            java.util.Set<String> activeNames = new java.util.HashSet<>();
+            java.util.Set<String> activeIds = new java.util.HashSet<>();
+
+            for (com.apms.domain.crawler.domain.TrackedCompany tc : activeTc) {
+                if (tc.getId() != null) activeIds.add(tc.getId());
+                if (tc.getCompanyName() != null) activeNames.add(tc.getCompanyName().toLowerCase());
+                if (tc.getDisplayName() != null) activeNames.add(tc.getDisplayName().toLowerCase());
+                if (tc.getAliases() != null) {
+                    for (String a : tc.getAliases()) {
+                        if (a != null) activeNames.add(a.toLowerCase());
+                    }
+                }
+            }
+
+            // Prefer canonical APMS company match over incidental mentions
+            com.apms.domain.crawler.domain.CompanyMatch canonicalMatch = item.getMatchedCompanies().stream()
+                    .filter(m -> (m.getCompanyId() != null && activeIds.contains(m.getCompanyId()))
+                              || (m.getCompanyName() != null && activeNames.contains(m.getCompanyName().toLowerCase())))
+                    .findFirst()
+                    .orElse(item.getMatchedCompanies().get(0));
+
+            companyId = canonicalMatch.getCompanyId();
+            String rawMatchName = canonicalMatch.getCompanyName();
+
+            // Resolve canonical CompanyProfile to enforce canonical UI display name
+            com.apms.domain.profile.CompanyProfile canonicalProfile = null;
+            if (companyId != null) {
+                final String targetCompanyId = companyId;
+                canonicalProfile = companyProfileRepository.findById(targetCompanyId)
+                        .or(() -> companyProfileRepository.findByCompanyId(targetCompanyId))
+                        .orElse(null);
+            }
+            if (canonicalProfile == null && rawMatchName != null) {
+                String matchLower = rawMatchName.toLowerCase();
+                com.apms.domain.crawler.domain.TrackedCompany matchedTc = activeTc.stream()
+                        .filter(tc -> (tc.getCompanyName() != null && tc.getCompanyName().equalsIgnoreCase(matchLower))
+                                   || (tc.getDisplayName() != null && tc.getDisplayName().equalsIgnoreCase(matchLower))
+                                   || (tc.getAliases() != null && tc.getAliases().stream().anyMatch(a -> a.equalsIgnoreCase(matchLower))))
+                        .findFirst()
+                        .orElse(null);
+                if (matchedTc != null && matchedTc.getId() != null) {
+                    canonicalProfile = companyProfileRepository.findById(matchedTc.getId()).orElse(null);
+                }
+                if (canonicalProfile == null) {
+                    canonicalProfile = companyProfileRepository.searchByName("^" + java.util.regex.Pattern.quote(rawMatchName) + "$", org.springframework.data.domain.PageRequest.of(0, 1))
+                            .stream().findFirst().orElse(null);
+                }
+            }
+
+            if (canonicalProfile != null) {
+                companyId = canonicalProfile.getId();
+                companyName = canonicalProfile.resolveDisplayName();
+            } else {
+                companyName = rawMatchName;
+            }
         }
 
         return ExternalDataItemResponse.builder()
@@ -234,6 +414,7 @@ public class ExternalDataService {
                 .sentiment(item.getSentiment())
                 .riskLevel(item.getPriorityLevel())
                 .relatedCompanyName(companyName)
+                .relatedCompanyId(companyId)
                 .imageUrl(item.getThumbnail())
                 .createdAt(item.getCrawledAt())
                 .build();

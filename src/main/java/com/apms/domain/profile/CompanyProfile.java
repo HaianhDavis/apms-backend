@@ -296,4 +296,36 @@ public class CompanyProfile {
         private String itemsJson;
         private String sourceUrl;
     }
+
+    public String resolveDisplayName() {
+        if (identity != null) {
+            if (isValidName(identity.getTradeName())) {
+                return identity.getTradeName().trim();
+            }
+            if (isValidName(identity.getLegalName())) {
+                return identity.getLegalName().trim();
+            }
+        }
+        return "Unknown Company";
+    }
+
+    public static String getCanonicalDisplayName(CompanyProfile profile, String fallback) {
+        if (profile != null) {
+            String resolved = profile.resolveDisplayName();
+            if (!"Unknown Company".equals(resolved)) {
+                return resolved;
+            }
+        }
+        return isValidName(fallback) ? fallback.trim() : "Unknown Company";
+    }
+
+    private static boolean isValidName(String name) {
+        if (name == null) return false;
+        String trimmed = name.trim();
+        return !trimmed.isEmpty()
+                && !trimmed.equalsIgnoreCase("Not updated")
+                && !trimmed.equalsIgnoreCase("N/A")
+                && !trimmed.equalsIgnoreCase("Chưa cập nhật")
+                && !trimmed.equalsIgnoreCase("Chưa có");
+    }
 }

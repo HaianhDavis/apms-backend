@@ -14,10 +14,10 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * Keeps the crawler focused on the configured target companies.
+ * Deprecated: Company tracking is now driven dynamically from canonical CompanyProfile records
+ * via CompanyTrackingSyncRunner and ProfileService.
  */
 @Slf4j
-@Component
 @RequiredArgsConstructor
 public class TrackedCompanySeeder implements CommandLineRunner {
 

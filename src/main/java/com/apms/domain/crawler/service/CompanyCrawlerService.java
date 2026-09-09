@@ -73,6 +73,9 @@ public class CompanyCrawlerService {
             if (StringUtils.hasText(tc.getCompanyName())) {
                 searchNames.add(tc.getCompanyName().trim());
             }
+            if (StringUtils.hasText(tc.getDisplayName())) {
+                searchNames.add(tc.getDisplayName().trim());
+            }
             if (tc.getAliases() != null) {
                 for (String a : tc.getAliases()) {
                     if (StringUtils.hasText(a)) searchNames.add(a.trim());

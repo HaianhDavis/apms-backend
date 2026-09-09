@@ -24,6 +24,7 @@ import java.util.Map;
 public class CompanyCrawlerController {
 
     private final CompanyCrawlerService companyCrawlerService;
+    private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
 
     @GetMapping("/companies/{companyId}/articles")
     @PreAuthorize("hasAnyRole('SYSTEM_ADMIN','BUSINESS_OWNER','BUSINESS_DEVELOPMENT_MANAGER','BUSINESS_DEVELOPMENT_STAFF')")
@@ -87,6 +88,22 @@ public class CompanyCrawlerController {
         String companyId = (article.getMatchedCompanies() != null && !article.getMatchedCompanies().isEmpty())
                 ? article.getMatchedCompanies().get(0).getCompanyId()
                 : null;
+
+        com.apms.domain.profile.CompanyProfile profile = null;
+        if (companyId != null) {
+            final String targetCompanyId = companyId;
+            profile = companyProfileRepository.findById(targetCompanyId)
+                    .or(() -> companyProfileRepository.findByCompanyId(targetCompanyId))
+                    .orElse(null);
+        }
+        if (profile == null && companyName != null) {
+            profile = companyProfileRepository.searchByName("^" + java.util.regex.Pattern.quote(companyName) + "$", org.springframework.data.domain.PageRequest.of(0, 1))
+                    .stream().findFirst().orElse(null);
+        }
+        if (profile != null) {
+            companyName = profile.resolveDisplayName();
+            companyId = profile.getId();
+        }
 
         java.time.LocalDateTime pubDate = null;
         if (article.getPublishedDate() != null) {
