@@ -66,6 +66,20 @@ public class ProfileController {
     }
 
     // ─────────────────────────────────────────────
+    // GET /api/v1/company-profiles/relationship-types (or /profiles/relationship-types)
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
+    // ─────────────────────────────────────────────
+    @GetMapping("/relationship-types")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<java.util.List<String>>> getDistinctRelationshipTypes(
+            @RequestParam(defaultValue = "true") boolean excludeOwner,
+            @RequestParam(required = false) Boolean createdByMe,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        Long managerId = (createdByMe != null && createdByMe && currentUser != null) ? currentUser.getId() : null;
+        return ResponseEntity.ok(ApiResponse.success(profileService.getDistinctRelationshipTypes(excludeOwner, managerId), "Distinct relationship types retrieved"));
+    }
+
+    // ─────────────────────────────────────────────
     // GET /api/v1/profiles/{companyId}
     // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
