@@ -1084,49 +1084,90 @@ public class ProjectTaskService {
             subNumber++;
             String submitterName = formatAccountName(sub.getSubmittedByAccount(), staffName);
 
-            String subTitle = subNumber == 1 ? "Submitted for review" : "Resubmitted";
+            boolean isRecalled = (sub.getNote() != null && sub.getNote().contains("[Recalled by Staff]"))
+                    || sub.getStatus() == SubmissionStatus.WITHDRAWN;
+            String subTitle = isRecalled ? "Submission recalled" : (subNumber == 1 ? "Submitted for review" : "Resubmitted for review");
             String subDetail = "Submission #" + subNumber;
             if (sub.getSubmittedRevisionNumber() != null) {
                 subDetail += " (Rev. " + sub.getSubmittedRevisionNumber() + ")";
             }
 
+            // Extract genuine staff note if any (filter out automated/system fallback boilerplate)
+            String staffNote = sub.getNote();
+            if (staffNote != null) {
+                staffNote = staffNote.replace("[Recalled by Staff]", "").trim();
+                if (isAutomatedSystemPlaceholder(staffNote)) {
+                    staffNote = null;
+                }
+            }
+
             activities.add(TaskTimelineEventResponse.builder()
-                    .type(subNumber == 1 ? "SUBMITTED" : "RESUBMITTED")
+                    .type(isRecalled ? "RECALLED" : (subNumber == 1 ? "SUBMITTED" : "RESUBMITTED"))
                     .submissionNumber(subNumber)
                     .title(subTitle)
                     .detail(subDetail)
-                    .note(sub.getNote())
+                    .note(staffNote) // Only set if staff wrote an actual custom note
                     .actorId(sub.getSubmittedByAccount() != null ? sub.getSubmittedByAccount().getId() : null)
                     .actorName(submitterName)
                     .occurredAt(sub.getSubmittedAt() != null ? sub.getSubmittedAt() : sub.getCreatedAt())
                     .build());
 
-            if (sub.getReviewedAt() != null) {
-                String reviewerName = formatAccountName(sub.getReviewedByAccount(), "Manager");
+            String reviewComment = sub.getReviewComment();
+            LocalDateTime reviewedAt = sub.getReviewedAt();
+            String reviewerName = formatAccountName(sub.getReviewedByAccount(), "Manager");
 
-                if (sub.getStatus() == SubmissionStatus.CHANGES_REQUESTED || sub.getStatus() == SubmissionStatus.REVISION_REQUESTED) {
-                    activities.add(TaskTimelineEventResponse.builder()
-                            .type("REVISION_REQUESTED")
-                            .submissionNumber(subNumber)
-                            .title("Revision requested")
-                            .detail("Reviewed by: " + reviewerName)
-                            .note(sub.getReviewComment())
-                            .actorId(sub.getReviewedByAccount() != null ? sub.getReviewedByAccount().getId() : null)
-                            .actorName(reviewerName)
-                            .occurredAt(sub.getReviewedAt())
-                            .build());
-                } else if (sub.getStatus() == SubmissionStatus.APPROVED) {
-                    activities.add(TaskTimelineEventResponse.builder()
-                            .type("APPROVED")
-                            .submissionNumber(subNumber)
-                            .title("Approved")
-                            .detail("Reviewed by: " + reviewerName + ". Task completed.")
-                            .note(sub.getReviewComment())
-                            .actorId(sub.getReviewedByAccount() != null ? sub.getReviewedByAccount().getId() : null)
-                            .actorName(reviewerName)
-                            .occurredAt(sub.getReviewedAt())
-                            .build());
-                }
+            // Enrich from FinancialResearch Mongo data if needed
+            if (!org.springframework.util.StringUtils.hasText(reviewComment) && financialResearchService != null && task.getTaskType() == TaskType.FINANCIAL_RESEARCH) {
+                try {
+                    var frOpt = financialResearchService.getResearch(projectId, taskId);
+                    if (frOpt.isPresent()) {
+                        var fr = frOpt.get();
+                        if (fr.getReports() != null) {
+                            var rep = fr.getReports().stream()
+                                    .filter(r -> r.getReviewStatus() == com.apms.domain.financial.FinancialReportReviewStatus.CHANGES_REQUESTED || org.springframework.util.StringUtils.hasText(r.getReviewComment()))
+                                    .findFirst()
+                                    .orElse(null);
+                            if (rep != null) {
+                                if (!org.springframework.util.StringUtils.hasText(reviewComment)) reviewComment = rep.getReviewComment();
+                                if (reviewedAt == null) reviewedAt = rep.getReviewedAt();
+                                if (org.springframework.util.StringUtils.hasText(rep.getReviewedByName())) reviewerName = rep.getReviewedByName();
+                            }
+                        }
+                        if (!org.springframework.util.StringUtils.hasText(reviewComment) && org.springframework.util.StringUtils.hasText(fr.getReviewReason())) {
+                            reviewComment = fr.getReviewReason();
+                        }
+                        if (reviewedAt == null) reviewedAt = fr.getReviewedAt();
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            boolean isChangesRequested = sub.getStatus() == SubmissionStatus.CHANGES_REQUESTED || sub.getStatus() == SubmissionStatus.REVISION_REQUESTED;
+            boolean isApproved = sub.getStatus() == SubmissionStatus.APPROVED;
+
+            if (isChangesRequested || (reviewedAt != null && !isApproved && org.springframework.util.StringUtils.hasText(reviewComment))) {
+                LocalDateTime actionTime = reviewedAt != null ? reviewedAt : (sub.getUpdatedAt() != null ? sub.getUpdatedAt() : sub.getSubmittedAt());
+                activities.add(TaskTimelineEventResponse.builder()
+                        .type("REVISION_REQUESTED")
+                        .submissionNumber(subNumber)
+                        .title("Changes requested by Manager")
+                        .detail("Submission #" + subNumber + " • Reviewed by " + reviewerName)
+                        .note(reviewComment)
+                        .actorId(sub.getReviewedByAccount() != null ? sub.getReviewedByAccount().getId() : null)
+                        .actorName(reviewerName)
+                        .occurredAt(actionTime)
+                        .build());
+            } else if (isApproved || (reviewedAt != null && isApproved)) {
+                LocalDateTime actionTime = reviewedAt != null ? reviewedAt : (sub.getUpdatedAt() != null ? sub.getUpdatedAt() : sub.getSubmittedAt());
+                activities.add(TaskTimelineEventResponse.builder()
+                        .type("APPROVED")
+                        .submissionNumber(subNumber)
+                        .title("Task approved by Manager")
+                        .detail("Submission #" + subNumber + " • Reviewed by " + reviewerName)
+                        .note(reviewComment)
+                        .actorId(sub.getReviewedByAccount() != null ? sub.getReviewedByAccount().getId() : null)
+                        .actorName(reviewerName)
+                        .occurredAt(actionTime)
+                        .build());
             }
         }
 
@@ -1187,6 +1228,20 @@ public class ProjectTaskService {
             return (UserDetailsImpl) auth.getPrincipal();
         }
         return null;
+    }
+
+    private boolean isAutomatedSystemPlaceholder(String note) {
+        if (!org.springframework.util.StringUtils.hasText(note)) {
+            return true;
+        }
+        String lower = note.trim().toLowerCase();
+        return lower.contains("submitted for manager review")
+                || lower.contains("submitted for review")
+                || lower.contains("submitted to manager")
+                || lower.contains("completed revisions per manager feedback")
+                || lower.contains("task result submitted")
+                || lower.contains("documents submitted")
+                || lower.contains("candidate submitted for manager review");
     }
 
     private boolean hasRole(UserDetailsImpl user, SystemRole role) {
