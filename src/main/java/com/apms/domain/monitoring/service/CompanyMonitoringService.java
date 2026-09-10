@@ -51,6 +51,7 @@ public class CompanyMonitoringService {
     private final CompanyProfileUpdateProposalRepository proposalRepository;
     private final CompanyRelationshipChangeProposalRepository relationshipChangeProposalRepository;
     private final AuditLogService auditLogService;
+    private final com.apms.domain.profile.service.CompanyProfileVersionService versionService;
 
     @Transactional
     public CompanyMonitoringAssignmentResponse assignMonitor(CompanyMonitoringAssignmentRequest request, Long currentManagerId) {
@@ -190,6 +191,20 @@ public class CompanyMonitoringService {
                     .anyMatch(p -> p.getOrigin() == ProposalOrigin.MONITORING && !p.getId().equals(request.getUpdateProposalId()));
             if (hasOtherSubmitted) {
                 throw new com.apms.common.exception.BusinessConflictException("A monitoring proposal is already awaiting manager review. Cancel the current proposal before submitting a new one.");
+            }
+
+            if ((proposal.getOriginalValues() == null || proposal.getOriginalValues().isEmpty()) && proposal.getChangedFieldPaths() != null) {
+                CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId()).orElse(null);
+                if (companyProfile != null && versionService != null) {
+                    Map<String, Object> snapshot = versionService.createSnapshotMap(companyProfile);
+                    if (snapshot != null) {
+                        Map<String, Object> origValues = new HashMap<>();
+                        for (String path : proposal.getChangedFieldPaths()) {
+                            origValues.put(path, extractValueByPath(snapshot, path));
+                        }
+                        proposal.setOriginalValues(origValues);
+                    }
+                }
             }
 
             proposal.setStatus(SubmissionStatus.SUBMITTED);
@@ -529,5 +544,19 @@ public class CompanyMonitoringService {
                 throw new org.springframework.security.access.AccessDeniedException("Only the responsible Manager or SYSTEM_ADMIN can manage this monitoring assignment");
             }
         }
+    }
+
+    private Object extractValueByPath(Map<String, Object> map, String path) {
+        if (map == null || path == null) return null;
+        String[] parts = path.split("\\.");
+        Object current = map;
+        for (String part : parts) {
+            if (current instanceof Map) {
+                current = ((Map<?, ?>) current).get(part);
+            } else {
+                return null;
+            }
+        }
+        return current;
     }
 }

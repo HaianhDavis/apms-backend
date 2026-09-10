@@ -66,6 +66,9 @@ class CompanyMonitoringServiceTest {
     @Mock
     private AuditLogService auditLogService;
 
+    @Mock
+    private com.apms.domain.profile.service.CompanyProfileVersionService versionService;
+
     @InjectMocks
     private CompanyMonitoringService service;
 
@@ -252,7 +255,7 @@ class CompanyMonitoringServiceTest {
     void getAssignmentByCompany_Assigned_ReturnsAssignment() {
         when(assignmentRepository.findByCompanyProfileId("profile-1")).thenReturn(Optional.of(assignment));
         when(companyProfileRepository.findById("profile-1")).thenReturn(Optional.of(companyProfile));
-        when(proposalRepository.findTopByCompanyProfileIdAndOriginOrderByCreatedAtDesc(eq("profile-1"), any()))
+        lenient().when(proposalRepository.findTopByCompanyProfileIdAndOriginOrderByCreatedAtDesc(eq("profile-1"), any()))
                 .thenReturn(Optional.empty());
 
         Optional<CompanyMonitoringAssignmentResponse> response = service.getAssignmentByCompany("profile-1");

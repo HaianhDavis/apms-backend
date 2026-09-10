@@ -40,6 +40,7 @@ public class CompanyProfileUpdateProposal {
 
     private List<com.apms.domain.project.fieldapproval.FieldApprovalRecord> fieldApprovals;
     private List<String> changedFieldPaths;
+    private Map<String, Object> originalValues;
     private LocalDateTime lastSubmittedAt;
     private Long lastSubmittedByAccountId;
 

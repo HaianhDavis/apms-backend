@@ -25,6 +25,7 @@ public interface CompanyProfileVersionRepository extends MongoRepository<Company
 
     boolean existsByCompanyProfileId(String companyProfileId);
     boolean existsByCreatedFromProposalId(String createdFromProposalId);
+    Optional<CompanyProfileVersion> findFirstByCreatedFromProposalId(String createdFromProposalId);
     boolean existsByCompanyProfileIdAndCreatedFromProjectId(String companyProfileId, Long createdFromProjectId);
     List<CompanyProfileVersion> findByCompanyProfileIdOrderByCreatedAtDesc(String companyProfileId);
     Optional<CompanyProfileVersion> findTopByCompanyProfileIdOrderByCreatedAtDesc(String companyProfileId);

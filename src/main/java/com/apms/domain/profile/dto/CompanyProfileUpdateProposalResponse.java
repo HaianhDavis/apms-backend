@@ -35,6 +35,7 @@ public class CompanyProfileUpdateProposalResponse {
     private String extractionId;
 
     private List<String> changedFieldPaths;
+    private Map<String, Object> originalValues;
     private List<com.apms.domain.ai.dto.FieldEvidence> fieldEvidence;
 
     private SubmissionStatus status;

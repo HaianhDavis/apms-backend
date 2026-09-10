@@ -109,6 +109,18 @@ public class CompanyProfileUpdateProposalService {
             throw new BusinessConflictException("A monitoring proposal is already awaiting manager review. Cancel the current proposal before submitting a new one.");
         }
 
+        java.util.Map<String, Object> origValues = request.getOriginalValues();
+        if (origValues == null || origValues.isEmpty()) {
+            origValues = new java.util.HashMap<>();
+            CompanyProfile companyProfile = companyProfileRepository.findById(request.getCompanyProfileId()).orElse(null);
+            if (companyProfile != null && request.getChangedFieldPaths() != null) {
+                java.util.Map<String, Object> snapshot = versionService.createSnapshotMap(companyProfile);
+                for (String path : request.getChangedFieldPaths()) {
+                    origValues.put(path, extractValueByPath(snapshot, path));
+                }
+            }
+        }
+
         CompanyProfileUpdateProposal proposal = CompanyProfileUpdateProposal.builder()
                 .origin(com.apms.common.enums.ProposalOrigin.MONITORING)
                 .companyProfileId(request.getCompanyProfileId())
@@ -125,6 +137,7 @@ public class CompanyProfileUpdateProposalService {
                 .proposedCompanyMembers(request.getProposedCompanyMembers())
                 .proposedRelationship(request.getProposedRelationship())
                 .changedFieldPaths(request.getChangedFieldPaths())
+                .originalValues(origValues)
                 .fieldEvidence(request.getFieldEvidence())
                 .sourceDocumentIds(request.getSourceDocumentIds())
                 .extractionId(request.getExtractionId())
@@ -396,6 +409,10 @@ public class CompanyProfileUpdateProposalService {
             companyProfileRepository.save(companyProfile);
         }
 
+        if ((proposal.getOriginalValues() == null || proposal.getOriginalValues().isEmpty()) && beforeValues != null && !beforeValues.isEmpty()) {
+            proposal.setOriginalValues(beforeValues);
+        }
+
         proposal.setStatus(SubmissionStatus.APPROVED);
         proposal.setReviewedBy(approverId);
         if (reviewComment != null) {
@@ -630,6 +647,24 @@ public class CompanyProfileUpdateProposalService {
                     .orElse(null);
         }
 
+        java.util.Map<String, Object> originalValues = proposal.getOriginalValues();
+        if ((originalValues == null || originalValues.isEmpty()) && proposal.getStatus() == SubmissionStatus.APPROVED) {
+            java.util.Optional<com.apms.domain.profile.CompanyProfileVersion> versionOpt = versionRepository.findFirstByCreatedFromProposalId(proposal.getId());
+            if (versionOpt.isPresent() && versionOpt.get().getBeforeValues() != null) {
+                originalValues = versionOpt.get().getBeforeValues();
+            }
+        }
+        if ((originalValues == null || originalValues.isEmpty()) && proposal.getChangedFieldPaths() != null && !proposal.getChangedFieldPaths().isEmpty() && proposal.getCompanyProfileId() != null) {
+            CompanyProfile companyProfile = companyProfileRepository.findById(proposal.getCompanyProfileId()).orElse(null);
+            if (companyProfile != null) {
+                java.util.Map<String, Object> snapshot = versionService.createSnapshotMap(companyProfile);
+                originalValues = new java.util.HashMap<>();
+                for (String path : proposal.getChangedFieldPaths()) {
+                    originalValues.put(path, extractValueByPath(snapshot, path));
+                }
+            }
+        }
+
         return CompanyProfileUpdateProposalResponse.builder()
                 .id(proposal.getId())
                 .projectId(proposal.getProjectId())
@@ -649,6 +684,7 @@ public class CompanyProfileUpdateProposalService {
                 .proposedCompanyMembers(proposal.getProposedCompanyMembers())
                 .proposedRelationship(proposal.getProposedRelationship())
                 .changedFieldPaths(proposal.getChangedFieldPaths())
+                .originalValues(originalValues)
                 .fieldEvidence(proposal.getFieldEvidence())
                 .sourceDocumentIds(proposal.getSourceDocumentIds())
                 .extractionId(proposal.getExtractionId())

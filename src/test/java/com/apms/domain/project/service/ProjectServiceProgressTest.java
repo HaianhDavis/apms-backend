@@ -71,6 +71,8 @@ public class ProjectServiceProgressTest {
     private OwnerOrganizationService ownerOrganizationService;
     @Mock
     private CompanyProfileRepository companyProfileRepository;
+    @Mock
+    private ProjectTargetProfileResolver projectTargetProfileResolver;
 
     @InjectMocks
     private ProjectService projectService;
@@ -120,19 +122,15 @@ public class ProjectServiceProgressTest {
             p.setId(200L);
             return p;
         });
-        when(companyProfileRepository.save(any(CompanyProfile.class))).thenAnswer(i -> i.getArgument(0));
+        CompanyProfile shell = new CompanyProfile();
+        shell.setCompanyId("shell-200");
+        when(projectTargetProfileResolver.getOrCreateProjectProfileShell(any(Project.class), eq(1L))).thenReturn(shell);
 
         ProjectResponse res = projectService.createProject(req, 1L);
         assertNotNull(res);
         assertEquals(req.getPlannedEndDate(), res.getPlannedEndDate());
         assertNotNull(res.getTargetCompanyProfileId());
-
-        ArgumentCaptor<CompanyProfile> profileCaptor = ArgumentCaptor.forClass(CompanyProfile.class);
-        verify(companyProfileRepository).save(profileCaptor.capture());
-        CompanyProfile profile = profileCaptor.getValue();
-        assertEquals("PENDING_RESEARCH", profile.getReviewStatus());
-        assertEquals("Target", profile.getIdentity().getLegalName());
-        assertTrue(profile.getSourceRefs().getProjectIds().contains("200"));
+        assertEquals("shell-200", res.getTargetCompanyProfileId());
     }
 
     @Test
@@ -228,6 +226,7 @@ public class ProjectServiceProgressTest {
 
     @Test
     void getProjectById_overdueIncomplete_returnsOverdueTrue() {
+        mockProject.setStatus(ProjectStatus.ACTIVE);
         mockProject.setPlannedEndDate(LocalDate.now().minusDays(1)); // overdue
         when(projectRepository.findById(100L)).thenReturn(Optional.of(mockProject));
         when(projectTaskRepository.getProjectTaskStatsIn(List.of(100L), TaskStatus.DONE, TaskStatus.CANCELLED))
@@ -296,5 +295,83 @@ public class ProjectServiceProgressTest {
         ProjectResponse r2 = res.getContent().get(1);
         assertEquals(100, r2.getProgressPercentage());
         assertEquals(5, r2.getTotalTasks());
+    }
+
+    @Test
+    void createProject_updateExistingCompany_autoPopulatesTaxCodeFromProfile_preservesLeadingZeros() {
+        CreateProjectRequest req = new CreateProjectRequest();
+        req.setProjectName("Vietjet Project");
+        req.setProjectType(ProjectType.UPDATE_EXISTING_COMPANY);
+        req.setTargetCompanyProfileId("vj-profile-001");
+        req.setTargetCompanyName("VIETJET AIR");
+        req.setTargetRelationshipType(com.apms.common.enums.RelationshipType.PARTNER_WITH);
+        req.setPlannedEndDate(LocalDate.now().plusDays(30));
+        req.setTargetCompanyTaxCode(null);
+
+        CompanyProfile profile = new CompanyProfile();
+        profile.setCompanyId("vj-profile-001");
+        CompanyProfile.Identity identity = new CompanyProfile.Identity();
+        identity.setLegalName("VIETJET AIR");
+        identity.setTaxCode("0000124456328");
+        profile.setIdentity(identity);
+
+        when(companyProfileRepository.findByCompanyId("vj-profile-001")).thenReturn(Optional.of(profile));
+        when(accountRepository.getReferenceById(1L)).thenReturn(mockAccount);
+        when(projectRepository.save(any(Project.class))).thenAnswer(i -> {
+            Project p = i.getArgument(0);
+            p.setId(301L);
+            return p;
+        });
+
+        ProjectResponse res = projectService.createProject(req, 1L);
+        assertNotNull(res);
+        assertEquals("0000124456328", res.getTargetCompanyTaxCode());
+
+        ArgumentCaptor<Project> captor = ArgumentCaptor.forClass(Project.class);
+        verify(projectRepository, atLeastOnce()).save(captor.capture());
+        Project savedProject = captor.getValue();
+        assertEquals("0000124456328", savedProject.getTargetCompanyTaxCode());
+        assertTrue(savedProject.getTargetCompanyTaxCode().startsWith("0000"));
+    }
+
+    @Test
+    void getProjectById_existingProjectMissingTaxCode_healsTaxCodeFromProfile() {
+        mockProject.setProjectType(ProjectType.UPDATE_EXISTING_COMPANY);
+        mockProject.setTargetCompanyProfileId("vj-profile-001");
+        mockProject.setTargetCompanyTaxCode(null);
+
+        CompanyProfile profile = new CompanyProfile();
+        profile.setCompanyId("vj-profile-001");
+        CompanyProfile.Identity identity = new CompanyProfile.Identity();
+        identity.setTaxCode("0000124456328");
+        profile.setIdentity(identity);
+
+        when(projectRepository.findById(100L)).thenReturn(Optional.of(mockProject));
+        when(companyProfileRepository.findByCompanyId("vj-profile-001")).thenReturn(Optional.of(profile));
+        when(projectRepository.save(any(Project.class))).thenAnswer(i -> i.getArgument(0));
+
+        ProjectResponse res = projectService.getProjectById(100L);
+        assertNotNull(res);
+        assertEquals("0000124456328", res.getTargetCompanyTaxCode());
+        assertEquals("0000124456328", mockProject.getTargetCompanyTaxCode());
+        verify(projectRepository).save(mockProject);
+    }
+
+    @Test
+    void updateProject_existingCompany_doesNotThrowFalseTaxCodeDuplicate() {
+        mockProject.setProjectType(ProjectType.UPDATE_EXISTING_COMPANY);
+        mockProject.setStatus(ProjectStatus.DRAFT);
+        mockProject.setTargetCompanyProfileId("vj-profile-001");
+        mockProject.setTargetCompanyTaxCode("0000124456328");
+
+        when(projectRepository.findById(100L)).thenReturn(Optional.of(mockProject));
+        when(projectRepository.save(any(Project.class))).thenAnswer(i -> i.getArgument(0));
+
+        UpdateProjectRequest updateReq = new UpdateProjectRequest();
+        updateReq.setTargetCompanyTaxCode("0000124456328");
+
+        ProjectResponse res = projectService.updateProject(100L, updateReq);
+        assertNotNull(res);
+        assertEquals("0000124456328", res.getTargetCompanyTaxCode());
     }
 }

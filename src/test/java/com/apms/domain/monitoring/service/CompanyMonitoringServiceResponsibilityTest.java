@@ -30,6 +30,9 @@ public class CompanyMonitoringServiceResponsibilityTest {
     private CompanyMonitoringAssignmentRepository assignmentRepository;
 
     @Mock
+    private com.apms.domain.monitoring.repository.CompanyMonitoringReviewRepository reviewRepository;
+
+    @Mock
     private CompanyProfileRepository companyProfileRepository;
 
     @Mock
@@ -40,6 +43,13 @@ public class CompanyMonitoringServiceResponsibilityTest {
     
     @Mock
     private com.apms.domain.profile.repository.mongo.CompanyProfileUpdateProposalRepository proposalRepository;
+
+    @Mock
+    private com.apms.domain.monitoring.repository.CompanyRelationshipChangeProposalRepository relationshipChangeProposalRepository;
+
+    @Mock
+    private com.apms.domain.profile.service.CompanyProfileVersionService versionService;
+
     @InjectMocks
     private CompanyMonitoringService companyMonitoringService;
 

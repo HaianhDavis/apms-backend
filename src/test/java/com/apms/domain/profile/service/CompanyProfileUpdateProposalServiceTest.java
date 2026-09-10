@@ -43,6 +43,15 @@ class CompanyProfileUpdateProposalServiceTest {
     @Mock
     private AuditLogService auditLogService;
 
+    @Mock
+    private CompanyProfileVersionService versionService;
+
+    @Mock
+    private com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository versionRepository;
+
+    @Mock
+    private com.apms.domain.user.repository.sql.UserProfileRepository userProfileRepository;
+
     @InjectMocks
     private CompanyProfileUpdateProposalService service;
 
@@ -106,5 +115,34 @@ class CompanyProfileUpdateProposalServiceTest {
         verify(projectRepository, never()).existsByIdAndMembersAccountId(anyLong(), anyLong());
         verify(proposalRepository).save(argThat(p -> p.getOrigin() == ProposalOrigin.MONITORING));
         verify(auditLogService).log(eq(1L), eq(AuditAction.PROFILE_UPDATE_PROPOSAL_CREATED), eq("CompanyProfileUpdateProposal"), eq("proposal-2"), anyString());
+    }
+
+    @Test
+    void getProposalDetails_ApprovedHistorical_RecoversBeforeValuesFromVersion() {
+        CompanyProfileUpdateProposal proposal = CompanyProfileUpdateProposal.builder()
+                .id("prop-approved")
+                .origin(ProposalOrigin.MONITORING)
+                .companyProfileId("profile-1")
+                .status(com.apms.common.enums.SubmissionStatus.APPROVED)
+                .changedFieldPaths(java.util.List.of("contact.phones"))
+                .originalValues(null)
+                .build();
+
+        when(proposalRepository.findById("prop-approved")).thenReturn(java.util.Optional.of(proposal));
+
+        com.apms.domain.profile.CompanyProfileVersion version = com.apms.domain.profile.CompanyProfileVersion.builder()
+                .id("version-1")
+                .createdFromProposalId("prop-approved")
+                .beforeValues(java.util.Map.of("contact.phones", java.util.List.of("024 2220 5544", "19009247")))
+                .afterValues(java.util.Map.of("contact.phones", java.util.List.of("024 2220 5555")))
+                .build();
+
+        when(versionRepository.findFirstByCreatedFromProposalId("prop-approved")).thenReturn(java.util.Optional.of(version));
+
+        CompanyProfileUpdateProposalResponse response = service.getProposalDetails("prop-approved");
+
+        assertNotNull(response);
+        assertNotNull(response.getOriginalValues());
+        assertEquals(java.util.List.of("024 2220 5544", "19009247"), response.getOriginalValues().get("contact.phones"));
     }
 }
