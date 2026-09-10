@@ -38,6 +38,11 @@ public class TrackedCompany {
     private String companyName;
 
     /**
+     * Canonical display name for UI presentation (tradeName ?? legalName ?? fallback).
+     */
+    private String displayName;
+
+    /**
      * Alternative names, ticker symbols, abbreviations.
      * Example: ["MSFT", "Microsoft Corporation", "Microsoft Corp"]
      */

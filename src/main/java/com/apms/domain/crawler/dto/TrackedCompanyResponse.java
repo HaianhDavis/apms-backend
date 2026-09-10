@@ -19,6 +19,7 @@ public class TrackedCompanyResponse {
 
     private String id;
     private String companyName;
+    private String displayName;
     private List<String> aliases;
     private List<String> subsidiaries;
     private List<String> products;
