@@ -36,6 +36,7 @@ public class ExtractionFieldResult {
     private Long managerReviewedByUserId;
     private LocalDateTime managerReviewedAt;
     private String managerReviewComment;
+    private Integer reviewedRevision;
 
     private ExtractionReviewStatus previousManagerReviewStatus;
     private String previousManagerReviewComment;

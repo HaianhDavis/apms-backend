@@ -8,15 +8,30 @@ import com.apms.domain.ai.dto.ExtractionValidationStatus;
 import com.apms.domain.ai.dto.StaffFieldReviewStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
-
 import java.util.Map;
 import java.util.regex.Pattern;
 
 @Service
 public class AiExtractionQualityService {
 
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,6}$");
-    private static final Pattern URL_PATTERN = Pattern.compile("^(https?://)?([a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}(/.*)?$");
+    public static final Pattern EMAIL_PATTERN = Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,6}$");
+    public static final Pattern URL_PATTERN = Pattern.compile("^(https?://)?([a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}(/.*)?$");
+    public static final Pattern PHONE_PATTERN = Pattern.compile("^[+0-9\\s().-]{7,25}$");
+
+    public static boolean isValidEmail(String email) {
+        if (!StringUtils.hasText(email)) return true;
+        return EMAIL_PATTERN.matcher(email.trim()).find();
+    }
+
+    public static boolean isValidUrl(String url) {
+        if (!StringUtils.hasText(url)) return true;
+        return URL_PATTERN.matcher(url.trim()).find();
+    }
+
+    public static boolean isValidPhone(String phone) {
+        if (!StringUtils.hasText(phone)) return true;
+        return PHONE_PATTERN.matcher(phone.trim()).find();
+    }
 
     public void validateExtraction(Map<String, ExtractionFieldResult> fieldResults) {
         if (fieldResults == null) return;

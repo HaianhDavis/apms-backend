@@ -1,17 +1,21 @@
 package com.apms.domain.financial.controller;
 
 import com.apms.domain.contract.dto.ConfirmCompanyMatchRequest;
+import com.apms.domain.financial.dto.BatchCreateFinancialMetricsRequest;
 import com.apms.domain.financial.dto.CreateFinancialMetricRequest;
 import com.apms.domain.financial.dto.CreateFinancialReportRequest;
 import com.apms.domain.financial.dto.FinancialResearchResponse;
 import com.apms.domain.financial.dto.UpdateFinancialMetricRequest;
+import com.apms.domain.financial.dto.UpdateFinancialReportRequest;
 import com.apms.domain.financial.service.FinancialResearchService;
 import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -45,6 +49,26 @@ public class FinancialResearchController {
             @PathVariable Long taskId,
             @PathVariable String reportId) {
         return ResponseEntity.ok(researchService.removeReport(projectId, taskId, reportId));
+    }
+
+    @PutMapping("/projects/{projectId}/tasks/{taskId}/financial-research/reports/{reportId}")
+    public ResponseEntity<FinancialResearchResponse> updateReport(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String reportId,
+            @RequestBody UpdateFinancialReportRequest request) {
+        return ResponseEntity.ok(researchService.updateReport(projectId, taskId, reportId, request));
+    }
+
+    @PutMapping(value = "/projects/{projectId}/tasks/{taskId}/financial-research/reports/{reportId}/file", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<FinancialResearchResponse> replaceReportFile(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String reportId,
+            @RequestPart("file") MultipartFile file,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        Long userId = currentUser != null ? currentUser.getId() : null;
+        return ResponseEntity.ok(researchService.replaceReportFile(projectId, taskId, reportId, file, userId));
     }
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/financial-research/reports/{reportId}/extract")
@@ -81,6 +105,15 @@ public class FinancialResearchController {
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
         Long userId = currentUser != null ? currentUser.getId() : null;
         return ResponseEntity.ok(researchService.confirmCompanyMatch(projectId, taskId, reportId, request.isConfirmed(), userId));
+    }
+
+    @PostMapping("/projects/{projectId}/tasks/{taskId}/financial-research/reports/{reportId}/manual-metrics/batch")
+    public ResponseEntity<FinancialResearchResponse> saveManualMetricsBatch(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String reportId,
+            @RequestBody BatchCreateFinancialMetricsRequest request) {
+        return ResponseEntity.ok(researchService.saveManualMetricsBatch(projectId, taskId, reportId, request));
     }
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/financial-research/metrics")

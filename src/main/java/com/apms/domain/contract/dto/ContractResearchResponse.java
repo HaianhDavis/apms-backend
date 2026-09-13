@@ -28,6 +28,8 @@ public class ContractResearchResponse {
     // Active submission context
     private Long activeSubmissionId;
     private List<String> activeSubmittedContractIds;
+    private Boolean canRecallSubmission;
+    private String activeSubmissionStatus;
     private LocalDateTime submittedAt;
 
     private Long reviewedBy;

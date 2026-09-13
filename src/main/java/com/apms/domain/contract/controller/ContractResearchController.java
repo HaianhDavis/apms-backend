@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -49,6 +50,28 @@ public class ContractResearchController {
             @AuthenticationPrincipal UserDetailsImpl user) {
         Long userId = user != null ? user.getId() : 1L;
         return ResponseEntity.ok(researchService.updateContractEntry(taskId, contractId, request, userId));
+    }
+
+    @PutMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}/manual")
+    public ResponseEntity<ContractResearchResponse> saveManualContract(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String contractId,
+            @Valid @RequestBody SaveManualContractRequest request,
+            @AuthenticationPrincipal UserDetailsImpl user) {
+        Long userId = user != null ? user.getId() : 1L;
+        return ResponseEntity.ok(researchService.saveManualContract(projectId, taskId, contractId, request, userId));
+    }
+
+    @PutMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}/file")
+    public ResponseEntity<ContractResearchResponse> replaceContractFile(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String contractId,
+            @RequestPart("file") MultipartFile file,
+            @AuthenticationPrincipal UserDetailsImpl user) {
+        Long userId = user != null ? user.getId() : 1L;
+        return ResponseEntity.ok(researchService.replaceContractFile(projectId, taskId, contractId, file, userId));
     }
 
     @DeleteMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}")

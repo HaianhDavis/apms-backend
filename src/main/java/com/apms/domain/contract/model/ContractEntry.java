@@ -24,6 +24,13 @@ public class ContractEntry {
     private String title;
     private LocalDate documentDate;
 
+    @Builder.Default
+    private ContractDataEntryMethod dataEntryMethod = ContractDataEntryMethod.AI_EXTRACTION;
+
+    public ContractDataEntryMethod getDataEntryMethod() {
+        return this.dataEntryMethod != null ? this.dataEntryMethod : ContractDataEntryMethod.AI_EXTRACTION;
+    }
+
     // Type classification & resolution (Canonical Type Owner)
     private ContractType declaredContractType;
     private ContractType detectedContractType;

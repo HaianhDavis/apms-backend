@@ -45,16 +45,8 @@ public class FieldApprovalGuard {
             if (!Objects.equals(hashOld, hashNew)) {
                 // Field value is changing
                 FieldApprovalRecord record = map.get(def.getCanonicalPath());
-                if (record != null) {
-                    FieldApprovalStatus status = record.getStatus();
-
-                    if (status == FieldApprovalStatus.APPROVED ||
-                        status == FieldApprovalStatus.STALE ||
-                        status == FieldApprovalStatus.REJECTED) {
-                        blockedFields.add(def.getCanonicalPath());
-                    } else if (status == FieldApprovalStatus.PENDING_REVIEW && isDraftInReview) {
-                        blockedFields.add(def.getCanonicalPath());
-                    }
+                if (record != null && isDraftInReview) {
+                    blockedFields.add(def.getCanonicalPath());
                 }
             }
         }

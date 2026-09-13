@@ -1,5 +1,6 @@
 package com.apms.domain.contract.dto;
 
+import com.apms.domain.contract.enums.ContractDataEntryMethod;
 import com.apms.domain.contract.enums.ContractTypeSelection;
 import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
@@ -19,8 +20,9 @@ public class CreateContractEntryRequest {
 
     private LocalDate documentDate;
 
-    @NotBlank(message = "Document ID is required")
     private String documentId;
 
     private ContractTypeSelection declaredContractType;
+
+    private ContractDataEntryMethod dataEntryMethod;
 }

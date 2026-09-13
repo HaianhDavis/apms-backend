@@ -13,6 +13,13 @@ import java.util.function.Function;
 
 public class CandidateFieldAccessor {
 
+    public static final java.util.Set<String> REVIEWABLE_FIELD_PATHS = java.util.Set.of(
+        "identity.tradeName",
+        "contact.address", "contact.website", "contact.emails", "contact.phones",
+        "business.businessModel", "business.industries", "business.markets", "business.targetCustomers", "business.products",
+        "companySize.employeeTier", "companySize.employeeCount", "companySize.revenueTier"
+    );
+
     private static final Map<String, FieldDefinition<CompanyCandidate>> REGISTRY = new HashMap<>();
 
     static {
@@ -121,6 +128,12 @@ public class CandidateFieldAccessor {
 
     public static List<FieldDefinition<CompanyCandidate>> getAllDefinitions() {
         return new ArrayList<>(REGISTRY.values());
+    }
+
+    public static List<FieldDefinition<CompanyCandidate>> getReviewableDefinitions() {
+        return REGISTRY.values().stream()
+                .filter(def -> REVIEWABLE_FIELD_PATHS.contains(def.getCanonicalPath()))
+                .toList();
     }
 
     public static FieldDefinition<CompanyCandidate> getDefinition(String path) {

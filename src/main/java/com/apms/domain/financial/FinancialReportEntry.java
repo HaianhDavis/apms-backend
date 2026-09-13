@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 public class FinancialReportEntry {
     private String id;
     private String documentId;
+    private String fileName;
     private String title;
     private LocalDate publicationDate;
     private ReportingPeriod reportingPeriod;
@@ -30,11 +31,17 @@ public class FinancialReportEntry {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
-    // Review fields
     @Builder.Default
-    private FinancialReportReviewStatus reviewStatus = FinancialReportReviewStatus.PENDING_REVIEW;
+    private FinancialDataEntryMethod dataEntryMethod = FinancialDataEntryMethod.AI_EXTRACTION;
+
+    // Review fields
+    private FinancialReportReviewStatus reviewStatus;
     private Long reviewedBy;
     private String reviewedByName;
     private LocalDateTime reviewedAt;
     private String reviewComment;
+
+    public FinancialDataEntryMethod getDataEntryMethod() {
+        return this.dataEntryMethod != null ? this.dataEntryMethod : FinancialDataEntryMethod.AI_EXTRACTION;
+    }
 }

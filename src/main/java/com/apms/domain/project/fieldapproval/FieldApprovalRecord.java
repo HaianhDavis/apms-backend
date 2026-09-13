@@ -34,5 +34,6 @@ public class FieldApprovalRecord {
     // Resubmission history tracking
     private FieldApprovalStatus previousStatus;
     private String previousComment;
+    private Integer previousReviewedRevision;
     private Integer changedInRevision;
 }

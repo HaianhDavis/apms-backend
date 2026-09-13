@@ -34,6 +34,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -59,6 +60,7 @@ public class ContractResearchService {
     private final ContractExtractionNormalizer normalizer;
     private final ContractCompanyMatcher companyMatcher;
     private final AuditLogService auditLogService;
+    private final com.apms.domain.document.service.DocumentService documentService;
 
     @Autowired
     @Lazy
@@ -136,35 +138,75 @@ public class ContractResearchService {
         }
     }
 
+    private boolean requiresSourceDocument(ContractDataEntryMethod method) {
+        return method == ContractDataEntryMethod.AI_EXTRACTION;
+    }
+
     @Transactional
     public ContractResearchResponse createContractEntry(Long taskId, CreateContractEntryRequest req, Long userId) {
         ContractResearch research = getOrCreateResearchEntity(taskId);
 
-        RawDocument doc = rawDocumentRepository.findById(req.getDocumentId())
-                .orElseGet(() -> {
-                    try {
-                        Long jobId = Long.parseLong(req.getDocumentId());
-                        ImportJob job = importJobRepository.findById(jobId).orElse(null);
-                        if (job != null && job.getRawDocumentId() != null) {
-                            return rawDocumentRepository.findById(job.getRawDocumentId()).orElse(null);
-                        }
-                    } catch (Exception ignored) {}
-                    return null;
-                });
+        ContractDataEntryMethod method = req.getDataEntryMethod() != null
+                ? req.getDataEntryMethod()
+                : ContractDataEntryMethod.AI_EXTRACTION;
 
-        if (doc == null) {
-            throw new BusinessValidationException("DOCUMENT_NOT_FOUND", "RawDocument not found: " + req.getDocumentId());
+        String docId = null;
+        String docName = null;
+
+        if (requiresSourceDocument(method)) {
+            if (req.getDocumentId() == null || req.getDocumentId().trim().isEmpty()) {
+                throw new BusinessValidationException("DOCUMENT_REQUIRED", "Document ID is required for AI extraction contracts.");
+            }
+
+            RawDocument doc = rawDocumentRepository.findById(req.getDocumentId().trim())
+                    .orElseGet(() -> {
+                        try {
+                            Long jobId = Long.parseLong(req.getDocumentId().trim());
+                            ImportJob job = importJobRepository.findById(jobId).orElse(null);
+                            if (job != null && job.getRawDocumentId() != null) {
+                                return rawDocumentRepository.findById(job.getRawDocumentId()).orElse(null);
+                            }
+                        } catch (Exception ignored) {}
+                        return null;
+                    });
+
+            if (doc == null) {
+                throw new BusinessValidationException("DOCUMENT_NOT_FOUND", "RawDocument not found: " + req.getDocumentId());
+            }
+
+            docId = doc.getId();
+            docName = (doc.getSource() != null && doc.getSource().getFileName() != null)
+                    ? doc.getSource().getFileName()
+                    : "Contract Document.pdf";
+        } else {
+            // MANUAL contract: document is optional
+            if (StringUtils.hasText(req.getDocumentId())) {
+                RawDocument doc = rawDocumentRepository.findById(req.getDocumentId().trim())
+                        .orElseGet(() -> {
+                            try {
+                                Long jobId = Long.parseLong(req.getDocumentId().trim());
+                                ImportJob job = importJobRepository.findById(jobId).orElse(null);
+                                if (job != null && job.getRawDocumentId() != null) {
+                                    return rawDocumentRepository.findById(job.getRawDocumentId()).orElse(null);
+                                }
+                            } catch (Exception ignored) {}
+                            return null;
+                        });
+                if (doc != null) {
+                    docId = doc.getId();
+                    docName = (doc.getSource() != null && doc.getSource().getFileName() != null)
+                            ? doc.getSource().getFileName()
+                            : "Contract Document.pdf";
+                }
+            }
         }
 
         LocalDate docDate = req.getDocumentDate();
 
-        String docName = (doc.getSource() != null && doc.getSource().getFileName() != null)
-                ? doc.getSource().getFileName()
-                : "Contract Document.pdf";
-
         ContractEntry entry = ContractEntry.builder()
                 .id(UUID.randomUUID().toString())
-                .documentId(doc.getId())
+                .dataEntryMethod(method)
+                .documentId(docId)
                 .documentName(docName)
                 .title(req.getTitle().trim())
                 .documentDate(docDate)
@@ -172,9 +214,9 @@ public class ContractResearchService {
                 .confirmedContractType(ContractType.COOPERATION_AGREEMENT)
                 .typeValidationStatus(TypeValidationStatus.MATCH)
                 .companyMatchStatus(CompanyMatchStatus.UNKNOWN)
-                .companyMatchConfirmed(false)
+                .companyMatchConfirmed(method == ContractDataEntryMethod.MANUAL)
                 .derivedContractStatus(ContractStatus.UNKNOWN)
-                .extractionStatus(ContractExtractionStatus.NOT_EXTRACTED)
+                .extractionStatus(method == ContractDataEntryMethod.MANUAL ? ContractExtractionStatus.COMPLETED : ContractExtractionStatus.NOT_EXTRACTED)
                 .reviewStatus(ContractEntryReviewStatus.DRAFT)
                 .reviewHistory(new ArrayList<>())
                 .createdAt(LocalDateTime.now())
@@ -185,7 +227,7 @@ public class ContractResearchService {
         research = contractResearchRepository.save(research);
 
         auditLogService.log(userId, AuditAction.CONTRACT_RESEARCH_CREATED, "CONTRACT_ENTRY", entry.getId(),
-                "Task " + taskId + ": Created contract entry " + entry.getTitle());
+                "Task " + taskId + ": Created contract entry " + entry.getTitle() + " (" + method + ")");
 
         return toResponse(research);
     }
@@ -202,6 +244,110 @@ public class ContractResearchService {
         entry.setUpdatedAt(LocalDateTime.now());
 
         research = contractResearchRepository.save(research);
+        return toResponse(research);
+    }
+
+    @Transactional
+    public ContractResearchResponse saveManualContract(Long projectId, Long taskId, String contractId, SaveManualContractRequest req, Long userId) {
+        ProjectTask task = projectTaskRepository.findWithProjectById(taskId)
+                .orElseThrow(() -> new BusinessValidationException("TASK_NOT_FOUND", "Project task not found: " + taskId));
+        if (task.getProject() == null || !projectId.equals(task.getProject().getId())) {
+            throw new BusinessValidationException("PROJECT_TASK_MISMATCH", "Task " + taskId + " does not belong to project " + projectId);
+        }
+
+        ContractResearch research = getResearchEntity(taskId);
+        ContractEntry entry = findContractOrThrow(research, contractId);
+
+        // Correction 1: Enforce dataEntryMethod immutability (never convert AI to MANUAL or vice versa)
+        if (entry.getDataEntryMethod() != ContractDataEntryMethod.MANUAL) {
+            throw new BusinessValidationException("INVALID_DATA_ENTRY_METHOD",
+                    "Manual contract endpoint can only modify MANUAL contracts.");
+        }
+
+        validateContractEditable(research, entry);
+
+        if (req != null) {
+            if (StringUtils.hasText(req.getTitle())) {
+                entry.setTitle(req.getTitle().trim());
+            }
+            if (req.getDocumentDate() != null) {
+                entry.setDocumentDate(req.getDocumentDate());
+            }
+
+            CommonContractData common = entry.getCommonData();
+            if (common == null) {
+                common = CommonContractData.builder().build();
+                entry.setCommonData(common);
+            }
+
+            common.setContractNumber(createManualStringField(req.getContractNumber()));
+            common.setSigningDate(createManualLocalDateField(req.getSigningDate()));
+            common.setEffectiveDate(createManualLocalDateField(req.getEffectiveDate()));
+            common.setExpiryDate(createManualLocalDateField(req.getExpiryDate()));
+            common.setTerm(createManualStringField(req.getTerm()));
+            common.setGoverningLaw(createManualStringField(req.getGoverningLaw()));
+            common.setPurpose(createManualStringField(req.getPurpose()));
+            common.setContractValue(createManualContractValue(req.getContractValueAmount(), req.getContractValueCurrency(), req.getRawContractValueText()));
+
+            // Correction 6: Preserve ContractParty Identity During Edits
+            List<ContractParty> existingParties = common.getParties() != null ? common.getParties() : new ArrayList<>();
+            Map<String, ContractParty> existingPartyMap = existingParties.stream()
+                    .filter(p -> p != null && StringUtils.hasText(p.getId()))
+                    .collect(Collectors.toMap(ContractParty::getId, p -> p, (a, b) -> a));
+
+            List<ContractParty> updatedParties = new ArrayList<>();
+            if (req.getParties() != null) {
+                for (ManualContractPartyDto pDto : req.getParties()) {
+                    if (pDto == null) continue;
+                    boolean hasPartyData = StringUtils.hasText(pDto.getLegalName())
+                            || StringUtils.hasText(pDto.getRole())
+                            || StringUtils.hasText(pDto.getTaxCode())
+                            || StringUtils.hasText(pDto.getRepresentative())
+                            || StringUtils.hasText(pDto.getAddress());
+                    if (!hasPartyData) continue;
+
+                    String partyId;
+                    if (StringUtils.hasText(pDto.getId()) && existingPartyMap.containsKey(pDto.getId().trim())) {
+                        partyId = pDto.getId().trim();
+                    } else if (StringUtils.hasText(pDto.getId())) {
+                        partyId = pDto.getId().trim();
+                    } else {
+                        partyId = UUID.randomUUID().toString();
+                    }
+
+                    ContractParty party = existingPartyMap.getOrDefault(partyId, ContractParty.builder().id(partyId).build());
+                    party.setId(partyId);
+                    party.setLegalName(StringUtils.hasText(pDto.getLegalName()) ? pDto.getLegalName().trim() : null);
+                    party.setRole(StringUtils.hasText(pDto.getRole()) ? pDto.getRole().trim() : null);
+                    party.setTaxCode(StringUtils.hasText(pDto.getTaxCode()) ? pDto.getTaxCode().trim() : null);
+                    party.setRepresentative(StringUtils.hasText(pDto.getRepresentative()) ? pDto.getRepresentative().trim() : null);
+                    party.setAddress(StringUtils.hasText(pDto.getAddress()) ? pDto.getAddress().trim() : null);
+                    party.setInputMethod(ContractFieldInputMethod.MANUAL);
+                    party.setQualityStatus(ContractFieldQualityStatus.VALID);
+                    party.setVerificationStatus(null);
+
+                    updatedParties.add(party);
+                }
+            }
+            common.setParties(updatedParties);
+
+            if (normalizer != null) {
+                LocalDate eff = common.getEffectiveDate() != null ? common.getEffectiveDate().getValue() : null;
+                LocalDate exp = common.getExpiryDate() != null ? common.getExpiryDate().getValue() : null;
+                ContractStatus status = normalizer.deriveContractStatus(eff, exp, false);
+                entry.setDerivedContractStatus(status);
+                entry.setStatusDerivedAt(LocalDateTime.now());
+                entry.setStatusDerivationReason("Manual contract status derived from effective/expiry dates");
+            }
+        }
+
+        entry.setUpdatedAt(LocalDateTime.now());
+        research.setUpdatedAt(LocalDateTime.now());
+        research = contractResearchRepository.save(research);
+
+        auditLogService.log(userId, AuditAction.CONTRACT_RESEARCH_UPDATED, "CONTRACT_ENTRY", entry.getId(),
+                "Task " + taskId + ": Saved manual contract data for " + entry.getTitle());
+
         return toResponse(research);
     }
 
@@ -229,11 +375,105 @@ public class ContractResearchService {
     }
 
     @Transactional
+    public ContractResearchResponse replaceContractFile(Long projectId, Long taskId, String contractId, MultipartFile file, Long userId) {
+        ProjectTask task = projectTaskRepository.findWithProjectById(taskId)
+                .orElseThrow(() -> new BusinessValidationException("TASK_NOT_FOUND", "Project task not found: " + taskId));
+        if (task.getProject() == null || !projectId.equals(task.getProject().getId())) {
+            throw new BusinessValidationException("PROJECT_TASK_MISMATCH", "Task " + taskId + " does not belong to project " + projectId);
+        }
+
+        ContractResearch research = getResearchEntity(taskId);
+        ContractEntry entry = findContractOrThrow(research, contractId);
+
+        if (research.getStatus() != null && research.getStatus() != ContractResearchStatus.DRAFT && research.getStatus() != ContractResearchStatus.CHANGES_REQUESTED) {
+            throw new BusinessValidationException("RESEARCH_NOT_EDITABLE", "Cannot replace document in submitted or approved research");
+        }
+
+        if (entry.getReviewStatus() == ContractEntryReviewStatus.APPROVED) {
+            throw new BusinessValidationException("CONTRACT_APPROVED", "Cannot replace document for an approved contract");
+        }
+
+        if (entry.getReviewStatus() == ContractEntryReviewStatus.PENDING_REVIEW) {
+            throw new BusinessValidationException("CONTRACT_IN_REVIEW", "Contract is currently under Manager review and cannot be modified.");
+        }
+
+        if (entry.getExtractionStatus() == ContractExtractionStatus.PROCESSING) {
+            throw new BusinessValidationException("EXTRACTION_IN_PROGRESS", "Cannot replace document while AI extraction is in progress");
+        }
+
+        boolean anyOtherExtracting = research.getContracts() != null && research.getContracts().stream()
+                .anyMatch(c -> !c.getId().equals(contractId) && c.getExtractionStatus() == ContractExtractionStatus.PROCESSING);
+        if (anyOtherExtracting) {
+            throw new BusinessValidationException("EXTRACTION_IN_PROGRESS", "Một tài liệu khác đang được AI trích xuất. Vui lòng đợi hoàn tất trước khi thao tác tiếp.");
+        }
+
+        if (file == null || file.isEmpty()) {
+            throw new BusinessValidationException("EMPTY_FILE", "Uploaded file cannot be empty");
+        }
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null || !originalFilename.toLowerCase().endsWith(".pdf")) {
+            throw new BusinessValidationException("INVALID_FILE_TYPE", "Only PDF documents are supported for contracts");
+        }
+
+        Long effectiveUserId = userId != null ? userId : 1L;
+
+        // Upload and store new document via DocumentService
+        com.apms.domain.document.dto.ImportJobResponse importJob = documentService.uploadDocument(projectId, taskId, file, effectiveUserId);
+        String newDocumentId = importJob.getRawDocumentId();
+        if (newDocumentId == null) {
+            throw new BusinessValidationException("UPLOAD_FAILED", "Failed to obtain document ID for uploaded file");
+        }
+
+        // Update contract document reference
+        entry.setDocumentId(newDocumentId);
+        entry.setDocumentName(originalFilename);
+        entry.setUpdatedAt(LocalDateTime.now());
+
+        if (entry.getDataEntryMethod() == ContractDataEntryMethod.MANUAL) {
+            // Manual contract: document is for reference only;
+            // preserve all manual fields, extraction status (COMPLETED), and review status
+        } else {
+            // AI extraction contract: reset extraction state
+            entry.setExtractionStatus(ContractExtractionStatus.NOT_EXTRACTED);
+            entry.setExtractionStage(null);
+            entry.setExtractionProgress(0);
+            entry.setExtractionStartedAt(null);
+            entry.setExtractionCompletedAt(null);
+            entry.setExtractionErrorCode(null);
+            entry.setExtractionErrorMessage(null);
+            entry.setCommonData(null);
+            entry.setCooperationAgreementData(null);
+            entry.setPartnershipAgreementData(null);
+            entry.setJointVentureAgreementData(null);
+            entry.setBusinessCooperationContractData(null);
+            entry.setDerivedContractStatus(ContractStatus.UNKNOWN);
+            entry.setCompanyMatchConfirmed(false);
+            entry.setCompanyMatchStatus(CompanyMatchStatus.UNKNOWN);
+        }
+
+        // Do NOT soft-delete old document to avoid cross-record document loss
+
+        research = contractResearchRepository.save(research);
+
+        auditLogService.log(effectiveUserId, AuditAction.UPLOAD_DOCUMENT, "CONTRACT_ENTRY", entry.getId(),
+                "Task " + taskId + ": Replaced document for contract " + entry.getTitle() + " with " + originalFilename);
+
+        return toResponse(research);
+    }
+
+    @Transactional
     public ContractResearchResponse extractContractEntry(Long taskId, String contractId, Long userId) {
         ContractResearch research = getResearchEntity(taskId);
         ContractEntry entry = findContractOrThrow(research, contractId);
 
         validateContractEditable(research, entry);
+
+        if (entry.getDataEntryMethod() == ContractDataEntryMethod.MANUAL) {
+            throw new BusinessValidationException("CANNOT_EXTRACT_MANUAL_CONTRACT", "Cannot run AI extraction on a Manual Entry contract.");
+        }
+        if (entry.getDocumentId() == null || entry.getDocumentId().isBlank()) {
+            throw new BusinessValidationException("DOCUMENT_REQUIRED", "AI extraction requires a source document (PDF).");
+        }
 
         if (entry.getExtractionStatus() == ContractExtractionStatus.PROCESSING) {
             throw new BusinessValidationException("EXTRACTION_IN_PROGRESS", "Extraction is already in progress for this contract.");
@@ -412,6 +652,13 @@ public class ContractResearchService {
         ContractEntry entry = findContractOrThrow(research, contractId);
 
         validateContractEditable(research, entry);
+
+        if (entry.getDataEntryMethod() == ContractDataEntryMethod.MANUAL) {
+            throw new BusinessValidationException("CANNOT_EXTRACT_MANUAL_CONTRACT", "Cannot run AI extraction on a Manual Entry contract.");
+        }
+        if (entry.getDocumentId() == null || entry.getDocumentId().isBlank()) {
+            throw new BusinessValidationException("DOCUMENT_REQUIRED", "AI extraction requires a source document (PDF).");
+        }
 
         if (entry.getExtractionStatus() == ContractExtractionStatus.PROCESSING) {
             throw new BusinessValidationException("EXTRACTION_IN_PROGRESS", "Extraction is already in progress for this contract.");
@@ -833,16 +1080,31 @@ public class ContractResearchService {
         ProjectTask task = projectTaskRepository.findWithProjectById(taskId)
                 .orElseThrow(() -> new BusinessValidationException("TASK_NOT_FOUND", "Project task not found: " + taskId));
 
+        boolean isRevision = research.getStatus() == ContractResearchStatus.CHANGES_REQUESTED
+                || (research.getContracts() != null && research.getContracts().stream().anyMatch(c -> c.getReviewStatus() == ContractEntryReviewStatus.CHANGES_REQUESTED));
         List<ContractEntry> selectedContracts = new ArrayList<>();
         for (String cId : req.getContractEntryIds()) {
             ContractEntry entry = findContractOrThrow(research, cId);
+            if (entry.getReviewStatus() == ContractEntryReviewStatus.APPROVED) {
+                throw new BusinessValidationException("CONTRACT_APPROVED_IMMUTABLE",
+                        "Approved contract '" + entry.getTitle() + "' cannot be resubmitted.");
+            }
+            if (isRevision && entry.getReviewStatus() != ContractEntryReviewStatus.CHANGES_REQUESTED
+                    && entry.getReviewStatus() != ContractEntryReviewStatus.PENDING_REVIEW) {
+                throw new BusinessValidationException("CONTRACT_NOT_IN_REVISION",
+                        "Only contracts with CHANGES_REQUESTED can be resubmitted during revision. Contract '" + entry.getTitle() + "' is in status " + entry.getReviewStatus());
+            }
             validateSubmissionEligibility(entry);
             selectedContracts.add(entry);
         }
 
-        // Mark contracts PENDING_REVIEW
+        // Mark contracts PENDING_REVIEW and reset active decision fields
         for (ContractEntry c : selectedContracts) {
             c.setReviewStatus(ContractEntryReviewStatus.PENDING_REVIEW);
+            c.setReviewComment(null);
+            c.setReviewedBy(null);
+            c.setReviewedByName(null);
+            c.setReviewedAt(null);
             c.setUpdatedAt(LocalDateTime.now());
         }
 
@@ -950,8 +1212,8 @@ public class ContractResearchService {
         }
 
         ContractEntry entry = findContractOrThrow(research, contractId);
-        if (entry.getReviewStatus() != ContractEntryReviewStatus.PENDING_REVIEW) {
-            throw new BusinessValidationException("CONTRACT_NOT_PENDING_REVIEW", "Contract is not in PENDING_REVIEW status.");
+        if (!isPendingReview(entry)) {
+            throw new BusinessValidationException("CONTRACT_NOT_PENDING_REVIEW", "This contract has already been reviewed in the current review cycle.");
         }
 
         if (req.getStatus() == ContractEntryReviewStatus.CHANGES_REQUESTED && !StringUtils.hasText(req.getReason())) {
@@ -983,52 +1245,8 @@ public class ContractResearchService {
                 .build();
         entry.getReviewHistory().add(event);
 
-        // Check if all contracts in current submission have been decided
-        List<String> submittedIds = submission.getTargetItemIdList();
-        boolean allDecided = true;
-        boolean anyChangesRequested = false;
-
-        for (String sId : submittedIds) {
-            ContractEntry ce = findContractOrThrow(research, sId);
-            if (ce.getReviewStatus() == ContractEntryReviewStatus.PENDING_REVIEW) {
-                allDecided = false;
-            }
-            if (ce.getReviewStatus() == ContractEntryReviewStatus.CHANGES_REQUESTED) {
-                anyChangesRequested = true;
-            }
-        }
-
-        if (allDecided || anyChangesRequested) {
-            com.apms.domain.user.Account reviewerAccount = accountRepository != null ? accountRepository.findById(userId).orElse(null) : null;
-            if (anyChangesRequested) {
-                submission.setStatus(SubmissionStatus.REVISION_REQUESTED);
-            } else {
-                submission.setStatus(SubmissionStatus.APPROVED);
-            }
-            submission.setReviewedByAccount(reviewerAccount);
-            submission.setReviewedAt(LocalDateTime.now());
-            if (StringUtils.hasText(req.getReason())) {
-                submission.setReviewComment(req.getReason());
-            } else if (!StringUtils.hasText(submission.getReviewComment())) {
-                submission.setReviewComment(anyChangesRequested ? "Contract changes requested" : "Contracts approved");
-            }
-            projectTaskSubmissionRepository.save(submission);
-
-            // Package Precedence Evaluation
-            ContractResearchStatus nextPackageStatus = computePackageStatusPrecedence(research);
-            research.setStatus(nextPackageStatus);
-            research.setReviewedBy(userId);
-            research.setReviewedAt(LocalDateTime.now());
-
-            if (nextPackageStatus == ContractResearchStatus.APPROVED) {
-                task.setStatus(TaskStatus.DONE);
-                task.setCompletedAt(LocalDateTime.now());
-            } else if (nextPackageStatus == ContractResearchStatus.CHANGES_REQUESTED) {
-                task.setStatus(TaskStatus.IN_PROGRESS);
-                task.setCompletedAt(null);
-            }
-            projectTaskRepository.save(task);
-        }
+        Account reviewerAccount = accountRepository != null ? accountRepository.findById(userId).orElse(null) : null;
+        recalculateContractReviewState(research, task, submission, userId, reviewerAccount);
 
         research = contractResearchRepository.save(research);
 
@@ -1102,6 +1320,117 @@ public class ContractResearchService {
 
     // --- Helper Validation & Resolution Methods ---
 
+    private boolean isPendingReview(ContractEntry entry) {
+        if (entry == null) return false;
+        return entry.getReviewStatus() == null
+                || entry.getReviewStatus() == ContractEntryReviewStatus.PENDING_REVIEW;
+    }
+
+    private void recalculateContractReviewState(
+            ContractResearch research,
+            ProjectTask task,
+            ProjectTaskSubmission activeSubmission,
+            Long reviewerId,
+            Account reviewerAccount
+    ) {
+        Set<String> packageContractIds = new HashSet<>(activeSubmission.getTargetItemIdList());
+        List<ContractEntry> packageContracts = research.getContracts().stream()
+                .filter(c -> packageContractIds.contains(c.getId()))
+                .collect(Collectors.toList());
+
+        boolean packageHasPending = packageContracts.stream().anyMatch(this::isPendingReview);
+        boolean packageHasChangesRequested = packageContracts.stream()
+                .anyMatch(c -> c.getReviewStatus() == ContractEntryReviewStatus.CHANGES_REQUESTED);
+        boolean packageAllApproved = !packageContracts.isEmpty() && packageContracts.stream()
+                .allMatch(c -> c.getReviewStatus() == ContractEntryReviewStatus.APPROVED);
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // Priority 1: Pending contracts exist in current review package
+        if (packageHasPending) {
+            research.setStatus(ContractResearchStatus.SUBMITTED);
+            if (task.getStatus() != TaskStatus.IN_REVIEW) {
+                task.setStatus(TaskStatus.IN_REVIEW);
+                task.setCompletedAt(null);
+                projectTaskRepository.save(task);
+            }
+            if (activeSubmission.getStatus() != SubmissionStatus.IN_REVIEW) {
+                activeSubmission.setStatus(SubmissionStatus.IN_REVIEW);
+                projectTaskSubmissionRepository.save(activeSubmission);
+            }
+            return;
+        }
+
+        // Priority 2: Current package has changes requested (and 0 pending in package)
+        if (packageHasChangesRequested) {
+            research.setStatus(ContractResearchStatus.CHANGES_REQUESTED);
+            research.setReviewedBy(reviewerId);
+            research.setReviewedAt(now);
+
+            // Aggregate feedback ONLY from CHANGES_REQUESTED contracts in packageContracts
+            List<ContractEntry> changedContracts = packageContracts.stream()
+                    .filter(c -> c.getReviewStatus() == ContractEntryReviewStatus.CHANGES_REQUESTED)
+                    .collect(Collectors.toList());
+
+            String aggregatedFeedback = changedContracts.stream()
+                    .map(c -> {
+                        String title = StringUtils.hasText(c.getTitle()) ? c.getTitle() : "Contract";
+                        String comment = StringUtils.hasText(c.getReviewComment()) ? c.getReviewComment() : "Changes requested";
+                        return title + ": " + comment;
+                    })
+                    .collect(Collectors.joining("\n"));
+
+            research.setReviewReason(aggregatedFeedback);
+
+            task.setStatus(TaskStatus.IN_PROGRESS);
+            task.setCompletedAt(null);
+            projectTaskRepository.save(task);
+
+            activeSubmission.setStatus(SubmissionStatus.REVISION_REQUESTED);
+            activeSubmission.setReviewedByAccount(reviewerAccount);
+            activeSubmission.setReviewedAt(now);
+            activeSubmission.setReviewComment(aggregatedFeedback);
+            projectTaskSubmissionRepository.save(activeSubmission);
+            return;
+        }
+
+        // Priority 3: Current package is all approved
+        if (packageAllApproved) {
+            activeSubmission.setStatus(SubmissionStatus.APPROVED);
+            activeSubmission.setReviewedByAccount(reviewerAccount);
+            activeSubmission.setReviewedAt(now);
+            activeSubmission.setReviewComment("Contracts approved");
+            projectTaskSubmissionRepository.save(activeSubmission);
+
+            // Separately evaluate if the WHOLE Contract task is complete
+            List<ContractEntry> allContracts = research.getContracts() != null ? research.getContracts() : Collections.emptyList();
+            boolean anyTaskContractPendingOrDraftOrChanges = allContracts.stream()
+                    .anyMatch(c -> c.getReviewStatus() == ContractEntryReviewStatus.DRAFT
+                            || c.getReviewStatus() == ContractEntryReviewStatus.CHANGES_REQUESTED
+                            || isPendingReview(c));
+
+            boolean allTaskContractsApproved = !allContracts.isEmpty() && allContracts.stream()
+                    .allMatch(c -> c.getReviewStatus() == ContractEntryReviewStatus.APPROVED);
+
+            if (allTaskContractsApproved && !anyTaskContractPendingOrDraftOrChanges) {
+                research.setStatus(ContractResearchStatus.APPROVED);
+                research.setReviewedBy(reviewerId);
+                research.setReviewedAt(now);
+                research.setReviewReason("All contracts approved");
+
+                task.setStatus(TaskStatus.DONE);
+                task.setCompletedAt(now);
+                projectTaskRepository.save(task);
+            } else {
+                // Current submission is approved, but task still has other active draft or changes requested contracts
+                research.setStatus(computePackageStatusPrecedence(research));
+                task.setStatus(TaskStatus.IN_PROGRESS);
+                task.setCompletedAt(null);
+                projectTaskRepository.save(task);
+            }
+        }
+    }
+
     private ContractResearchStatus computePackageStatusPrecedence(ContractResearch research) {
         if (research.getContracts() == null || research.getContracts().isEmpty()) {
             return ContractResearchStatus.DRAFT;
@@ -1119,43 +1448,147 @@ public class ContractResearchService {
                 anyPendingReview = true;
             } else if (c.getReviewStatus() == ContractEntryReviewStatus.APPROVED) {
                 anyApproved = true;
-            } else if (c.getReviewStatus() == ContractEntryReviewStatus.DRAFT) {
+            } else if (c.getReviewStatus() == ContractEntryReviewStatus.DRAFT || c.getReviewStatus() == null) {
                 anyDraft = true;
             }
         }
 
-        if (anyChangesRequested) return ContractResearchStatus.CHANGES_REQUESTED;
         if (anyPendingReview) return ContractResearchStatus.SUBMITTED;
+        if (anyChangesRequested) return ContractResearchStatus.CHANGES_REQUESTED;
+        if (anyApproved && !anyDraft) return ContractResearchStatus.APPROVED;
         if (anyDraft) return ContractResearchStatus.DRAFT;
-        if (anyApproved) return ContractResearchStatus.APPROVED;
 
         return ContractResearchStatus.DRAFT;
     }
 
     private void syncTaskAndResearchStatusIfComplete(ContractResearch research) {
         if (research == null || research.getContracts() == null) return;
-        ContractResearchStatus computedStatus = computePackageStatusPrecedence(research);
-        if (computedStatus != research.getStatus()) {
-            research.setStatus(computedStatus);
-            contractResearchRepository.save(research);
-        }
 
-        if (computedStatus == ContractResearchStatus.APPROVED) {
-            projectTaskRepository.findById(research.getTaskId()).ifPresent(task -> {
+        try {
+            Long taskId = research.getTaskId();
+            if (taskId == null) return;
+
+            ProjectTask task = projectTaskRepository.findWithProjectById(taskId).orElse(null);
+            if (task == null) return;
+
+            List<ProjectTaskSubmission> subs = projectTaskSubmissionRepository.findByProjectTask_Id(taskId);
+
+            // 1. Check if there is an active IN_REVIEW submission
+            Optional<ProjectTaskSubmission> inReviewSub = subs.stream()
+                    .filter(s -> s.getStatus() == SubmissionStatus.IN_REVIEW)
+                    .findFirst();
+
+            if (inReviewSub.isPresent()) {
+                boolean modified = false;
+                if (research.getStatus() != ContractResearchStatus.SUBMITTED) {
+                    research.setStatus(ContractResearchStatus.SUBMITTED);
+                    modified = true;
+                }
+                if (task.getStatus() != TaskStatus.IN_REVIEW) {
+                    task.setStatus(TaskStatus.IN_REVIEW);
+                    projectTaskRepository.save(task);
+                }
+                if (modified) {
+                    contractResearchRepository.save(research);
+                }
+                return;
+            }
+
+            // 2. No active IN_REVIEW submission.
+            Optional<ProjectTaskSubmission> revSub = subs.stream()
+                    .filter(s -> s.getStatus() == SubmissionStatus.REVISION_REQUESTED)
+                    .findFirst();
+
+            boolean hasChangesRequestedContracts = research.getContracts().stream()
+                    .anyMatch(c -> c.getReviewStatus() == ContractEntryReviewStatus.CHANGES_REQUESTED);
+
+            boolean allApproved = !research.getContracts().isEmpty() && research.getContracts().stream()
+                    .allMatch(c -> c.getReviewStatus() == ContractEntryReviewStatus.APPROVED);
+
+            if (allApproved) {
+                boolean modified = false;
+                if (research.getStatus() != ContractResearchStatus.APPROVED) {
+                    research.setStatus(ContractResearchStatus.APPROVED);
+                    modified = true;
+                }
                 if (task.getStatus() != TaskStatus.DONE) {
                     task.setStatus(TaskStatus.DONE);
                     task.setCompletedAt(LocalDateTime.now());
                     projectTaskRepository.save(task);
                     log.info("Auto-synced task {} to DONE as all submitted contracts are approved", task.getId());
                 }
-            });
+                if (modified) {
+                    contractResearchRepository.save(research);
+                }
+            } else if (revSub.isPresent() || (task.getStatus() == TaskStatus.IN_PROGRESS && hasChangesRequestedContracts)) {
+                boolean modified = false;
+                if (research.getStatus() != ContractResearchStatus.CHANGES_REQUESTED) {
+                    research.setStatus(ContractResearchStatus.CHANGES_REQUESTED);
+                    modified = true;
+                }
+                if (task.getStatus() != TaskStatus.IN_PROGRESS) {
+                    task.setStatus(TaskStatus.IN_PROGRESS);
+                    projectTaskRepository.save(task);
+                }
+
+                // AUTO-HEAL: If the submission was returned for revision, any contract in that submission
+                // that was left in PENDING_REVIEW (due to legacy premature return before review completed)
+                // MUST be transitioned to CHANGES_REQUESTED so Staff can edit and resubmit it!
+                if (revSub.isPresent()) {
+                    Set<String> subItemIds = new HashSet<>(revSub.get().getTargetItemIdList());
+                    String comment = StringUtils.hasText(revSub.get().getReviewComment())
+                            ? revSub.get().getReviewComment()
+                            : "Returned for revision with submission package";
+                    for (ContractEntry c : research.getContracts()) {
+                        if (subItemIds.contains(c.getId()) && isPendingReview(c)) {
+                            c.setReviewStatus(ContractEntryReviewStatus.CHANGES_REQUESTED);
+                            if (!StringUtils.hasText(c.getReviewComment())) {
+                                c.setReviewComment(comment);
+                            }
+                            c.setUpdatedAt(LocalDateTime.now());
+                            modified = true;
+                            log.info("Auto-healed legacy pending contract {} to CHANGES_REQUESTED for revision task {}", c.getId(), taskId);
+                        }
+                    }
+                }
+
+                if (modified) {
+                    contractResearchRepository.save(research);
+                }
+            } else if (task.getStatus() == TaskStatus.IN_PROGRESS) {
+                boolean modified = false;
+                if (research.getStatus() != ContractResearchStatus.DRAFT) {
+                    research.setStatus(ContractResearchStatus.DRAFT);
+                    modified = true;
+                }
+                if (modified) {
+                    contractResearchRepository.save(research);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Could not sync task status in getResearch: {}", e.getMessage());
         }
     }
 
     private void validateSubmissionEligibility(ContractEntry entry) {
-        if (entry.getReviewStatus() != ContractEntryReviewStatus.DRAFT && entry.getReviewStatus() != ContractEntryReviewStatus.CHANGES_REQUESTED) {
+        if (entry.getReviewStatus() == ContractEntryReviewStatus.APPROVED) {
+            throw new BusinessValidationException("CONTRACT_APPROVED_IMMUTABLE",
+                    "Approved contract '" + entry.getTitle() + "' cannot be resubmitted.");
+        }
+        if (entry.getReviewStatus() != null
+                && entry.getReviewStatus() != ContractEntryReviewStatus.DRAFT
+                && entry.getReviewStatus() != ContractEntryReviewStatus.CHANGES_REQUESTED) {
             throw new BusinessValidationException("CONTRACT_NOT_SUBMITTABLE",
                     "Contract '" + entry.getTitle() + "' is in status " + entry.getReviewStatus() + " and cannot be submitted.");
+        }
+
+        // Manual contracts bypass AI verification, but require meaningful data
+        if (entry.getDataEntryMethod() == ContractDataEntryMethod.MANUAL) {
+            if (!hasMeaningfulManualContractData(entry)) {
+                throw new BusinessValidationException("MANUAL_CONTRACT_EMPTY",
+                        "Hợp đồng nhập thủ công '" + entry.getTitle() + "' chưa có số liệu. Vui lòng nhập thông tin trước khi gửi duyệt.");
+            }
+            return;
         }
 
         // If extraction is completed, enforce data quality validation
@@ -1409,6 +1842,91 @@ public class ContractResearchService {
         if (entry.getReviewStatus() == ContractEntryReviewStatus.PENDING_REVIEW) {
             throw new BusinessValidationException("CONTRACT_IN_REVIEW", "Contract is currently under Manager review and cannot be modified.");
         }
+        if (research != null && research.getStatus() != null && research.getStatus() != ContractResearchStatus.DRAFT && research.getStatus() != ContractResearchStatus.CHANGES_REQUESTED) {
+            throw new BusinessValidationException("RESEARCH_NOT_EDITABLE", "Research is currently not in an editable state.");
+        }
+    }
+
+    private ExtractedContractField<String> createManualStringField(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return ExtractedContractField.<String>builder()
+                .value(value.trim())
+                .inputMethod(ContractFieldInputMethod.MANUAL)
+                .qualityStatus(ContractFieldQualityStatus.VALID)
+                .build();
+    }
+
+    private ExtractedContractField<LocalDate> createManualLocalDateField(LocalDate value) {
+        if (value == null) {
+            return null;
+        }
+        return ExtractedContractField.<LocalDate>builder()
+                .value(value)
+                .inputMethod(ContractFieldInputMethod.MANUAL)
+                .qualityStatus(ContractFieldQualityStatus.VALID)
+                .build();
+    }
+
+    private ExtractedContractField<ContractValue> createManualContractValue(BigDecimal amount, String currency, String rawText) {
+        boolean hasAmount = amount != null;
+        boolean hasRaw = StringUtils.hasText(rawText);
+        if (!hasAmount && !hasRaw) {
+            return null;
+        }
+        ContractValue cv = ContractValue.builder()
+                .amount(amount)
+                .currency(StringUtils.hasText(currency) ? currency.trim() : "VND")
+                .rawAmountText(hasRaw ? rawText.trim() : null)
+                .build();
+        return ExtractedContractField.<ContractValue>builder()
+                .value(cv)
+                .inputMethod(ContractFieldInputMethod.MANUAL)
+                .qualityStatus(ContractFieldQualityStatus.VALID)
+                .build();
+    }
+
+    public boolean hasMeaningfulManualContractData(ContractEntry entry) {
+        if (entry == null || entry.getCommonData() == null) {
+            return false;
+        }
+        CommonContractData common = entry.getCommonData();
+        if (common.getContractNumber() != null && StringUtils.hasText(common.getContractNumber().getValue())) {
+            return true;
+        }
+        if (common.getSigningDate() != null && common.getSigningDate().getValue() != null) {
+            return true;
+        }
+        if (common.getEffectiveDate() != null && common.getEffectiveDate().getValue() != null) {
+            return true;
+        }
+        if (common.getExpiryDate() != null && common.getExpiryDate().getValue() != null) {
+            return true;
+        }
+        if (common.getTerm() != null && StringUtils.hasText(common.getTerm().getValue())) {
+            return true;
+        }
+        if (common.getGoverningLaw() != null && StringUtils.hasText(common.getGoverningLaw().getValue())) {
+            return true;
+        }
+        if (common.getPurpose() != null && StringUtils.hasText(common.getPurpose().getValue())) {
+            return true;
+        }
+        if (common.getContractValue() != null && common.getContractValue().getValue() != null) {
+            ContractValue cv = common.getContractValue().getValue();
+            if (cv.getAmount() != null || StringUtils.hasText(cv.getRawAmountText())) {
+                return true;
+            }
+        }
+        if (common.getParties() != null) {
+            for (ContractParty p : common.getParties()) {
+                if (p != null && (StringUtils.hasText(p.getLegalName()) || StringUtils.hasText(p.getTaxCode()) || StringUtils.hasText(p.getRole()))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void updateProgress(Long taskId, String contractId, ContractExtractionStage stage, int progress) {
@@ -2096,15 +2614,44 @@ public class ContractResearchService {
         Long activeSubId = null;
         List<String> activeSubmittedIds = new ArrayList<>();
         LocalDateTime submittedAt = research.getSubmittedAt();
+        Boolean canRecall = false;
+        String activeSubmissionStatus = null;
 
         try {
+            // First try to find IN_REVIEW submission (active review)
             Optional<ProjectTaskSubmission> activeSub = projectTaskSubmissionRepository.findByProjectTask_Id(research.getTaskId()).stream()
                     .filter(s -> s.getStatus() == SubmissionStatus.IN_REVIEW)
                     .findFirst();
+
+            if (activeSub.isEmpty()) {
+                // Fallback: look for REVISION_REQUESTED (Manager finished, returned to Staff)
+                activeSub = projectTaskSubmissionRepository.findByProjectTask_Id(research.getTaskId()).stream()
+                        .filter(s -> s.getStatus() == SubmissionStatus.REVISION_REQUESTED)
+                        .findFirst();
+            }
+
             if (activeSub.isPresent()) {
-                activeSubId = activeSub.get().getId();
-                activeSubmittedIds = activeSub.get().getTargetItemIdList();
-                submittedAt = activeSub.get().getSubmittedAt();
+                ProjectTaskSubmission sub = activeSub.get();
+                activeSubId = sub.getId();
+                activeSubmittedIds = sub.getTargetItemIdList();
+                submittedAt = sub.getSubmittedAt();
+                activeSubmissionStatus = sub.getStatus().name();
+
+                // canRecall = true only if IN_REVIEW and NO contracts have been reviewed yet
+                if (sub.getStatus() == SubmissionStatus.IN_REVIEW) {
+                    boolean anyDecisionMade = false;
+                    for (String cId : sub.getTargetItemIdList()) {
+                        ContractEntry entry = research.getContracts() != null
+                                ? research.getContracts().stream().filter(c -> cId.equals(c.getId())).findFirst().orElse(null)
+                                : null;
+                        if (entry != null && entry.getReviewStatus() != null
+                                && entry.getReviewStatus() != ContractEntryReviewStatus.PENDING_REVIEW) {
+                            anyDecisionMade = true;
+                            break;
+                        }
+                    }
+                    canRecall = !anyDecisionMade;
+                }
             }
         } catch (Exception ignored) {}
 
@@ -2117,6 +2664,8 @@ public class ContractResearchService {
                 .contracts(research.getContracts() != null ? research.getContracts() : new ArrayList<>())
                 .activeSubmissionId(activeSubId)
                 .activeSubmittedContractIds(activeSubmittedIds)
+                .activeSubmissionStatus(activeSubmissionStatus)
+                .canRecallSubmission(canRecall)
                 .submittedAt(submittedAt)
                 .reviewedBy(research.getReviewedBy())
                 .reviewedAt(research.getReviewedAt())

@@ -20,6 +20,8 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import com.apms.security.UserDetailsImpl;
+import org.springframework.web.multipart.MultipartFile;
+import com.apms.domain.document.service.DocumentService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -46,6 +48,7 @@ public class FinancialResearchService {
 
     private final FinancialResearchRepository researchRepository;
     private final RawDocumentRepository documentRepository;
+    private final DocumentService documentService;
     private final ProjectTaskRepository projectTaskRepository;
     private final ProjectRepository projectRepository;
     private final DocumentCompanyMatcher companyMatcher;
@@ -86,16 +89,37 @@ public class FinancialResearchService {
         }
 
         if (research == null) {
+            Integer targetYear = resolveTaskTargetYear(taskId, null);
+            ReportingPeriod targetPeriod = targetYear != null
+                    ? ReportingPeriod.builder()
+                            .year(targetYear)
+                            .period("FY")
+                            .periodType(ReportingPeriodType.FULL_YEAR)
+                            .build()
+                    : null;
+
             research = FinancialResearch.builder()
                     .taskId(taskId)
                     .projectId(projectId)
                     .companyProfileId(targetProfileId)
+                    .targetResearchPeriod(targetPeriod)
                     .status(FinancialResearchStatus.DRAFT)
                     .reports(new ArrayList<>())
                     .metrics(new ArrayList<>())
                     .build();
             research = researchRepository.save(research);
         } else {
+            if (research.getTargetResearchPeriod() == null || research.getTargetResearchPeriod().getYear() == null) {
+                Integer targetYear = resolveTaskTargetYear(taskId, research);
+                if (targetYear != null) {
+                    research.setTargetResearchPeriod(ReportingPeriod.builder()
+                            .year(targetYear)
+                            .period("FY")
+                            .periodType(ReportingPeriodType.FULL_YEAR)
+                            .build());
+                    research = researchRepository.save(research);
+                }
+            }
             if (research.getCompanyProfileId() == null && targetProfileId != null) {
                 research.setCompanyProfileId(targetProfileId);
                 research = researchRepository.save(research);
@@ -154,6 +178,10 @@ public class FinancialResearchService {
         return Optional.of(toResponse(research));
     }
 
+    private boolean requiresSourceDocument(FinancialDataEntryMethod method) {
+        return method == FinancialDataEntryMethod.AI_EXTRACTION;
+    }
+
     public FinancialResearchResponse addReport(Long projectId, Long taskId, CreateFinancialReportRequest request) {
         FinancialResearch research = researchRepository.findByTaskId(taskId)
                 .orElseThrow(() -> new BusinessValidationException("Research not found"));
@@ -162,14 +190,74 @@ public class FinancialResearchService {
             throw new BusinessValidationException("Cannot add report to submitted or approved research");
         }
 
+        FinancialDataEntryMethod method = request.getDataEntryMethod() != null
+                ? request.getDataEntryMethod()
+                : FinancialDataEntryMethod.AI_EXTRACTION;
+
+        if (requiresSourceDocument(method)) {
+            if (request.getDocumentId() == null || request.getDocumentId().isBlank()) {
+                throw new BusinessValidationException("AI Extraction requires a source document (PDF).");
+            }
+        }
+
+        Integer year = request.getReportingPeriod() != null ? request.getReportingPeriod().getYear() : null;
+        if (year == null && research.getTargetResearchPeriod() != null) {
+            year = research.getTargetResearchPeriod().getYear();
+        }
+        if (year == null) {
+            year = resolveTaskTargetYear(taskId, research);
+            if (year != null && (research.getTargetResearchPeriod() == null || research.getTargetResearchPeriod().getYear() == null)) {
+                research.setTargetResearchPeriod(ReportingPeriod.builder()
+                        .year(year)
+                        .period("FY")
+                        .periodType(ReportingPeriodType.FULL_YEAR)
+                        .build());
+                research = researchRepository.save(research);
+            }
+        }
+        if (year == null) {
+            throw new BusinessValidationException("Target research period year is not configured for this task.");
+        }
+
+        ReportingPeriod reportingPeriod = request.getReportingPeriod();
+        if (reportingPeriod == null) {
+            reportingPeriod = ReportingPeriod.builder()
+                    .year(year)
+                    .period("Q1")
+                    .periodType(ReportingPeriodType.QUARTER)
+                    .build();
+        } else {
+            reportingPeriod.setYear(year);
+        }
+
+        String docName = null;
+        if (request.getDocumentId() != null && !request.getDocumentId().isBlank()) {
+            try {
+                RawDocument doc = documentRepository.findById(request.getDocumentId()).orElse(null);
+                if (doc != null && doc.getSource() != null) {
+                    docName = doc.getSource().getFileName();
+                }
+            } catch (Exception ignored) {}
+        }
+
+        StatementScope statementScope = request.getStatementScope() != null
+                ? request.getStatementScope()
+                : StatementScope.UNKNOWN;
+
+        ReportType reportType = request.getReportType() != null
+                ? request.getReportType()
+                : ReportType.FINANCIAL_STATEMENT;
+
         FinancialReportEntry entry = FinancialReportEntry.builder()
                 .id(UUID.randomUUID().toString())
                 .documentId(request.getDocumentId())
-                .title(request.getTitle())
+                .fileName(docName)
+                .title(request.getTitle() != null ? request.getTitle().trim() : "")
+                .dataEntryMethod(method)
                 .publicationDate(request.getPublicationDate())
-                .reportingPeriod(request.getReportingPeriod())
-                .reportType(request.getReportType())
-                .statementScope(request.getStatementScope())
+                .reportingPeriod(reportingPeriod)
+                .reportType(reportType)
+                .statementScope(statementScope)
                 .extractionStatus(ExtractionStatus.NOT_EXTRACTED)
                 .createdAt(LocalDateTime.now())
                 .updatedAt(LocalDateTime.now())
@@ -183,6 +271,182 @@ public class FinancialResearchService {
 
         auditLogService.log(getCurrentUserId(), AuditAction.FINANCIAL_RESEARCH_CREATED, "ProjectTask", taskId.toString(), "Added financial report");
         
+        return toResponse(research);
+    }
+
+    public FinancialResearchResponse updateReport(Long projectId, Long taskId, String reportId, UpdateFinancialReportRequest request) {
+        FinancialResearch research = researchRepository.findByTaskId(taskId)
+                .orElseThrow(() -> new BusinessValidationException("Research not found"));
+
+        if (research.getStatus() != FinancialResearchStatus.DRAFT && research.getStatus() != FinancialResearchStatus.CHANGES_REQUESTED) {
+            throw new BusinessValidationException("Cannot update report in submitted or approved research");
+        }
+
+        if (research.getReports() == null) {
+            throw new BusinessValidationException("Report not found");
+        }
+
+        FinancialReportEntry report = research.getReports().stream()
+                .filter(r -> r.getId().equals(reportId))
+                .findFirst()
+                .orElseThrow(() -> new BusinessValidationException("Report not found"));
+
+        if (report.getReviewStatus() == FinancialReportReviewStatus.APPROVED) {
+            throw new BusinessValidationException("Cannot edit an approved report");
+        }
+
+        if (report.getExtractionStatus() == ExtractionStatus.EXTRACTING) {
+            throw new BusinessValidationException("Cannot edit report while AI extraction is in progress");
+        }
+
+        boolean anyExtracting = research.getReports().stream()
+                .anyMatch(r -> r.getExtractionStatus() == ExtractionStatus.EXTRACTING);
+        if (anyExtracting) {
+            throw new BusinessValidationException("Một tài liệu khác đang được AI trích xuất. Vui lòng đợi hoàn tất trước khi thao tác tiếp.");
+        }
+
+        if (request.getTitle() != null && !request.getTitle().isBlank()) {
+            report.setTitle(request.getTitle().trim());
+        }
+        if (request.getPublicationDate() != null) {
+            report.setPublicationDate(request.getPublicationDate());
+        }
+        if (request.getReportType() != null) {
+            report.setReportType(request.getReportType());
+        }
+        if (request.getStatementScope() != null) {
+            report.setStatementScope(request.getStatementScope());
+        }
+        if (request.getReportingPeriod() != null) {
+            report.setReportingPeriod(request.getReportingPeriod());
+            // Sync period to metrics belonging to this report
+            if (research.getMetrics() != null && request.getReportingPeriod().getPeriod() != null) {
+                for (FinancialMetric m : research.getMetrics()) {
+                    if (m.getSource() != null && reportId.equals(m.getSource().getReportEntryId())) {
+                        m.setPeriod(request.getReportingPeriod());
+                    }
+                }
+            }
+        }
+
+        report.setUpdatedAt(LocalDateTime.now());
+        research.setUpdatedAt(LocalDateTime.now());
+        research = researchRepository.save(research);
+
+        auditLogService.log(getCurrentUserId(), AuditAction.FINANCIAL_RESEARCH_CREATED, "ProjectTask", taskId.toString(), "Updated financial report: " + report.getTitle());
+
+        return toResponse(research);
+    }
+
+    @Transactional
+    public FinancialResearchResponse replaceReportFile(Long projectId, Long taskId, String reportId, MultipartFile file, Long userId) {
+        FinancialResearch research = researchRepository.findByTaskId(taskId)
+                .orElseThrow(() -> new BusinessValidationException("Research not found"));
+
+        if (research.getStatus() != FinancialResearchStatus.DRAFT && research.getStatus() != FinancialResearchStatus.CHANGES_REQUESTED) {
+            throw new BusinessValidationException("Cannot replace document in submitted or approved research");
+        }
+
+        if (research.getReports() == null) {
+            throw new BusinessValidationException("Report not found");
+        }
+
+        FinancialReportEntry report = research.getReports().stream()
+                .filter(r -> r.getId().equals(reportId))
+                .findFirst()
+                .orElseThrow(() -> new BusinessValidationException("Report not found"));
+
+        if (report.getReviewStatus() == FinancialReportReviewStatus.APPROVED) {
+            throw new BusinessValidationException("Cannot replace document for an approved report");
+        }
+
+        if (report.getExtractionStatus() == ExtractionStatus.EXTRACTING) {
+            throw new BusinessValidationException("Cannot replace document while AI extraction is in progress");
+        }
+
+        boolean anyExtracting = research.getReports().stream()
+                .anyMatch(r -> r.getExtractionStatus() == ExtractionStatus.EXTRACTING);
+        if (anyExtracting) {
+            throw new BusinessValidationException("Một tài liệu khác đang được AI trích xuất. Vui lòng đợi hoàn tất trước khi thao tác tiếp.");
+        }
+
+        if (file == null || file.isEmpty()) {
+            throw new BusinessValidationException("Uploaded file cannot be empty");
+        }
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null || !originalFilename.toLowerCase().endsWith(".pdf")) {
+            throw new BusinessValidationException("Only PDF documents are supported for financial reports");
+        }
+
+        Long effectiveUserId = userId != null ? userId : getCurrentUserId();
+        String oldDocumentId = report.getDocumentId();
+
+        // Upload and store new document via DocumentService
+        com.apms.domain.document.dto.ImportJobResponse importJob = documentService.uploadDocument(projectId, taskId, file, effectiveUserId);
+        String newDocumentId = importJob.getRawDocumentId();
+        if (newDocumentId == null) {
+            throw new BusinessValidationException("Failed to obtain document ID for uploaded file");
+        }
+
+        // Update report source document reference
+        report.setDocumentId(newDocumentId);
+        report.setFileName(originalFilename);
+
+        if (report.getDataEntryMethod() == FinancialDataEntryMethod.MANUAL) {
+            // Manual report: document is for reference only; preserve manual metrics and extraction status
+            if (research.getMetrics() != null) {
+                for (FinancialMetric m : research.getMetrics()) {
+                    if (m.getSource() != null && reportId.equals(m.getSource().getReportEntryId())) {
+                        m.getSource().setDocumentId(newDocumentId);
+                        m.getSource().setDocumentName(originalFilename);
+                    }
+                }
+            }
+        } else {
+            // Reset extraction-derived data for THIS REPORT ONLY
+            report.setExtractionStatus(ExtractionStatus.NOT_EXTRACTED);
+            report.setExtractionStage(null);
+            report.setExtractionProgress(0);
+            report.setExtractionStartedAt(null);
+            report.setExtractionCompletedAt(null);
+            report.setExtractionErrorCode(null);
+            report.setExtractionErrorMessage(null);
+            report.setDocumentContext(null);
+
+            // Invalidate / remove metrics associated with this report
+            if (research.getMetrics() != null) {
+                research.getMetrics().removeIf(m -> m.getSource() != null &&
+                        (reportId.equals(m.getSource().getReportEntryId()) ||
+                         (oldDocumentId != null && oldDocumentId.equals(m.getSource().getDocumentId()))));
+            }
+        }
+
+        // Soft-delete old document if not referenced by another report
+        if (oldDocumentId != null) {
+            boolean isDocShared = research.getReports().stream()
+                    .anyMatch(r -> !r.getId().equals(reportId) && oldDocumentId.equals(r.getDocumentId()));
+            if (!isDocShared) {
+                try {
+                    documentService.deleteDocument(projectId, taskId, oldDocumentId, effectiveUserId);
+                } catch (Exception e) {
+                    log.warn("Could not soft-delete old raw document {}: {}", oldDocumentId, e.getMessage());
+                }
+            }
+        }
+
+        if (report.getReviewStatus() == FinancialReportReviewStatus.CHANGES_REQUESTED) {
+            report.setReviewStatus(null);
+            report.setReviewComment(null);
+            report.setReviewedBy(null);
+            report.setReviewedByName(null);
+            report.setReviewedAt(null);
+        }
+
+        research = researchRepository.save(research);
+
+        auditLogService.log(effectiveUserId, AuditAction.FINANCIAL_RESEARCH_CREATED, "ProjectTask", taskId.toString(),
+                "Replaced financial report document for " + report.getTitle() + " with " + originalFilename);
+
         return toResponse(research);
     }
 
@@ -216,6 +480,14 @@ public class FinancialResearchService {
         FinancialReportEntry report = research.getReports().stream()
                 .filter(r -> r.getId().equals(reportId)).findFirst()
                 .orElseThrow(() -> new BusinessValidationException("Report not found"));
+
+        if (report.getDataEntryMethod() == FinancialDataEntryMethod.MANUAL) {
+            throw new BusinessValidationException("Cannot run AI extraction on a Manual Entry report.");
+        }
+
+        if (report.getDocumentId() == null || report.getDocumentId().isBlank()) {
+            throw new BusinessValidationException("DOCUMENT_REQUIRED", "AI extraction requires a source document (PDF).");
+        }
 
         // Prevent duplicate extraction
         if (report.getExtractionStatus() == ExtractionStatus.EXTRACTING) {
@@ -259,6 +531,14 @@ public class FinancialResearchService {
         FinancialReportEntry report = research.getReports().stream()
                 .filter(r -> r.getId().equals(reportId)).findFirst()
                 .orElseThrow(() -> new BusinessValidationException("Report not found"));
+
+        if (report.getDataEntryMethod() == FinancialDataEntryMethod.MANUAL) {
+            throw new BusinessValidationException("Cannot run AI extraction on a Manual Entry report.");
+        }
+
+        if (report.getDocumentId() == null || report.getDocumentId().isBlank()) {
+            throw new BusinessValidationException("DOCUMENT_REQUIRED", "AI extraction requires a source document (PDF).");
+        }
 
         // Prevent duplicate extraction
         if (report.getExtractionStatus() == ExtractionStatus.EXTRACTING) {
@@ -559,9 +839,155 @@ public class FinancialResearchService {
         }
     }
 
+    public void validateReportEditableByStaff(FinancialResearch research, FinancialReportEntry report) {
+        if (research == null) {
+            throw new BusinessValidationException("Financial research not found.");
+        }
+        if (research.getStatus() != FinancialResearchStatus.DRAFT && research.getStatus() != FinancialResearchStatus.CHANGES_REQUESTED) {
+            throw new BusinessValidationException("Cannot modify metrics in research with status: " + research.getStatus());
+        }
+        if (report != null) {
+            FinancialReportReviewStatus reviewStatus = report.getReviewStatus();
+            if (reviewStatus != null && reviewStatus != FinancialReportReviewStatus.CHANGES_REQUESTED) {
+                throw new BusinessValidationException("Cannot modify metrics for report with review status: " + reviewStatus);
+            }
+        }
+    }
+
+    public FinancialResearchResponse saveManualMetricsBatch(Long projectId, Long taskId, String reportId, BatchCreateFinancialMetricsRequest request) {
+        FinancialResearch research = researchRepository.findByTaskId(taskId)
+                .orElseThrow(() -> new BusinessValidationException("Financial research not found for task " + taskId));
+
+        FinancialReportEntry targetReport = null;
+        if (research.getReports() != null) {
+            targetReport = research.getReports().stream()
+                    .filter(r -> reportId.equals(r.getId()))
+                    .findFirst()
+                    .orElse(null);
+        }
+        if (targetReport == null) {
+            throw new BusinessValidationException("Report not found: " + reportId);
+        }
+
+        if (targetReport.getDataEntryMethod() != FinancialDataEntryMethod.MANUAL) {
+            throw new BusinessValidationException("Batch metrics entry is only supported for MANUAL reports.");
+        }
+
+        validateReportEditableByStaff(research, targetReport);
+
+        if (request == null || request.getMetrics() == null || request.getMetrics().isEmpty()) {
+            return toResponse(research);
+        }
+
+        List<CreateFinancialMetricRequest> meaningfulRequests = request.getMetrics().stream()
+                .filter(m -> m != null && StringUtils.hasText(m.getRawValue()) && StringUtils.hasText(m.getLabel()))
+                .collect(Collectors.toList());
+
+        if (meaningfulRequests.isEmpty()) {
+            return toResponse(research);
+        }
+
+        // Atomic pre-validation of all metrics
+        for (CreateFinancialMetricRequest req : meaningfulRequests) {
+            if (!StringUtils.hasText(req.getLabel())) {
+                throw new BusinessValidationException("Metric label cannot be empty.");
+            }
+            if (!StringUtils.hasText(req.getRawUnit())) {
+                throw new BusinessValidationException("Metric unit cannot be empty for " + req.getLabel());
+            }
+            try {
+                NormalizedValue norm = normalizeValue(req.getRawValue(), req.getRawUnit());
+                if (norm.value == null) {
+                    throw new BusinessValidationException("Invalid numeric financial value: " + req.getRawValue());
+                }
+            } catch (Exception e) {
+                throw new BusinessValidationException("Invalid numeric financial value for " + req.getLabel() + ": " + req.getRawValue());
+            }
+        }
+
+        if (research.getMetrics() == null) {
+            research.setMetrics(new ArrayList<>());
+        }
+
+        final String finalReportId = reportId;
+        for (CreateFinancialMetricRequest req : meaningfulRequests) {
+            String metricCode = req.getMetricCode();
+            String normKey = generateNormalizedKey(req.getLabel());
+            FinancialMetric existing = null;
+
+            for (FinancialMetric m : research.getMetrics()) {
+                if (m.getSource() != null && finalReportId.equals(m.getSource().getReportEntryId())) {
+                    if (metricCode != null && metricCode.equals(m.getMetricCode())) {
+                        existing = m;
+                        break;
+                    } else if (normKey != null && normKey.equals(m.getNormalizedKey())) {
+                        existing = m;
+                        break;
+                    }
+                }
+            }
+
+            NormalizedValue norm = normalizeValue(req.getRawValue(), req.getRawUnit());
+
+            String stmtType = req.getStatementType();
+            if (stmtType == null && metricCode != null) {
+                CanonicalFinancialTaxonomy.findByCode(metricCode)
+                        .ifPresent(d -> req.setStatementType(d.getStatementType()));
+                stmtType = req.getStatementType();
+            }
+
+            if (existing != null) {
+                existing.setLabel(req.getLabel().trim());
+                if (req.getOriginalLabel() != null) {
+                    existing.setOriginalLabel(req.getOriginalLabel().trim());
+                }
+                if (metricCode != null) {
+                    existing.setMetricCode(metricCode);
+                }
+                existing.setRawValue(req.getRawValue().trim());
+                existing.setRawUnit(req.getRawUnit().trim());
+                existing.setNormalizedValue(norm.value);
+                existing.setNormalizedUnit(norm.unit);
+                existing.setInputMethod(MetricInputMethod.MANUAL);
+                existing.setVerificationStatus(null);
+                existing.setQualityStatus(MetricQualityStatus.VALID);
+                if (stmtType != null && existing.getSource() != null) {
+                    existing.getSource().setStatementType(stmtType);
+                }
+            } else {
+                FinancialMetric newMetric = FinancialMetric.builder()
+                        .id(UUID.randomUUID().toString())
+                        .label(req.getLabel().trim())
+                        .originalLabel(req.getOriginalLabel() != null ? req.getOriginalLabel().trim() : req.getLabel().trim())
+                        .metricCode(metricCode)
+                        .normalizedKey(normKey)
+                        .rawValue(req.getRawValue().trim())
+                        .rawUnit(req.getRawUnit().trim())
+                        .normalizedValue(norm.value)
+                        .normalizedUnit(norm.unit)
+                        .inputMethod(MetricInputMethod.MANUAL)
+                        .period(targetReport.getReportingPeriod())
+                        .source(MetricSource.builder()
+                                .reportEntryId(finalReportId)
+                                .documentId(targetReport.getDocumentId())
+                                .statementType(stmtType)
+                                .build())
+                        .qualityStatus(MetricQualityStatus.VALID)
+                        .verificationStatus(null)
+                        .build();
+
+                research.getMetrics().add(newMetric);
+            }
+        }
+
+        healOrphanManualMetrics(research);
+        research = researchRepository.save(research);
+        return toResponse(research);
+    }
+
     public FinancialResearchResponse addManualMetric(Long projectId, Long taskId, CreateFinancialMetricRequest request) {
         FinancialResearch research = researchRepository.findByTaskId(taskId).orElseThrow();
-        
+
         String reportEntryId = request.getReportEntryId();
         if ((reportEntryId == null || reportEntryId.isBlank()) && request.getReportId() != null) {
             reportEntryId = request.getReportId();
@@ -581,15 +1007,68 @@ public class FinancialResearchService {
             }
         }
 
+        validateReportEditableByStaff(research, targetReport);
+
+        String metricCode = request.getMetricCode();
+        String label = request.getLabel();
+        String normKey = generateNormalizedKey(label);
+
+        // Check if metricCode or label matches any canonical metric (label, alias, or code)
+        Optional<CanonicalFinancialTaxonomy.MetricDefinition> canonicalMatch =
+                CanonicalFinancialTaxonomy.findByCodeOrAlias(metricCode != null ? metricCode : label);
+
+        if (canonicalMatch.isPresent()) {
+            CanonicalFinancialTaxonomy.MetricDefinition canDef = canonicalMatch.get();
+            metricCode = canDef.getCode();
+            request.setMetricCode(metricCode);
+            if (request.getLabel() == null || request.getLabel().isBlank()) {
+                request.setLabel(canDef.getLabel());
+            }
+
+            // Canonical duplicate check: same reportEntryId AND same metricCode
+            if (targetReport != null && research.getMetrics() != null) {
+                final String finalRepId = targetReport.getId();
+                final String finalMetricCode = metricCode;
+                boolean exists = research.getMetrics().stream()
+                        .filter(m -> m.getSource() != null && finalRepId.equals(m.getSource().getReportEntryId()))
+                        .anyMatch(m -> finalMetricCode.equals(m.getMetricCode()));
+                if (exists) {
+                    throw new BusinessValidationException("DUPLICATE_METRIC",
+                            "Chỉ số '" + canDef.getLabel() + "' đã có trong báo cáo này.");
+                }
+            }
+        } else {
+            // Custom metric duplicate check: same reportEntryId AND same normalizedKey
+            if (targetReport != null && research.getMetrics() != null) {
+                final String finalRepId = targetReport.getId();
+                boolean exists = research.getMetrics().stream()
+                        .filter(m -> m.getSource() != null && finalRepId.equals(m.getSource().getReportEntryId()))
+                        .anyMatch(m -> normKey != null && normKey.equals(m.getNormalizedKey()));
+                if (exists) {
+                    throw new BusinessValidationException("DUPLICATE_METRIC",
+                            "Chỉ số '" + label + "' đã tồn tại trong báo cáo này.");
+                }
+            }
+        }
+
         String sourceDocumentId = request.getSourceDocumentId();
         if (sourceDocumentId == null && targetReport != null) {
             sourceDocumentId = targetReport.getDocumentId();
         }
 
+        String stmtType = request.getStatementType();
+        if (stmtType == null && metricCode != null) {
+            CanonicalFinancialTaxonomy.findByCode(metricCode)
+                    .ifPresent(d -> request.setStatementType(d.getStatementType()));
+            stmtType = request.getStatementType();
+        }
+
         FinancialMetric metric = FinancialMetric.builder()
                 .id(UUID.randomUUID().toString())
-                .label(request.getLabel())
-                .normalizedKey(generateNormalizedKey(request.getLabel()))
+                .label(request.getLabel().trim())
+                .originalLabel(request.getOriginalLabel() != null ? request.getOriginalLabel().trim() : request.getLabel().trim())
+                .metricCode(metricCode)
+                .normalizedKey(normKey)
                 .rawValue(request.getRawValue())
                 .rawUnit(request.getRawUnit())
                 .evidence(request.getEvidence())
@@ -599,9 +1078,10 @@ public class FinancialResearchService {
                         .reportEntryId(reportEntryId)
                         .documentId(sourceDocumentId)
                         .page(request.getSourcePage())
+                        .statementType(stmtType)
                         .build())
                 .qualityStatus(MetricQualityStatus.VALID)
-                .verificationStatus(MetricVerificationStatus.VERIFIED)
+                .verificationStatus(null)
                 .build();
 
         NormalizedValue norm = normalizeValue(request.getRawValue(), request.getRawUnit());
@@ -613,8 +1093,9 @@ public class FinancialResearchService {
         }
         research.getMetrics().add(metric);
 
-        if (targetReport != null && (targetReport.getExtractionStatus() == ExtractionStatus.NOT_EXTRACTED ||
-                                     targetReport.getExtractionStatus() == ExtractionStatus.FAILED)) {
+        if (targetReport != null && targetReport.getDataEntryMethod() != FinancialDataEntryMethod.MANUAL &&
+                (targetReport.getExtractionStatus() == ExtractionStatus.NOT_EXTRACTED ||
+                 targetReport.getExtractionStatus() == ExtractionStatus.FAILED)) {
             targetReport.setExtractionStatus(ExtractionStatus.EXTRACTED);
         }
 
@@ -668,20 +1149,14 @@ public class FinancialResearchService {
     }
 
     private void validateMetricEditable(FinancialResearch research, FinancialMetric metric) {
-        if (research.getStatus() == FinancialResearchStatus.SUBMITTED || research.getStatus() == FinancialResearchStatus.APPROVED) {
-            throw new BusinessValidationException("Cannot modify metrics in a submitted or approved research package.");
-        }
-        
-        if (metric.getSource() != null && metric.getSource().getReportEntryId() != null) {
-            research.getReports().stream()
+        FinancialReportEntry targetReport = null;
+        if (metric.getSource() != null && metric.getSource().getReportEntryId() != null && research.getReports() != null) {
+            targetReport = research.getReports().stream()
                     .filter(r -> r.getId().equals(metric.getSource().getReportEntryId()))
                     .findFirst()
-                    .ifPresent(report -> {
-                        if (report.getReviewStatus() == FinancialReportReviewStatus.APPROVED) {
-                            throw new BusinessValidationException("Cannot modify metrics for an approved report.");
-                        }
-                    });
+                    .orElse(null);
         }
+        validateReportEditableByStaff(research, targetReport);
     }
 
     public FinancialResearchResponse updateMetric(Long projectId, Long taskId, String metricId, UpdateFinancialMetricRequest request) {
@@ -691,6 +1166,7 @@ public class FinancialResearchService {
         validateMetricEditable(research, metric);
 
         metric.setLabel(request.getLabel());
+        metric.setNormalizedKey(generateNormalizedKey(request.getLabel()));
         metric.setRawValue(request.getRawValue());
         metric.setRawUnit(request.getRawUnit());
         metric.setPeriod(request.getPeriod());
@@ -703,7 +1179,11 @@ public class FinancialResearchService {
         metric.setNormalizedUnit(norm.unit);
         
         metric.setQualityStatus(MetricQualityStatus.VALID);
-        metric.setVerificationStatus(MetricVerificationStatus.VERIFIED);
+        if (metric.getInputMethod() == MetricInputMethod.MANUAL) {
+            metric.setVerificationStatus(null);
+        } else {
+            metric.setVerificationStatus(MetricVerificationStatus.VERIFIED);
+        }
         
         research = researchRepository.save(research);
         return toResponse(research);
@@ -950,34 +1430,48 @@ public class FinancialResearchService {
                 }
             }
                     
-            if (report.getExtractionStatus() != ExtractionStatus.EXTRACTED && report.getExtractionStatus() != ExtractionStatus.NEEDS_REVIEW) {
-                throw new BusinessValidationException("Cannot submit report that has not been extracted: " + report.getTitle());
-            }
+            if (report.getDataEntryMethod() == FinancialDataEntryMethod.MANUAL) {
+                long reportMetricCount = research.getMetrics() != null ? research.getMetrics().stream()
+                        .filter(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()))
+                        .count() : 0;
+                if (reportMetricCount == 0) {
+                    throw new BusinessValidationException("NO_METRICS", "Báo cáo '" + report.getTitle() + "' chưa có chỉ số nào được nhập.");
+                }
+            } else {
+                if (report.getExtractionStatus() != ExtractionStatus.EXTRACTED && report.getExtractionStatus() != ExtractionStatus.NEEDS_REVIEW) {
+                    throw new BusinessValidationException("Cannot submit report that has not been extracted: " + report.getTitle());
+                }
 
-            if (requiresCompanyConfirmation(report.getDocumentContext())) {
-                throw new BusinessValidationException(
-                        "COMPANY_MATCH_UNCONFIRMED",
-                        "Báo cáo '" + report.getTitle() + "' yêu cầu xác nhận công ty mục tiêu trước khi nộp cho Manager."
-                );
-            }
-            
-            long reportMetricCount = research.getMetrics().stream()
-                    .filter(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()))
-                    .count();
-            if (reportMetricCount == 0) {
-                throw new BusinessValidationException("NO_METRICS", "Báo cáo '" + report.getTitle() + "' chưa có chỉ số nào được trích xuất.");
-            }
+                if (requiresCompanyConfirmation(report.getDocumentContext())) {
+                    throw new BusinessValidationException(
+                            "COMPANY_MATCH_UNCONFIRMED",
+                            "Báo cáo '" + report.getTitle() + "' yêu cầu xác nhận công ty mục tiêu trước khi nộp cho Manager."
+                    );
+                }
+                
+                long reportMetricCount = research.getMetrics() != null ? research.getMetrics().stream()
+                        .filter(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()))
+                        .count() : 0;
+                if (reportMetricCount == 0) {
+                    throw new BusinessValidationException("NO_METRICS", "Báo cáo '" + report.getTitle() + "' chưa có chỉ số nào được trích xuất.");
+                }
 
-            // Check for unverified metrics in THIS report - all metrics must be VERIFIED before submit
-            boolean hasUnverified = research.getMetrics().stream()
-                    .filter(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()))
-                    .anyMatch(m -> m.getVerificationStatus() != MetricVerificationStatus.VERIFIED);
-            if (hasUnverified) {
-                throw new BusinessValidationException("UNVERIFIED_FIELDS", "Không thể nộp báo cáo '" + report.getTitle() + "' do còn chỉ số chưa được xác thực. Vui lòng xác thực tất cả các chỉ số trước khi nộp cho Manager.");
+                // Check for unverified metrics in THIS report - all AI-extracted metrics must be VERIFIED before submit
+                boolean hasUnverified = research.getMetrics() != null && research.getMetrics().stream()
+                        .filter(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()))
+                        .filter(m -> m.getInputMethod() != MetricInputMethod.MANUAL)
+                        .anyMatch(m -> m.getVerificationStatus() != MetricVerificationStatus.VERIFIED);
+                if (hasUnverified) {
+                    throw new BusinessValidationException("UNVERIFIED_FIELDS", "Không thể nộp báo cáo '" + report.getTitle() + "' do còn chỉ số chưa được xác thực. Vui lòng xác thực tất cả các chỉ số trước khi nộp cho Manager.");
+                }
             }
 
             // Set review status to PENDING_REVIEW for all selected reports
             report.setReviewStatus(FinancialReportReviewStatus.PENDING_REVIEW);
+            report.setReviewComment(null);
+            report.setReviewedBy(null);
+            report.setReviewedByName(null);
+            report.setReviewedAt(null);
         }
 
         research.setSubmittedReportIds(new ArrayList<>(selectedReportIds));
@@ -1187,41 +1681,65 @@ public class FinancialResearchService {
             throw new BusinessValidationException("This submission is no longer available for review.");
         }
 
+        com.apms.domain.project.ProjectTaskSubmission activeSub = activeSubs.get(0);
+        com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new BusinessValidationException("Task not found"));
+
         FinancialReportEntry report = research.getReports().stream()
                 .filter(r -> r.getId().equals(reportId))
                 .findFirst()
                 .orElseThrow(() -> new BusinessValidationException("Report not found"));
 
-        com.apms.domain.project.ProjectTaskSubmission activeSub = activeSubs.get(0);
+        // Tighten report review validation: decision allowed only when report is PENDING_REVIEW or null
+        boolean reviewable = report.getReviewStatus() == null
+                || report.getReviewStatus() == FinancialReportReviewStatus.PENDING_REVIEW;
+        if (!reviewable) {
+            throw new BusinessValidationException("This report has already been reviewed in the current review cycle.");
+        }
+
+        // Validate package membership
         if (activeSub.getTargetItemIdList() != null && !activeSub.getTargetItemIdList().isEmpty()) {
             research.setSubmittedReportIds(new ArrayList<>(activeSub.getTargetItemIdList()));
-            research = researchRepository.save(research);
-        } else if (research.getSubmittedReportIds() == null || research.getSubmittedReportIds().isEmpty()) {
+            if (!activeSub.getTargetItemIdList().contains(reportId)) {
+                throw new BusinessValidationException("Report is not included in the current submission package.");
+            }
+        } else if (research.getSubmittedReportIds() != null && !research.getSubmittedReportIds().isEmpty()) {
+            if (!research.getSubmittedReportIds().contains(reportId)) {
+                throw new BusinessValidationException("Report is not included in the current submission package.");
+            }
+        } else {
             List<String> autoIds = research.getReports() != null
                     ? research.getReports().stream().map(FinancialReportEntry::getId).collect(Collectors.toList())
                     : new ArrayList<>();
             research.setSubmittedReportIds(autoIds);
-            research = researchRepository.save(research);
-        }
-
-        if (research.getSubmittedReportIds() != null && !research.getSubmittedReportIds().contains(reportId)) {
-            throw new BusinessValidationException("Report is not included in the current submission package.");
         }
 
         if (request.getStatus() == FinancialReportReviewStatus.APPROVED) {
-            if (report.getExtractionStatus() != ExtractionStatus.EXTRACTED && report.getExtractionStatus() != ExtractionStatus.NEEDS_REVIEW) {
-                throw new BusinessValidationException("Cannot approve report that has not been extracted.");
-            }
-            boolean hasUnverified = research.getMetrics().stream()
-                    .filter(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()))
-                    .anyMatch(m -> m.getQualityStatus() == MetricQualityStatus.NEEDS_REVIEW && m.getVerificationStatus() == MetricVerificationStatus.UNVERIFIED);
-            if (hasUnverified) {
-                throw new BusinessValidationException("Cannot approve report with unverified metrics that need review.");
+            if (report.getDataEntryMethod() == FinancialDataEntryMethod.MANUAL) {
+                long reportMetricCount = research.getMetrics() != null ? research.getMetrics().stream()
+                        .filter(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()))
+                        .count() : 0;
+                if (reportMetricCount == 0) {
+                    throw new BusinessValidationException("Cannot approve manual report without metrics.");
+                }
+            } else {
+                if (report.getExtractionStatus() != ExtractionStatus.EXTRACTED && report.getExtractionStatus() != ExtractionStatus.NEEDS_REVIEW) {
+                    throw new BusinessValidationException("Cannot approve report that has not been extracted.");
+                }
+                boolean hasUnverified = research.getMetrics() != null && research.getMetrics().stream()
+                        .filter(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()))
+                        .filter(m -> m.getInputMethod() != MetricInputMethod.MANUAL)
+                        .anyMatch(m -> m.getQualityStatus() == MetricQualityStatus.NEEDS_REVIEW && m.getVerificationStatus() == MetricVerificationStatus.UNVERIFIED);
+                if (hasUnverified) {
+                    throw new BusinessValidationException("Cannot approve report with unverified metrics that need review.");
+                }
             }
         } else if (request.getStatus() == FinancialReportReviewStatus.CHANGES_REQUESTED) {
             if (!org.springframework.util.StringUtils.hasText(request.getReason())) {
                 throw new BusinessValidationException("Reason is required when requesting changes.");
             }
+        } else {
+            throw new BusinessValidationException("Invalid review decision status: " + request.getStatus());
         }
 
         Long reviewerId = getCurrentUserId();
@@ -1237,58 +1755,75 @@ public class FinancialResearchService {
         report.setReviewedAt(LocalDateTime.now());
         report.setReviewComment(request.getReason());
 
-        boolean currentSubmissionReviewed = true;
+        // Recalculate parent review state across reports, research, task, and submission
+        recalculateReviewState(research, task, activeSub, reviewerId);
 
-        for (String subReportId : research.getSubmittedReportIds()) {
-            FinancialReportEntry subReport = research.getReports().stream().filter(r -> r.getId().equals(subReportId)).findFirst().orElse(null);
-            if (subReport == null || subReport.getReviewStatus() == null || subReport.getReviewStatus() == FinancialReportReviewStatus.PENDING_REVIEW) {
-                currentSubmissionReviewed = false;
-                break;
-            }
+        research = researchRepository.save(research);
+        String action = request.getStatus() == FinancialReportReviewStatus.APPROVED ? "Approved" : "Requested changes for";
+        auditLogService.log(reviewerId, AuditAction.FINANCIAL_RESEARCH_CHANGES_REQUESTED, "ProjectTask", taskId.toString(), action + " report " + report.getTitle());
+        return toResponse(research);
+    }
+
+    private void recalculateReviewState(
+            FinancialResearch research,
+            com.apms.domain.project.ProjectTask task,
+            com.apms.domain.project.ProjectTaskSubmission activeSubmission,
+            Long reviewerId
+    ) {
+        List<FinancialReportEntry> allReports = research.getReports() != null
+                ? research.getReports()
+                : Collections.emptyList();
+
+        // 1. Determine reports in current active review package
+        Set<String> packageReportIds = new HashSet<>();
+        if (activeSubmission != null && activeSubmission.getTargetItemIdList() != null && !activeSubmission.getTargetItemIdList().isEmpty()) {
+            packageReportIds.addAll(activeSubmission.getTargetItemIdList());
+        } else if (research.getSubmittedReportIds() != null && !research.getSubmittedReportIds().isEmpty()) {
+            packageReportIds.addAll(research.getSubmittedReportIds());
         }
 
-        final Set<String> submittedReportIdSet = new HashSet<>(
-                research.getSubmittedReportIds() != null ? research.getSubmittedReportIds() : Collections.emptyList());
+        List<FinancialReportEntry> reviewPackageReports = allReports.stream()
+                .filter(r -> packageReportIds.isEmpty() || packageReportIds.contains(r.getId()))
+                .collect(Collectors.toList());
 
-        boolean anyChangesRequested = research.getReports().stream()
-                .filter(r -> submittedReportIdSet.isEmpty() || submittedReportIdSet.contains(r.getId()))
+        // 2. Pending reports check (scoped strictly to current review package)
+        boolean hasPending = reviewPackageReports.stream()
+                .anyMatch(r -> r.getReviewStatus() == null || r.getReviewStatus() == FinancialReportReviewStatus.PENDING_REVIEW);
+
+        // 3. Changes requested check (across all reports in the research package)
+        boolean hasChangesRequested = allReports.stream()
                 .anyMatch(r -> r.getReviewStatus() == FinancialReportReviewStatus.CHANGES_REQUESTED);
 
-        if (anyChangesRequested) {
-            research.setStatus(FinancialResearchStatus.CHANGES_REQUESTED);
-            com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(taskId).orElse(null);
-            if (task != null) {
-                task.setStatus(com.apms.common.enums.TaskStatus.IN_PROGRESS);
+        // 4. All approved check (every report in research package must be approved)
+        boolean allApproved = !allReports.isEmpty() && allReports.stream()
+                .allMatch(r -> r.getReviewStatus() == FinancialReportReviewStatus.APPROVED);
+
+        LocalDateTime now = LocalDateTime.now();
+        com.apms.domain.user.Account reviewerAccount = accountRepository != null && reviewerId != null
+                ? accountRepository.findById(reviewerId).orElse(null)
+                : null;
+
+        // 5. Apply precedence rules
+        if (hasPending) {
+            // Manager has not finished reviewing all submitted reports in the current package.
+            research.setStatus(FinancialResearchStatus.SUBMITTED);
+            if (task != null && task.getStatus() != com.apms.common.enums.TaskStatus.IN_REVIEW) {
+                task.setStatus(com.apms.common.enums.TaskStatus.IN_REVIEW);
                 task.setCompletedAt(null);
                 projectTaskRepository.save(task);
             }
-            com.apms.domain.user.Account reviewerAccount = accountRepository != null ? accountRepository.findById(reviewerId).orElse(null) : null;
-            LocalDateTime now = LocalDateTime.now();
-            String reasonText = org.springframework.util.StringUtils.hasText(request.getReason()) ? request.getReason() : report.getReviewComment();
-            submissionRepository.findByProjectTask_Id(taskId).stream()
-                    .filter(s -> s.getStatus() == com.apms.common.enums.SubmissionStatus.IN_REVIEW
-                            || s.getStatus() == com.apms.common.enums.SubmissionStatus.CHANGES_REQUESTED)
-                    .forEach(s -> {
-                        s.setStatus(com.apms.common.enums.SubmissionStatus.CHANGES_REQUESTED);
-                        s.setReviewedByAccount(reviewerAccount);
-                        s.setReviewedAt(now);
-                        if (org.springframework.util.StringUtils.hasText(reasonText)) {
-                            s.setReviewComment(reasonText);
-                        }
-                        submissionRepository.save(s);
-                    });
-        } else if (currentSubmissionReviewed) {
-            com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(taskId).orElseThrow();
-            boolean anyPending = research.getReports().stream()
-                    .filter(r -> submittedReportIdSet.contains(r.getId()))
-                    .anyMatch(r -> r.getReviewStatus() == FinancialReportReviewStatus.PENDING_REVIEW);
+            if (activeSubmission != null && activeSubmission.getStatus() != com.apms.common.enums.SubmissionStatus.IN_REVIEW) {
+                activeSubmission.setStatus(com.apms.common.enums.SubmissionStatus.IN_REVIEW);
+                submissionRepository.save(activeSubmission);
+            }
+        } else if (allApproved) {
+            // All reports across the research package are approved
+            research.setStatus(FinancialResearchStatus.APPROVED);
+            research.setReviewedBy(reviewerId);
+            research.setReviewedAt(now);
+            research.setReviewReason("All financial reports approved");
 
-            boolean anyApproved = research.getReports().stream()
-                    .filter(r -> submittedReportIdSet.contains(r.getId()))
-                    .anyMatch(r -> r.getReviewStatus() == FinancialReportReviewStatus.APPROVED);
-
-            if (!anyPending && anyApproved) {
-                research.setStatus(FinancialResearchStatus.APPROVED);
+            if (task != null) {
                 String targetProfileId = task.getTargetCompanyProfileId() != null
                         ? task.getTargetCompanyProfileId()
                         : (task.getProject() != null ? task.getProject().getTargetCompanyProfileId() : null);
@@ -1296,32 +1831,58 @@ public class FinancialResearchService {
                     research.setCompanyProfileId(targetProfileId);
                 }
                 task.setStatus(com.apms.common.enums.TaskStatus.DONE);
-                com.apms.domain.user.Account reviewerAccount = accountRepository != null ? accountRepository.findById(reviewerId).orElse(null) : null;
-                LocalDateTime now = LocalDateTime.now();
-                submissionRepository.findByProjectTask_Id(taskId).stream()
-                        .filter(s -> s.getStatus() == com.apms.common.enums.SubmissionStatus.IN_REVIEW
-                                || s.getStatus() == com.apms.common.enums.SubmissionStatus.APPROVED)
-                        .forEach(s -> {
-                            s.setStatus(com.apms.common.enums.SubmissionStatus.APPROVED);
-                            s.setReviewedByAccount(reviewerAccount);
-                            s.setReviewedAt(now);
-                            if (org.springframework.util.StringUtils.hasText(request.getReason())) {
-                                s.setReviewComment(request.getReason());
-                            } else if (!org.springframework.util.StringUtils.hasText(s.getReviewComment())) {
-                                s.setReviewComment("Financial reports approved");
-                            }
-                            submissionRepository.save(s);
-                        });
+                task.setCompletedAt(now);
                 projectTaskRepository.save(task);
             }
-        } else {
-            research.setStatus(FinancialResearchStatus.SUBMITTED);
-        }
 
-        research = researchRepository.save(research);
-        String action = request.getStatus() == FinancialReportReviewStatus.APPROVED ? "Approved" : "Requested changes for";
-        auditLogService.log(reviewerId, AuditAction.FINANCIAL_RESEARCH_CHANGES_REQUESTED, "ProjectTask", taskId.toString(), action + " report " + report.getTitle());
-        return toResponse(research);
+            List<com.apms.domain.project.ProjectTaskSubmission> subs = submissionRepository.findByProjectTask_Id(task != null ? task.getId() : research.getTaskId());
+            for (com.apms.domain.project.ProjectTaskSubmission s : subs) {
+                if (s.getStatus() == com.apms.common.enums.SubmissionStatus.IN_REVIEW || s.getStatus() == com.apms.common.enums.SubmissionStatus.APPROVED) {
+                    s.setStatus(com.apms.common.enums.SubmissionStatus.APPROVED);
+                    s.setReviewedByAccount(reviewerAccount);
+                    s.setReviewedAt(now);
+                    s.setReviewComment("All financial reports approved");
+                    submissionRepository.save(s);
+                }
+            }
+        } else if (hasChangesRequested) {
+            // No pending reports remain in package, and at least one report has CHANGES_REQUESTED
+            research.setStatus(FinancialResearchStatus.CHANGES_REQUESTED);
+            research.setReviewedBy(reviewerId);
+            research.setReviewedAt(now);
+
+            // Generate aggregated feedback from ALL reports currently marked CHANGES_REQUESTED
+            List<FinancialReportEntry> changedReports = allReports.stream()
+                    .filter(r -> r.getReviewStatus() == FinancialReportReviewStatus.CHANGES_REQUESTED)
+                    .collect(Collectors.toList());
+
+            String aggregatedFeedback = changedReports.stream()
+                    .map(r -> {
+                        String title = org.springframework.util.StringUtils.hasText(r.getTitle()) ? r.getTitle() : "Report";
+                        String comment = org.springframework.util.StringUtils.hasText(r.getReviewComment()) ? r.getReviewComment() : "Changes requested";
+                        return title + ": " + comment;
+                    })
+                    .collect(Collectors.joining("\n"));
+
+            research.setReviewReason(aggregatedFeedback);
+
+            if (task != null) {
+                task.setStatus(com.apms.common.enums.TaskStatus.IN_PROGRESS);
+                task.setCompletedAt(null);
+                projectTaskRepository.save(task);
+            }
+
+            List<com.apms.domain.project.ProjectTaskSubmission> subs = submissionRepository.findByProjectTask_Id(task != null ? task.getId() : research.getTaskId());
+            for (com.apms.domain.project.ProjectTaskSubmission s : subs) {
+                if (s.getStatus() == com.apms.common.enums.SubmissionStatus.IN_REVIEW || s.getStatus() == com.apms.common.enums.SubmissionStatus.CHANGES_REQUESTED) {
+                    s.setStatus(com.apms.common.enums.SubmissionStatus.CHANGES_REQUESTED);
+                    s.setReviewedByAccount(reviewerAccount);
+                    s.setReviewedAt(now);
+                    s.setReviewComment(aggregatedFeedback);
+                    submissionRepository.save(s);
+                }
+            }
+        }
     }
 
     @Transactional(readOnly = true)
@@ -1584,6 +2145,20 @@ public class FinancialResearchService {
         }).collect(Collectors.toList()) : new ArrayList<>();
 
         List<FinancialReportEntry> filteredReports = domain.getReports() != null ? new ArrayList<>(domain.getReports()) : new ArrayList<>();
+        for (FinancialReportEntry rep : filteredReports) {
+            if (rep.getFileName() == null && rep.getDocumentId() != null) {
+                if (rep.getDocumentContext() != null && rep.getDocumentContext().getDocumentName() != null) {
+                    rep.setFileName(rep.getDocumentContext().getDocumentName());
+                } else {
+                    try {
+                        RawDocument doc = documentRepository.findById(rep.getDocumentId()).orElse(null);
+                        if (doc != null && doc.getSource() != null) {
+                            rep.setFileName(doc.getSource().getFileName());
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
         // Removed backend filtering of non-submitted reports.
         // The frontend already filters based on submittedReportIds to split CURRENT SUBMISSION and PREVIOUSLY APPROVED.
 
@@ -1643,15 +2218,75 @@ public class FinancialResearchService {
     }
 
     private Long getCurrentUserId() {
-        Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
-        if (principal instanceof UserDetails) {
-            try {
-                java.lang.reflect.Method getIdMethod = principal.getClass().getMethod("getId");
-                return (Long) getIdMethod.invoke(principal);
-            } catch (Exception e) {
-                log.warn("Could not extract user id", e);
+        if (SecurityContextHolder.getContext() != null && SecurityContextHolder.getContext().getAuthentication() != null) {
+            Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+            if (principal instanceof UserDetails) {
+                try {
+                    java.lang.reflect.Method getIdMethod = principal.getClass().getMethod("getId");
+                    return (Long) getIdMethod.invoke(principal);
+                } catch (Exception e) {
+                    log.warn("Could not extract user id", e);
+                }
             }
         }
         return 1L; // fallback
+    }
+
+    public Integer resolveTaskTargetYear(Long taskId, FinancialResearch research) {
+        if (research != null && research.getTargetResearchPeriod() != null && research.getTargetResearchPeriod().getYear() != null) {
+            return research.getTargetResearchPeriod().getYear();
+        }
+
+        try {
+            com.apms.domain.project.ProjectTask task = projectTaskRepository.findWithProjectById(taskId)
+                    .or(() -> projectTaskRepository.findById(taskId))
+                    .orElse(null);
+            if (task != null) {
+                Integer yearFromText = extractYearFromText(task.getTitle());
+                if (yearFromText != null) return yearFromText;
+
+                yearFromText = extractYearFromText(task.getDescription());
+                if (yearFromText != null) return yearFromText;
+
+                if (task.getDueDate() != null) {
+                    return task.getDueDate().getYear();
+                }
+
+                if (task.getProject() != null && task.getProject().getPlannedEndDate() != null) {
+                    return task.getProject().getPlannedEndDate().getYear();
+                }
+
+                if (task.getProject() != null) {
+                    yearFromText = extractYearFromText(task.getProject().getProjectName());
+                    if (yearFromText != null) return yearFromText;
+
+                    yearFromText = extractYearFromText(task.getProject().getDescription());
+                    if (yearFromText != null) return yearFromText;
+
+                    if (task.getProject().getCreatedAt() != null) {
+                        return task.getProject().getCreatedAt().getYear();
+                    }
+                }
+
+                if (task.getCreatedAt() != null) {
+                    return task.getCreatedAt().getYear();
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Could not resolve target year from task {}: {}", taskId, e.getMessage());
+        }
+
+        return null;
+    }
+
+    private Integer extractYearFromText(String text) {
+        if (text == null || text.isBlank()) return null;
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("\\b(20\\d{2})\\b").matcher(text);
+        if (matcher.find()) {
+            try {
+                return Integer.parseInt(matcher.group(1));
+            } catch (NumberFormatException ignored) {}
+        }
+        return null;
     }
 }

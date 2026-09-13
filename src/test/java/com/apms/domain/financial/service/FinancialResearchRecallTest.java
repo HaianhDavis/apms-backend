@@ -44,6 +44,8 @@ class FinancialResearchRecallTest {
     @Mock
     private FinancialResearchRepository researchRepository;
     @Mock
+    private com.apms.domain.document.service.DocumentService documentService;
+    @Mock
     private ProjectTaskRepository projectTaskRepository;
     @Mock
     private ProjectTaskSubmissionRepository submissionRepository;
