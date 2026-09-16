@@ -58,6 +58,15 @@ public class Notification {
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String rejectReason;
 
+    @Column(name = "company_profile_id", length = 100)
+    private String companyProfileId;
+
+    @Column(name = "entity_id", length = 100)
+    private String entityId;
+
+    @Column(name = "entity_type", length = 50)
+    private String entityType;
+
     @Builder.Default
     @Column(nullable = false)
     private Boolean isRead = false;

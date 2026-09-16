@@ -12,6 +12,8 @@ import com.apms.domain.notification.dto.RegisterFcmTokenRequest;
 import com.apms.domain.notification.dto.SendNotificationRequest;
 import com.apms.domain.notification.repository.sql.FcmDeviceTokenRepository;
 import com.apms.domain.notification.repository.sql.NotificationRepository;
+import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.profile.assessment.CompanyRelationshipAssessment;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectTask;
 import com.apms.domain.project.ProjectTaskSubmission;
@@ -510,6 +512,217 @@ public class NotificationService {
                 )));
     }
 
+    @Transactional
+    public void notifyCompanyProfileUpdated(CompanyProfile profile, String versionIdentity, Long actorId) {
+        if (profile == null) {
+            return;
+        }
+
+        String identity = StringUtils.hasText(versionIdentity) ? versionIdentity : profile.getVersionLabel();
+        if (!StringUtils.hasText(identity)) {
+            identity = "V1.0";
+        }
+
+        String companyProfileId = profile.getId() != null ? profile.getId() : profile.getCompanyId();
+        String companyName = null;
+        if (profile.getIdentity() != null) {
+            if (StringUtils.hasText(profile.getIdentity().getTradeName())) {
+                companyName = profile.getIdentity().getTradeName();
+            } else if (StringUtils.hasText(profile.getIdentity().getLegalName())) {
+                companyName = profile.getIdentity().getLegalName();
+            }
+        }
+        if (!StringUtils.hasText(companyName)) {
+            companyName = profile.getCompanyId();
+        }
+
+        List<Account> owners = accountRepository.findActiveAccountsByRole(SystemRole.BUSINESS_OWNER);
+        if (owners == null || owners.isEmpty()) {
+            log.debug("No active Business Owners to notify for profile update: {}", companyProfileId);
+            return;
+        }
+
+        Account sender = actorId != null ? accountRepository.findById(actorId).orElse(null) : null;
+        String title = "Hồ sơ doanh nghiệp được cập nhật";
+        String message = String.format("Hồ sơ doanh nghiệp \"%s\" đã được cập nhật phiên bản mới (%s).", companyName, identity);
+
+        for (Account owner : owners) {
+            if (actorId != null && owner.getId().equals(actorId)) {
+                continue;
+            }
+
+            if (notificationRepository.existsLifecycleNotification(owner.getId(), "COMPANY_PROFILE_UPDATED", identity, companyProfileId)) {
+                log.debug("Notification already exists for owner={}, profile={}, version={}", owner.getId(), companyProfileId, identity);
+                continue;
+            }
+
+            Notification notification = Notification.builder()
+                    .recipientAccount(owner)
+                    .senderAccount(sender)
+                    .title(title)
+                    .message(message)
+                    .type(NotificationType.SYSTEM)
+                    .actionType("COMPANY_PROFILE_UPDATED")
+                    .companyProfileId(companyProfileId)
+                    .entityId(identity)
+                    .entityType("COMPANY_PROFILE")
+                    .isRead(false)
+                    .isDeleted(false)
+                    .build();
+
+            notification = notificationRepository.save(notification);
+
+            Notification savedNotification = notification;
+            Account savedRecipient = owner;
+            String pushMessage = message;
+            String finalCompanyProfileId = companyProfileId;
+            String finalIdentity = identity;
+
+            runAfterCommit(() -> pushToUser(
+                    savedRecipient.getId(),
+                    title,
+                    pushMessage,
+                    java.util.Map.of(
+                            "type", "COMPANY_PROFILE_UPDATED",
+                            "notificationId", String.valueOf(savedNotification.getId()),
+                            "companyProfileId", finalCompanyProfileId,
+                            "entityId", finalIdentity
+                    )));
+        }
+    }
+
+    @Transactional
+    public void notifyRelationshipAssessmentCompleted(CompanyRelationshipAssessment assessment, Long actorId) {
+        if (assessment == null) {
+            return;
+        }
+
+        String entityId = String.valueOf(assessment.getId());
+        String companyProfileId = assessment.getCompanyProfileId();
+        List<Account> owners = accountRepository.findActiveAccountsByRole(SystemRole.BUSINESS_OWNER);
+        if (owners == null || owners.isEmpty()) {
+            log.debug("No active Business Owners to notify for assessment completion: {}", assessment.getId());
+            return;
+        }
+
+        Account sender = actorId != null ? accountRepository.findById(actorId).orElse(null) : null;
+        String title = "Đánh giá độ thân thiết đã hoàn thành";
+        String message = String.format("Đánh giá độ thân thiết v%d cho công ty \"%s\" đã được Manager hoàn thành.",
+                assessment.getVersionNumber(), companyProfileId);
+
+        for (Account owner : owners) {
+            if (actorId != null && owner.getId().equals(actorId)) {
+                continue;
+            }
+
+            if (notificationRepository.existsLifecycleNotification(owner.getId(), "RELATIONSHIP_ASSESSMENT_COMPLETED", entityId, companyProfileId)) {
+                log.debug("Notification already exists for owner={}, assessment={}", owner.getId(), assessment.getId());
+                continue;
+            }
+
+            Notification notification = Notification.builder()
+                    .recipientAccount(owner)
+                    .senderAccount(sender)
+                    .title(title)
+                    .message(message)
+                    .type(NotificationType.SYSTEM)
+                    .actionType("RELATIONSHIP_ASSESSMENT_COMPLETED")
+                    .companyProfileId(companyProfileId)
+                    .entityId(entityId)
+                    .entityType("RELATIONSHIP_ASSESSMENT")
+                    .isRead(false)
+                    .isDeleted(false)
+                    .build();
+
+            notification = notificationRepository.save(notification);
+
+            Notification savedNotification = notification;
+            Account savedRecipient = owner;
+            String pushMessage = message;
+
+            runAfterCommit(() -> pushToUser(
+                    savedRecipient.getId(),
+                    title,
+                    pushMessage,
+                    java.util.Map.of(
+                            "type", "RELATIONSHIP_ASSESSMENT_COMPLETED",
+                            "notificationId", String.valueOf(savedNotification.getId()),
+                            "companyProfileId", companyProfileId,
+                            "entityId", entityId
+                    )));
+        }
+    }
+
+    @Transactional
+    public void notifyRelationshipAssessmentOwnerAdjusted(CompanyRelationshipAssessment assessment, CompanyRelationshipAssessment sourceAssessment, Long actorId) {
+        if (assessment == null) {
+            return;
+        }
+
+        Long managerId = sourceAssessment != null && sourceAssessment.getManagerAccountId() != null
+                ? sourceAssessment.getManagerAccountId()
+                : assessment.getManagerAccountId();
+
+        if (managerId == null) {
+            log.warn("Cannot find source manager account for Owner Adjustment assessment={}", assessment.getId());
+            return;
+        }
+
+        if (actorId != null && managerId.equals(actorId)) {
+            return;
+        }
+
+        Account recipient = accountRepository.findById(managerId).orElse(null);
+        if (recipient == null || Boolean.FALSE.equals(recipient.getIsActive())) {
+            log.warn("Manager account {} not found or inactive for Owner Adjustment assessment={}", managerId, assessment.getId());
+            return;
+        }
+
+        String entityId = String.valueOf(assessment.getId());
+        String companyProfileId = assessment.getCompanyProfileId();
+
+        if (notificationRepository.existsLifecycleNotification(recipient.getId(), "RELATIONSHIP_ASSESSMENT_OWNER_ADJUSTED", entityId, companyProfileId)) {
+            log.debug("Notification already exists for manager={}, assessment={}", recipient.getId(), assessment.getId());
+            return;
+        }
+
+        Account sender = actorId != null ? accountRepository.findById(actorId).orElse(null) : null;
+        String title = "Đánh giá độ thân thiết đã được Owner điều chỉnh";
+        String message = String.format("Business Owner đã hoàn thành điều chỉnh đánh giá độ thân thiết v%d cho công ty \"%s\".",
+                assessment.getVersionNumber(), companyProfileId);
+
+        Notification notification = Notification.builder()
+                .recipientAccount(recipient)
+                .senderAccount(sender)
+                .title(title)
+                .message(message)
+                .type(NotificationType.SYSTEM)
+                .actionType("RELATIONSHIP_ASSESSMENT_OWNER_ADJUSTED")
+                .companyProfileId(companyProfileId)
+                .entityId(entityId)
+                .entityType("RELATIONSHIP_ASSESSMENT")
+                .isRead(false)
+                .isDeleted(false)
+                .build();
+
+        notification = notificationRepository.save(notification);
+
+        Notification savedNotification = notification;
+        Account savedRecipient = recipient;
+        String pushMessage = message;
+
+        runAfterCommit(() -> pushToUser(
+                savedRecipient.getId(),
+                title,
+                pushMessage,
+                java.util.Map.of(
+                        "type", "RELATIONSHIP_ASSESSMENT_OWNER_ADJUSTED",
+                        "notificationId", String.valueOf(savedNotification.getId()),
+                        "companyProfileId", companyProfileId,
+                        "entityId", entityId
+                )));
+    }
+
     private Notification createSystemNotification(Account recipient, Account sender, String title, String message, NotificationType type) {
         return createSystemNotification(recipient, sender, title, message, type, null, null, null, null);
     }
@@ -616,6 +829,9 @@ public class NotificationService {
                 .actionType(notification.getActionType())
                 .documentId(notification.getDocumentId())
                 .rejectReason(notification.getRejectReason())
+                .companyProfileId(notification.getCompanyProfileId())
+                .entityId(notification.getEntityId())
+                .entityType(notification.getEntityType())
                 .isRead(notification.getIsRead())
                 .readAt(notification.getReadAt())
                 .createdAt(notification.getCreatedAt())

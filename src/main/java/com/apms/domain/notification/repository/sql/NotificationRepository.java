@@ -28,4 +28,19 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
             @Param("taskId") Long taskId,
             @Param("submissionId") Long submissionId,
             @Param("documentId") String documentId);
+
+    @Query("""
+            select case when count(n) > 0 then true else false end
+            from Notification n
+            where n.recipientAccount.id = :recipientId
+              and n.actionType = :actionType
+              and n.entityId = :entityId
+              and (:companyProfileId is null or n.companyProfileId = :companyProfileId)
+              and n.isDeleted = false
+            """)
+    boolean existsLifecycleNotification(
+            @Param("recipientId") Long recipientId,
+            @Param("actionType") String actionType,
+            @Param("entityId") String entityId,
+            @Param("companyProfileId") String companyProfileId);
 }

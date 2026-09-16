@@ -6,7 +6,9 @@ import com.apms.common.exception.BusinessValidationException;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.candidate.CompanyCandidate;
 import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
+import com.apms.domain.notification.service.NotificationService;
 import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.profile.CompanyProfileVersion;
 import com.apms.domain.profile.dto.FinancialReportRequest;
 import com.apms.domain.profile.dto.ProfileResponse;
 import com.apms.domain.profile.dto.ProfileSourcesResponse;
@@ -70,6 +72,8 @@ public class ProfileService {
     private final CompanyProfileVersionService versionService;
     private final com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository profileVersionRepository;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final com.apms.domain.profile.assessment.service.RelationshipClosenessAccessEvaluator relationshipClosenessAccessEvaluator;
+    private final NotificationService notificationService;
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER
@@ -844,8 +848,9 @@ public class ProfileService {
 
         profileRepository.save(profile);
 
+        CompanyProfileVersion savedVersion = null;
         try {
-            versionService.createAndSaveVersion(
+            savedVersion = versionService.createAndSaveVersion(
                     profile,
                     com.apms.domain.profile.enums.CompanyProfileChangeSource.MANAGER_MANUAL_EDIT,
                     changedFieldPaths,
@@ -884,6 +889,11 @@ public class ProfileService {
             } catch (Exception e) {
                 log.warn("Failed to write audit log for manager profile update on company {}: {}", companyId, e.getMessage());
             }
+        }
+
+        if (savedVersion != null) {
+            String versionIdentity = StringUtils.hasText(savedVersion.getId()) ? savedVersion.getId() : profile.getVersionLabel();
+            notificationService.notifyCompanyProfileUpdated(profile, versionIdentity, currentUser != null ? currentUser.getId() : null);
         }
 
         return toResponse(profile);
@@ -1278,6 +1288,7 @@ public class ProfileService {
 
         boolean canEdit = false;
         boolean canManageVisibility = false;
+        boolean canAccessRelationship = false;
         try {
             org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
             if (auth != null && auth.getPrincipal() instanceof UserDetailsImpl user) {
@@ -1291,6 +1302,8 @@ public class ProfileService {
                         canEdit = true;
                     }
                 }
+
+                canAccessRelationship = relationshipClosenessAccessEvaluator.canAccess(p, user);
             }
         } catch (Exception ignored) {}
 
@@ -1325,6 +1338,7 @@ public class ProfileService {
                 .canEditProfile(canEdit)
                 .canManageVisibility(canManageVisibility)
                 .canPublish(canPublish)
+                .canAccessRelationshipCloseness(canAccessRelationship)
                 .build();
     }
 
@@ -1368,43 +1382,8 @@ public class ProfileService {
                 .orElseThrow(() -> new ResourceNotFoundException("Company profile not found: " + companyId));
     }
 
-    private String resolveRelationshipType(String companyId) {
-        if (!StringUtils.hasText(companyId)) return null;
-        try {
-            String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
-            if (companyId.equals(ownerCompanyId)) return null; // It's the owner
-
-            String cypher = "MATCH (:Company {companyId: $ownerCompanyId})-[r]->(:Company {companyId: $companyId}) RETURN type(r) LIMIT 1";
-            java.util.List<String> types = new java.util.ArrayList<>(neo4jClient.query(cypher)
-                    .bind(ownerCompanyId).to("ownerCompanyId")
-                    .bind(companyId).to("companyId")
-                    .fetchAs(String.class)
-                    .all());
-            if (types != null && !types.isEmpty()) {
-                return types.get(0);
-            }
-        } catch (Exception e) {
-            log.debug("Failed to resolve Neo4j relationship for companyId {}: {}", companyId, e.getMessage());
-        }
-
-        // Fallback: check linked projects for targetRelationshipType
-        try {
-            java.util.Optional<CompanyProfile> profileOpt = profileRepository.findByCompanyId(companyId)
-                    .or(() -> profileRepository.findById(companyId));
-            if (profileOpt.isPresent() && profileOpt.get().getSourceRefs() != null && profileOpt.get().getSourceRefs().getProjectIds() != null) {
-                for (String pid : profileOpt.get().getSourceRefs().getProjectIds()) {
-                    try {
-                        Long pId = Long.parseLong(pid);
-                        java.util.Optional<Project> projOpt = projectRepository.findById(pId);
-                        if (projOpt.isPresent() && projOpt.get().getTargetRelationshipType() != null) {
-                            return projOpt.get().getTargetRelationshipType().name();
-                        }
-                    } catch (Exception ignored) {}
-                }
-            }
-        } catch (Exception ignored) {}
-
-        return null;
+    public String resolveRelationshipType(String companyId) {
+        return relationshipClosenessAccessEvaluator.resolveRelationshipType(companyId);
     }
 
     private CompanyProfile.Identity mapIdentity(CompanyCandidate.Identity i) {

@@ -63,6 +63,8 @@ class ProfileServiceOwnerFinancialTest {
     private TrackedCompanyCache trackedCompanyCache;
     @Mock
     private com.apms.domain.project.service.ProjectTargetProfileResolver projectTargetProfileResolver;
+    @Mock
+    private com.apms.domain.profile.assessment.service.RelationshipClosenessAccessEvaluator relationshipClosenessAccessEvaluator;
 
     @InjectMocks
     private ProfileService profileService;
@@ -125,7 +127,7 @@ class ProfileServiceOwnerFinancialTest {
         ProfileResponse response = profileService.upsertOwnerFinancialReport(
                 request("SUMMARY", 2025, ITEMS_JSON_2025));
 
-        assertThat(response.getVersion()).isEqualTo("4.0");
+        assertThat(response.getVersion()).isEqualTo("3.01");
         assertThat(profile.getFinancialReports()).hasSize(1);
         CompanyProfile.FinancialReport saved = profile.getFinancialReports().get(0);
         assertThat(saved.getReportType()).isEqualTo("SUMMARY");
@@ -168,7 +170,7 @@ class ProfileServiceOwnerFinancialTest {
         assertThat(updated2025.getItemsJson()).contains("\"value\":15000");
         assertThat(profile.getFinancialReports().stream()
                 .filter(report -> report.getReportYear() == 2024)).hasSize(1);
-        assertThat(response.getVersion()).isEqualTo("4.0");
+        assertThat(response.getVersion()).isEqualTo("3.01");
     }
 
     // TEST 4 (Service): reportType không nằm trong danh sách cho phép → lỗi, không save
@@ -232,7 +234,7 @@ class ProfileServiceOwnerFinancialTest {
                 report.getReportYear() == 2024 && "SUMMARY".equalsIgnoreCase(report.getReportType()));
         assertThat(profile.getFinancialReports()).anyMatch(report ->
                 report.getReportYear() == 2025 && "BALANCE_SHEET".equalsIgnoreCase(report.getReportType()));
-        assertThat(response.getVersion()).isEqualTo("4.0");
+        assertThat(response.getVersion()).isEqualTo("3.01");
         verify(profileRepository).save(profile);
     }
 

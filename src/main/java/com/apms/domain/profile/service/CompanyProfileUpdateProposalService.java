@@ -6,8 +6,10 @@ import com.apms.common.enums.SystemRole;
 import com.apms.common.exception.BusinessConflictException;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.audit.service.AuditLogService;
+import com.apms.domain.notification.service.NotificationService;
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
+import com.apms.domain.profile.CompanyProfileVersion;
 import com.apms.domain.profile.dto.CompanyProfileUpdateProposalResponse;
 import com.apms.domain.profile.dto.CreateCompanyProfileUpdateProposalRequest;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
@@ -21,6 +23,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import com.apms.domain.project.fieldapproval.ProfileProposalFieldAccessor;
@@ -41,6 +44,7 @@ public class CompanyProfileUpdateProposalService {
     private final com.apms.domain.user.repository.sql.UserProfileRepository userProfileRepository;
     private final CompanyProfileVersionService versionService;
     private final com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository versionRepository;
+    private final NotificationService notificationService;
 
     @Transactional
     public CompanyProfileUpdateProposalResponse createProposal(Long projectId, Long taskId, CreateCompanyProfileUpdateProposalRequest request) {
@@ -391,7 +395,7 @@ public class CompanyProfileUpdateProposalService {
 
             companyProfileRepository.save(companyProfile);
 
-            versionService.createAndSaveVersion(
+            CompanyProfileVersion version = versionService.createAndSaveVersion(
                     companyProfile,
                     com.apms.domain.profile.enums.CompanyProfileChangeSource.MONITORING_PROPOSAL_APPROVED,
                     proposal.getChangedFieldPaths(),
@@ -405,6 +409,11 @@ public class CompanyProfileUpdateProposalService {
                     proposal.getSourceDocumentIds(),
                     approverId
             );
+
+            if (version != null) {
+                String versionIdentity = StringUtils.hasText(version.getId()) ? version.getId() : companyProfile.getVersionLabel();
+                notificationService.notifyCompanyProfileUpdated(companyProfile, versionIdentity, approverId);
+            }
         } else {
             companyProfileRepository.save(companyProfile);
         }

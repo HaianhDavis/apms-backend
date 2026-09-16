@@ -21,6 +21,9 @@ public class NotificationResponse {
     private String actionType;
     private String documentId;
     private String rejectReason;
+    private String companyProfileId;
+    private String entityId;
+    private String entityType;
     private Boolean isRead;
     private LocalDateTime readAt;
     private LocalDateTime createdAt;
