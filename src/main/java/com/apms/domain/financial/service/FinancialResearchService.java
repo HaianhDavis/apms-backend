@@ -34,17 +34,27 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.profile.dto.CompanyIdentity;
+import com.apms.domain.profile.service.CompanyIdentityResolver;
+import com.apms.domain.profile.service.CompanyProfileAccessService;
+import com.apms.common.security.StaffCompanyScopeEvaluator;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class FinancialResearchService {
+
+    public static final Pattern FINANCIAL_NUMBER_PATTERN = Pattern.compile("^-?(?:\\d+|\\d{1,3}(?:,\\d{3})+)(?:\\.\\d+)?$");
 
     private final FinancialResearchRepository researchRepository;
     private final RawDocumentRepository documentRepository;
@@ -57,6 +67,9 @@ public class FinancialResearchService {
     private final AuditLogService auditLogService;
     private final com.apms.domain.user.repository.sql.UserProfileRepository userProfileRepository;
     private final com.apms.domain.user.repository.sql.AccountRepository accountRepository;
+    private final CompanyIdentityResolver companyIdentityResolver;
+    private final CompanyProfileAccessService companyProfileAccessService;
+    private final StaffCompanyScopeEvaluator companyScope;
 
     @Autowired
     @Lazy
@@ -895,14 +908,7 @@ public class FinancialResearchService {
             if (!StringUtils.hasText(req.getRawUnit())) {
                 throw new BusinessValidationException("Metric unit cannot be empty for " + req.getLabel());
             }
-            try {
-                NormalizedValue norm = normalizeValue(req.getRawValue(), req.getRawUnit());
-                if (norm.value == null) {
-                    throw new BusinessValidationException("Invalid numeric financial value: " + req.getRawValue());
-                }
-            } catch (Exception e) {
-                throw new BusinessValidationException("Invalid numeric financial value for " + req.getLabel() + ": " + req.getRawValue());
-            }
+            validateAndNormalizeFinancialNumber(req.getRawValue(), req.getLabel());
         }
 
         if (research.getMetrics() == null) {
@@ -927,7 +933,7 @@ public class FinancialResearchService {
                 }
             }
 
-            NormalizedValue norm = normalizeValue(req.getRawValue(), req.getRawUnit());
+            NormalizedValue norm = normalizeManualValue(req.getRawValue(), req.getRawUnit(), req.getLabel());
 
             String stmtType = req.getStatementType();
             if (stmtType == null && metricCode != null) {
@@ -1084,7 +1090,12 @@ public class FinancialResearchService {
                 .verificationStatus(null)
                 .build();
 
-        NormalizedValue norm = normalizeValue(request.getRawValue(), request.getRawUnit());
+        NormalizedValue norm;
+        if (StringUtils.hasText(request.getRawValue())) {
+            norm = normalizeManualValue(request.getRawValue(), request.getRawUnit(), request.getLabel());
+        } else {
+            norm = new NormalizedValue(null, request.getRawUnit());
+        }
         metric.setNormalizedValue(norm.value);
         metric.setNormalizedUnit(norm.unit);
 
@@ -1174,7 +1185,16 @@ public class FinancialResearchService {
             metric.setEvidence(request.getEvidence());
         }
         
-        NormalizedValue norm = normalizeValue(request.getRawValue(), request.getRawUnit());
+        NormalizedValue norm;
+        if (StringUtils.hasText(request.getRawValue())) {
+            if (metric.getInputMethod() == MetricInputMethod.MANUAL) {
+                norm = normalizeManualValue(request.getRawValue(), request.getRawUnit(), request.getLabel());
+            } else {
+                norm = normalizeValue(request.getRawValue(), request.getRawUnit());
+            }
+        } else {
+            norm = new NormalizedValue(null, request.getRawUnit());
+        }
         metric.setNormalizedValue(norm.value);
         metric.setNormalizedUnit(norm.unit);
         
@@ -1431,11 +1451,16 @@ public class FinancialResearchService {
             }
                     
             if (report.getDataEntryMethod() == FinancialDataEntryMethod.MANUAL) {
-                long reportMetricCount = research.getMetrics() != null ? research.getMetrics().stream()
+                List<FinancialMetric> reportMetrics = research.getMetrics() != null ? research.getMetrics().stream()
                         .filter(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()))
-                        .count() : 0;
-                if (reportMetricCount == 0) {
+                        .collect(Collectors.toList()) : Collections.emptyList();
+                if (reportMetrics.isEmpty()) {
                     throw new BusinessValidationException("NO_METRICS", "Báo cáo '" + report.getTitle() + "' chưa có chỉ số nào được nhập.");
+                }
+                for (FinancialMetric m : reportMetrics) {
+                    if (StringUtils.hasText(m.getRawValue())) {
+                        validateAndNormalizeFinancialNumber(m.getRawValue(), m.getLabel());
+                    }
                 }
             } else {
                 if (report.getExtractionStatus() != ExtractionStatus.EXTRACTED && report.getExtractionStatus() != ExtractionStatus.NEEDS_REVIEW) {
@@ -1602,37 +1627,99 @@ public class FinancialResearchService {
 
     @Transactional(readOnly = true)
     public List<FinancialResearchResponse> getApprovedFinancials(String companyProfileId) {
-        List<FinancialResearch> list = new ArrayList<>(researchRepository.findByCompanyProfileIdAndStatus(companyProfileId, FinancialResearchStatus.APPROVED));
-        
-        if (list.isEmpty()) {
-            List<com.apms.domain.project.ProjectTask> tasks = new ArrayList<>();
-            try {
-                tasks.addAll(projectTaskRepository.findByTargetCompanyProfileId(companyProfileId));
-                tasks.addAll(projectTaskRepository.findByProject_TargetCompanyProfileId(companyProfileId));
-            } catch (Exception e) {
-                log.warn("Failed to find tasks by target company profile id: {}", companyProfileId, e);
-            }
-            
-            if (!tasks.isEmpty()) {
-                for (com.apms.domain.project.ProjectTask pt : tasks) {
-                    researchRepository.findByTaskId(pt.getId()).ifPresent(r -> {
-                        if (r.getStatus() == FinancialResearchStatus.APPROVED) {
-                            if (list.stream().noneMatch(existing -> existing.getId().equals(r.getId()))) {
-                                list.add(r);
-                            }
-                        }
-                    });
+        if (!StringUtils.hasText(companyProfileId)) {
+            return Collections.emptyList();
+        }
+
+        // 1. Centralized company identity resolution
+        Optional<CompanyIdentity> identityOpt = companyIdentityResolver != null
+                ? companyIdentityResolver.resolve(companyProfileId)
+                : Optional.empty();
+
+        // 2. Authoritative Access Control Check
+        UserDetailsImpl currentUser = getCurrentUserDetails();
+        if (currentUser != null && identityOpt.isPresent()) {
+            CompanyProfile profile = identityOpt.get().getProfile();
+            if (profile != null) {
+                boolean isOwner = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_OWNER"));
+                boolean isAdmin = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+                boolean isManager = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DEVELOPMENT_MANAGER"));
+                boolean isStaff = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DEVELOPMENT_STAFF"));
+
+                if (isManager && !isAdmin && !isOwner) {
+                    if (companyProfileAccessService != null && !companyProfileAccessService.isManagerAuthorizedForCompany(profile, currentUser.getId())) {
+                        log.warn("Manager {} denied access to financials of company {}", currentUser.getId(), profile.getCompanyId());
+                        throw new AccessDeniedException("MANAGER_NOT_AUTHORIZED_FOR_COMPANY");
+                    }
+                } else if (isStaff && !isAdmin && !isOwner) {
+                    if (companyScope != null && !companyScope.canAccessCompany(identityOpt.get().getCanonicalCompanyId())) {
+                        log.warn("Staff {} denied access to financials of company {}", currentUser.getId(), profile.getCompanyId());
+                        throw new AccessDeniedException("STAFF_NOT_AUTHORIZED_FOR_COMPANY");
+                    }
                 }
             }
         }
 
-        return list.stream().map(r -> {
+        // 3. Resolve candidate identifiers (universal companyId and Mongo _id)
+        Set<String> candidateIds = new LinkedHashSet<>();
+        candidateIds.add(companyProfileId.trim());
+        if (identityOpt.isPresent()) {
+            candidateIds.addAll(identityOpt.get().allIdentifiers());
+        }
+
+        // 4. Query FinancialResearch by candidate identifiers with deduplication by research ID
+        Map<String, FinancialResearch> deduplicatedResearch = new LinkedHashMap<>();
+        List<FinancialResearch> directMatches = researchRepository.findByCompanyProfileIdInAndStatus(candidateIds, FinancialResearchStatus.APPROVED);
+        for (FinancialResearch r : directMatches) {
+            if (r != null && r.getId() != null) {
+                deduplicatedResearch.putIfAbsent(r.getId(), r);
+            }
+        }
+
+        // 5. Fallback: Search tasks by target company profile ID across candidate IDs
+        if (deduplicatedResearch.isEmpty()) {
+            Set<Long> seenTaskIds = new HashSet<>();
+            List<com.apms.domain.project.ProjectTask> tasks = new ArrayList<>();
+            for (String cid : candidateIds) {
+                try {
+                    List<com.apms.domain.project.ProjectTask> t1 = projectTaskRepository.findByTargetCompanyProfileId(cid);
+                    if (t1 != null) {
+                        for (var t : t1) {
+                            if (t != null && t.getId() != null && seenTaskIds.add(t.getId())) {
+                                tasks.add(t);
+                            }
+                        }
+                    }
+                    List<com.apms.domain.project.ProjectTask> t2 = projectTaskRepository.findByProject_TargetCompanyProfileId(cid);
+                    if (t2 != null) {
+                        for (var t : t2) {
+                            if (t != null && t.getId() != null && seenTaskIds.add(t.getId())) {
+                                tasks.add(t);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("Failed to find tasks by target company profile id: {}", cid, e);
+                }
+            }
+
+            for (com.apms.domain.project.ProjectTask pt : tasks) {
+                researchRepository.findByTaskId(pt.getId()).ifPresent(r -> {
+                    if (r.getStatus() == FinancialResearchStatus.APPROVED && r.getId() != null) {
+                        deduplicatedResearch.putIfAbsent(r.getId(), r);
+                    }
+                });
+            }
+        }
+
+        // 6. Filter only approved report entries and corresponding metrics; exclude research with 0 approved reports
+        return deduplicatedResearch.values().stream().map(r -> {
             List<FinancialReportEntry> approvedReports = r.getReports() != null
                     ? r.getReports().stream()
                             .filter(rep -> rep.getReviewStatus() == FinancialReportReviewStatus.APPROVED)
                             .collect(Collectors.toList())
                     : new ArrayList<>();
-            
+
             Set<String> approvedReportIds = approvedReports.stream().map(FinancialReportEntry::getId).collect(Collectors.toSet());
             Set<String> approvedDocIds = approvedReports.stream().map(FinancialReportEntry::getDocumentId).filter(Objects::nonNull).collect(Collectors.toSet());
 
@@ -1662,7 +1749,9 @@ public class FinancialResearchService {
                     .updatedAt(r.getUpdatedAt())
                     .build();
             return toResponse(clone);
-        }).collect(Collectors.toList());
+        })
+        .filter(resp -> resp.getReports() != null && !resp.getReports().isEmpty())
+        .collect(Collectors.toList());
     }
 
     @org.springframework.transaction.annotation.Transactional
@@ -2065,6 +2154,60 @@ public class FinancialResearchService {
         return upper.equals("VND") || upper.equals("USD") || upper.equals("PERCENT") || upper.equals("TIMES") || upper.equals("RATIO");
     }
 
+    public static BigDecimal validateAndNormalizeFinancialNumber(String rawValue, String metricLabel) {
+        if (!StringUtils.hasText(rawValue)) {
+            return null;
+        }
+        String trimmed = rawValue.trim();
+        if (!FINANCIAL_NUMBER_PATTERN.matcher(trimmed).matches()) {
+            throw new BusinessValidationException("INVALID_METRIC_VALUE",
+                    "Giá trị chỉ số tài chính phải là số" + (metricLabel != null && !metricLabel.isBlank() ? " (" + metricLabel + ")" : "") + ".");
+        }
+        String normalized = trimmed.replace(",", "");
+        try {
+            return new BigDecimal(normalized);
+        } catch (Exception e) {
+            throw new BusinessValidationException("INVALID_METRIC_VALUE",
+                    "Giá trị chỉ số tài chính phải là số" + (metricLabel != null && !metricLabel.isBlank() ? " (" + metricLabel + ")" : "") + ".");
+        }
+    }
+
+    private NormalizedValue applyUnitScale(BigDecimal bd, String rawUnit) {
+        if (!StringUtils.hasText(rawUnit)) {
+            return new NormalizedValue(bd, null);
+        }
+
+        String unitUpper = rawUnit.toUpperCase();
+        if (unitUpper.contains("MILLION_VND") || unitUpper.contains("TRI\u1EC7U \u0110\u1ED3NG")) {
+            return new NormalizedValue(bd.multiply(new BigDecimal("1000000")), "VND");
+        } else if (unitUpper.contains("BILLION_VND") || unitUpper.contains("T\u1EF7 \u0110\u1ED3NG")) {
+            return new NormalizedValue(bd.multiply(new BigDecimal("1000000000")), "VND");
+        } else if (unitUpper.contains("THOUSAND_VND") || unitUpper.contains("NGH\u00CCN \u0110\u1ED3NG")) {
+            return new NormalizedValue(bd.multiply(new BigDecimal("1000")), "VND");
+        } else if (unitUpper.contains("MILLION_USD")) {
+            return new NormalizedValue(bd.multiply(new BigDecimal("1000000")), "USD");
+        } else if (unitUpper.contains("PERCENT") || unitUpper.contains("%")) {
+            return new NormalizedValue(bd, "PERCENT");
+        } else if (unitUpper.contains("TIMES") || unitUpper.contains("L\u1EA6N")) {
+            return new NormalizedValue(bd, "TIMES");
+        } else if (unitUpper.contains("RATIO") || unitUpper.contains("T\u1EF6 L\u1EC6")) {
+            return new NormalizedValue(bd, "RATIO");
+        }
+
+        return new NormalizedValue(bd, rawUnit);
+    }
+
+    private NormalizedValue normalizeManualValue(String rawValue, String rawUnit, String metricLabel) {
+        if (!StringUtils.hasText(rawValue)) {
+            return new NormalizedValue(null, rawUnit);
+        }
+        BigDecimal bd = validateAndNormalizeFinancialNumber(rawValue, metricLabel);
+        if (bd == null) {
+            return new NormalizedValue(null, rawUnit);
+        }
+        return applyUnitScale(bd, rawUnit);
+    }
+
     private NormalizedValue normalizeValue(String rawValue, String rawUnit) {
         if (!StringUtils.hasText(rawValue)) {
             return new NormalizedValue(null, rawUnit);
@@ -2073,29 +2216,7 @@ public class FinancialResearchService {
         try {
             String cleanVal = rawValue.replaceAll("[^0-9.-]", "");
             BigDecimal bd = new BigDecimal(cleanVal);
-            
-            if (!StringUtils.hasText(rawUnit)) {
-                return new NormalizedValue(bd, null);
-            }
-
-            String unitUpper = rawUnit.toUpperCase();
-            if (unitUpper.contains("MILLION_VND") || unitUpper.contains("TRI\u1EC7U \u0110\u1ED3NG")) {
-                return new NormalizedValue(bd.multiply(new BigDecimal("1000000")), "VND");
-            } else if (unitUpper.contains("BILLION_VND") || unitUpper.contains("T\u1EF7 \u0110\u1ED3NG")) {
-                return new NormalizedValue(bd.multiply(new BigDecimal("1000000000")), "VND");
-            } else if (unitUpper.contains("THOUSAND_VND") || unitUpper.contains("NGH\u00CCN \u0110\u1ED3NG")) {
-                return new NormalizedValue(bd.multiply(new BigDecimal("1000")), "VND");
-            } else if (unitUpper.contains("MILLION_USD")) {
-                return new NormalizedValue(bd.multiply(new BigDecimal("1000000")), "USD");
-            } else if (unitUpper.contains("PERCENT") || unitUpper.contains("%")) {
-                return new NormalizedValue(bd, "PERCENT");
-            } else if (unitUpper.contains("TIMES") || unitUpper.contains("L\u1EA6N")) {
-                return new NormalizedValue(bd, "TIMES");
-            } else if (unitUpper.contains("RATIO") || unitUpper.contains("T\u1EF6 L\u1EC6")) {
-                return new NormalizedValue(bd, "RATIO");
-            }
-
-            return new NormalizedValue(bd, rawUnit);
+            return applyUnitScale(bd, rawUnit);
         } catch (Exception e) {
             log.warn("Failed to parse value: {}", rawValue);
             return new NormalizedValue(null, rawUnit);

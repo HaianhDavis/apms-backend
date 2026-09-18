@@ -571,4 +571,232 @@ class ContractResearchManualWorkflowTest {
         assertThat(updated.getExtractionStatus()).isEqualTo(ContractExtractionStatus.NOT_EXTRACTED);
         assertThat(updated.getCommonData()).isNull();
     }
+
+    // --- DATE VALIDATION TESTS ---
+
+    @Test
+    @DisplayName("Date Validation Test 1: signing = 2026-09-17, effective = 2026-09-17, expiry = 2026-09-30 is valid")
+    void testDateValidation_EqualSigningAndEffective_Valid() {
+        LocalDate signing = LocalDate.of(2026, 9, 17);
+        LocalDate effective = LocalDate.of(2026, 9, 17);
+        LocalDate expiry = LocalDate.of(2026, 9, 30);
+
+        // Should not throw
+        contractResearchService.validateContractDates(signing, effective, expiry);
+    }
+
+    @Test
+    @DisplayName("Date Validation Test 2: signing = 2026-09-17, effective = 2026-09-18, expiry = 2026-09-30 is valid")
+    void testDateValidation_EffectiveAfterSigning_Valid() {
+        LocalDate signing = LocalDate.of(2026, 9, 17);
+        LocalDate effective = LocalDate.of(2026, 9, 18);
+        LocalDate expiry = LocalDate.of(2026, 9, 30);
+
+        contractResearchService.validateContractDates(signing, effective, expiry);
+    }
+
+    @Test
+    @DisplayName("Date Validation Test 3: signing = 2026-09-17, effective = 2026-09-16 is rejected")
+    void testDateValidation_EffectiveBeforeSigning_Rejected() {
+        LocalDate signing = LocalDate.of(2026, 9, 17);
+        LocalDate effective = LocalDate.of(2026, 9, 16);
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
+                contractResearchService.validateContractDates(signing, effective, null)
+        );
+        assertThat(ex.getMessage()).isEqualTo("Ngày hiệu lực phải bằng hoặc sau ngày ký.");
+        assertThat(ex.getErrorCode()).isEqualTo("INVALID_CONTRACT_DATES");
+    }
+
+    @Test
+    @DisplayName("Date Validation Test 4: effective = 2026-09-17, expiry = 2026-09-17 is rejected")
+    void testDateValidation_ExpiryEqualEffective_Rejected() {
+        LocalDate effective = LocalDate.of(2026, 9, 17);
+        LocalDate expiry = LocalDate.of(2026, 9, 17);
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
+                contractResearchService.validateContractDates(null, effective, expiry)
+        );
+        assertThat(ex.getMessage()).isEqualTo("Ngày hết hạn phải sau ngày hiệu lực.");
+        assertThat(ex.getErrorCode()).isEqualTo("INVALID_CONTRACT_DATES");
+    }
+
+    @Test
+    @DisplayName("Date Validation Test 5: effective = 2026-09-17, expiry = 2026-09-16 is rejected")
+    void testDateValidation_ExpiryBeforeEffective_Rejected() {
+        LocalDate effective = LocalDate.of(2026, 9, 17);
+        LocalDate expiry = LocalDate.of(2026, 9, 16);
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
+                contractResearchService.validateContractDates(null, effective, expiry)
+        );
+        assertThat(ex.getMessage()).isEqualTo("Ngày hết hạn phải sau ngày hiệu lực.");
+        assertThat(ex.getErrorCode()).isEqualTo("INVALID_CONTRACT_DATES");
+    }
+
+    @Test
+    @DisplayName("Date Validation Test 6: valid signing/effective with expiry after effective is valid")
+    void testDateValidation_ExpiryAfterEffective_Valid() {
+        LocalDate signing = LocalDate.of(2026, 9, 1);
+        LocalDate effective = LocalDate.of(2026, 9, 15);
+        LocalDate expiry = LocalDate.of(2027, 9, 15);
+
+        contractResearchService.validateContractDates(signing, effective, expiry);
+    }
+
+    @Test
+    @DisplayName("Date Validation Test 7: Nullable combinations preserve optionality")
+    void testDateValidation_NullableCombinations_PreserveOptionality() {
+        // Only signing date
+        contractResearchService.validateContractDates(LocalDate.of(2026, 9, 1), null, null);
+        // Only effective date
+        contractResearchService.validateContractDates(null, LocalDate.of(2026, 9, 1), null);
+        // Only expiry date
+        contractResearchService.validateContractDates(null, null, LocalDate.of(2026, 9, 1));
+        // All null
+        contractResearchService.validateContractDates(null, null, null);
+        // Signing and expiry without effective
+        contractResearchService.validateContractDates(LocalDate.of(2026, 9, 1), null, LocalDate.of(2026, 9, 30));
+    }
+
+    @Test
+    @DisplayName("Test 12: saveManualContract rejects invalid date combinations")
+    void test12_SaveManualContractRejectsInvalidDates() {
+        ContractEntry manualContract = ContractEntry.builder()
+                .id("c-manual-err")
+                .title("Manual Contract Inconsistent Dates")
+                .dataEntryMethod(ContractDataEntryMethod.MANUAL)
+                .reviewStatus(ContractEntryReviewStatus.DRAFT)
+                .commonData(CommonContractData.builder().build())
+                .build();
+
+        ContractResearch research = ContractResearch.builder()
+                .id("res-err")
+                .taskId(taskId)
+                .projectId(projectId)
+                .status(ContractResearchStatus.DRAFT)
+                .contracts(new ArrayList<>(List.of(manualContract)))
+                .build();
+
+        when(projectTaskRepository.findWithProjectById(taskId)).thenReturn(Optional.of(task));
+        when(contractResearchRepository.findByTaskId(taskId)).thenReturn(Optional.of(research));
+
+        // Effective < Signing
+        SaveManualContractRequest req1 = SaveManualContractRequest.builder()
+                .title("Manual Contract")
+                .signingDate(LocalDate.of(2026, 9, 29))
+                .effectiveDate(LocalDate.of(2026, 9, 23))
+                .expiryDate(LocalDate.of(2026, 6, 8))
+                .build();
+
+        BusinessValidationException ex1 = assertThrows(BusinessValidationException.class, () ->
+                contractResearchService.saveManualContract(projectId, taskId, "c-manual-err", req1, staffId)
+        );
+        assertThat(ex1.getMessage()).isEqualTo("Ngày hiệu lực phải bằng hoặc sau ngày ký.");
+
+        // Expiry <= Effective (Effective >= Signing is valid)
+        SaveManualContractRequest req2 = SaveManualContractRequest.builder()
+                .title("Manual Contract")
+                .signingDate(LocalDate.of(2026, 9, 20))
+                .effectiveDate(LocalDate.of(2026, 9, 25))
+                .expiryDate(LocalDate.of(2026, 9, 25))
+                .build();
+
+        BusinessValidationException ex2 = assertThrows(BusinessValidationException.class, () ->
+                contractResearchService.saveManualContract(projectId, taskId, "c-manual-err", req2, staffId)
+        );
+        assertThat(ex2.getMessage()).isEqualTo("Ngày hết hạn phải sau ngày hiệu lực.");
+    }
+
+    @Test
+    @DisplayName("Test 13: Correction Workflow - repairing invalid legacy dates succeeds atomically without deadlock")
+    void test13_CorrectionWorkflow_RepairInvalidLegacyDates() {
+        // Contract with invalid legacy dates in MongoDB
+        CommonContractData legacyCommon = CommonContractData.builder()
+                .contractNumber(ExtractedContractField.<String>builder().value("HD-LEGACY").build())
+                .signingDate(ExtractedContractField.<LocalDate>builder().value(LocalDate.of(2026, 9, 29)).build())
+                .effectiveDate(ExtractedContractField.<LocalDate>builder().value(LocalDate.of(2026, 9, 23)).build())
+                .expiryDate(ExtractedContractField.<LocalDate>builder().value(LocalDate.of(2026, 6, 8)).build())
+                .build();
+
+        ContractEntry manualContract = ContractEntry.builder()
+                .id("c-manual-fix")
+                .title("Legacy Inconsistent Contract")
+                .dataEntryMethod(ContractDataEntryMethod.MANUAL)
+                .reviewStatus(ContractEntryReviewStatus.DRAFT)
+                .commonData(legacyCommon)
+                .build();
+
+        ContractResearch research = ContractResearch.builder()
+                .id("res-fix")
+                .taskId(taskId)
+                .projectId(projectId)
+                .status(ContractResearchStatus.DRAFT)
+                .contracts(new ArrayList<>(List.of(manualContract)))
+                .build();
+
+        when(projectTaskRepository.findWithProjectById(taskId)).thenReturn(Optional.of(task));
+        when(contractResearchRepository.findByTaskId(taskId)).thenReturn(Optional.of(research));
+        when(contractResearchRepository.save(any(ContractResearch.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // Submit repaired dates together
+        SaveManualContractRequest repairReq = SaveManualContractRequest.builder()
+                .title("Corrected Contract")
+                .contractNumber("HD-LEGACY-FIXED")
+                .signingDate(LocalDate.of(2026, 9, 29))
+                .effectiveDate(LocalDate.of(2026, 9, 29))
+                .expiryDate(LocalDate.of(2026, 9, 30))
+                .build();
+
+        ContractResearchResponse response = contractResearchService.saveManualContract(projectId, taskId, "c-manual-fix", repairReq, staffId);
+        assertThat(response).isNotNull();
+
+        ContractEntry fixedContract = response.getContracts().get(0);
+        assertThat(fixedContract.getCommonData().getSigningDate().getValue()).isEqualTo(LocalDate.of(2026, 9, 29));
+        assertThat(fixedContract.getCommonData().getEffectiveDate().getValue()).isEqualTo(LocalDate.of(2026, 9, 29));
+        assertThat(fixedContract.getCommonData().getExpiryDate().getValue()).isEqualTo(LocalDate.of(2026, 9, 30));
+    }
+
+    @Test
+    @DisplayName("Test 14: submitResearch blocks submission if any selected contract has invalid dates")
+    void test14_SubmitResearchBlocksInvalidDates() {
+        CommonContractData invalidCommon = CommonContractData.builder()
+                .contractNumber(ExtractedContractField.<String>builder().value("HD-BAD-DATE").build())
+                .signingDate(ExtractedContractField.<LocalDate>builder().value(LocalDate.of(2026, 9, 29)).build())
+                .effectiveDate(ExtractedContractField.<LocalDate>builder().value(LocalDate.of(2026, 9, 23)).build())
+                .expiryDate(ExtractedContractField.<LocalDate>builder().value(LocalDate.of(2026, 6, 8)).build())
+                .parties(new ArrayList<>(List.of(ContractParty.builder().legalName("Company A").role("Bên A").build())))
+                .build();
+
+        ContractEntry badContract = ContractEntry.builder()
+                .id("c-bad-date")
+                .title("Hợp đồng ngày sai")
+                .dataEntryMethod(ContractDataEntryMethod.MANUAL)
+                .reviewStatus(ContractEntryReviewStatus.DRAFT)
+                .commonData(invalidCommon)
+                .build();
+
+        ContractResearch research = ContractResearch.builder()
+                .id("res-submit-test")
+                .taskId(taskId)
+                .projectId(projectId)
+                .status(ContractResearchStatus.DRAFT)
+                .contracts(new ArrayList<>(List.of(badContract)))
+                .build();
+
+        when(contractResearchRepository.findByTaskId(taskId)).thenReturn(Optional.of(research));
+        when(projectTaskRepository.findWithProjectById(taskId)).thenReturn(Optional.of(task));
+
+        SubmitContractResearchRequest submitReq = SubmitContractResearchRequest.builder()
+                .contractEntryIds(List.of("c-bad-date"))
+                .note("Submitting contract with invalid dates")
+                .build();
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
+                contractResearchService.submitResearch(projectId, taskId, submitReq, staffId)
+        );
+
+        assertThat(ex.getMessage()).contains("Hợp đồng 'Hợp đồng ngày sai' có ngày không hợp lệ: Ngày hiệu lực phải bằng hoặc sau ngày ký.");
+        assertThat(ex.getErrorCode()).isEqualTo("INVALID_CONTRACT_DATES");
+    }
 }

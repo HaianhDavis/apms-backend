@@ -43,4 +43,15 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
             @Param("actionType") String actionType,
             @Param("entityId") String entityId,
             @Param("companyProfileId") String companyProfileId);
+
+    @Query("""
+            select n from Notification n
+            where n.recipientAccount.id = :recipientId
+              and n.entityType = 'RELATIONSHIP_ASSESSMENT'
+              and n.isRead = false
+              and n.isDeleted = false
+            order by n.createdAt desc
+            """)
+    java.util.List<Notification> findUnreadRelationshipAssessmentNotifications(
+            @Param("recipientId") Long recipientId);
 }

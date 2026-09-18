@@ -267,6 +267,8 @@ public class ContractResearchService {
         validateContractEditable(research, entry);
 
         if (req != null) {
+            validateContractDates(req.getSigningDate(), req.getEffectiveDate(), req.getExpiryDate());
+
             if (StringUtils.hasText(req.getTitle())) {
                 entry.setTitle(req.getTitle().trim());
             }
@@ -1570,6 +1572,15 @@ public class ContractResearchService {
         }
     }
 
+    public void validateContractDates(LocalDate signingDate, LocalDate effectiveDate, LocalDate expiryDate) {
+        if (signingDate != null && effectiveDate != null && effectiveDate.isBefore(signingDate)) {
+            throw new BusinessValidationException("INVALID_CONTRACT_DATES", "Ngày hiệu lực phải bằng hoặc sau ngày ký.");
+        }
+        if (effectiveDate != null && expiryDate != null && !expiryDate.isAfter(effectiveDate)) {
+            throw new BusinessValidationException("INVALID_CONTRACT_DATES", "Ngày hết hạn phải sau ngày hiệu lực.");
+        }
+    }
+
     private void validateSubmissionEligibility(ContractEntry entry) {
         if (entry.getReviewStatus() == ContractEntryReviewStatus.APPROVED) {
             throw new BusinessValidationException("CONTRACT_APPROVED_IMMUTABLE",
@@ -1580,6 +1591,24 @@ public class ContractResearchService {
                 && entry.getReviewStatus() != ContractEntryReviewStatus.CHANGES_REQUESTED) {
             throw new BusinessValidationException("CONTRACT_NOT_SUBMITTABLE",
                     "Contract '" + entry.getTitle() + "' is in status " + entry.getReviewStatus() + " and cannot be submitted.");
+        }
+
+        // Validate contract dates for all submitted contracts (both manual and extracted)
+        LocalDate signingDate = entry.getCommonData() != null && entry.getCommonData().getSigningDate() != null
+                ? entry.getCommonData().getSigningDate().getValue()
+                : entry.getDocumentDate();
+        LocalDate effectiveDate = entry.getCommonData() != null && entry.getCommonData().getEffectiveDate() != null
+                ? entry.getCommonData().getEffectiveDate().getValue()
+                : null;
+        LocalDate expiryDate = entry.getCommonData() != null && entry.getCommonData().getExpiryDate() != null
+                ? entry.getCommonData().getExpiryDate().getValue()
+                : null;
+
+        try {
+            validateContractDates(signingDate, effectiveDate, expiryDate);
+        } catch (BusinessValidationException ex) {
+            throw new BusinessValidationException("INVALID_CONTRACT_DATES",
+                    "Hợp đồng '" + entry.getTitle() + "' có ngày không hợp lệ: " + ex.getMessage());
         }
 
         // Manual contracts bypass AI verification, but require meaningful data

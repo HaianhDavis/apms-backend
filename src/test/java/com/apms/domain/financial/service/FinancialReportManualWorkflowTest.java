@@ -1071,4 +1071,163 @@ class FinancialReportManualWorkflowTest {
         // No deleteDocument called since oldDocumentId was null
         verify(documentService, never()).deleteDocument(any(), any(), any(), any());
     }
+
+    @Test
+    @DisplayName("Test 34: validateAndNormalizeFinancialNumber strictly validates numeric formats and rejects invalid characters or comma placement")
+    void test34_validateAndNormalizeFinancialNumber_strictFormats() {
+        // Valid cases
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("0", "Test")).isEqualByComparingTo("0");
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("100", "Test")).isEqualByComparingTo("100");
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("-100", "Test")).isEqualByComparingTo("-100");
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("12.5", "Test")).isEqualByComparingTo("12.5");
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("-12.5", "Test")).isEqualByComparingTo("-12.5");
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("0.5", "Test")).isEqualByComparingTo("0.5");
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("-0.5", "Test")).isEqualByComparingTo("-0.5");
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("1,000", "Test")).isEqualByComparingTo("1000");
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("1,000,000", "Test")).isEqualByComparingTo("1000000");
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("-1,000.50", "Test")).isEqualByComparingTo("-1000.50");
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("1,234.56", "Test")).isEqualByComparingTo("1234.56");
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("-1,234.56", "Test")).isEqualByComparingTo("-1234.56");
+
+        // Null / blank is unentered (returns null)
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber(null, "Test")).isNull();
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("", "Test")).isNull();
+        assertThat(FinancialResearchService.validateAndNormalizeFinancialNumber("   ", "Test")).isNull();
+
+        // Invalid cases
+        List<String> invalidInputs = List.of(
+                "1,2,3",
+                "12,,34",
+                "1,00,000",
+                ",100",
+                "100,",
+                ".5",
+                "1e3",
+                "abc",
+                "12 triệu",
+                "1 tỷ",
+                "100 USD",
+                "NaN",
+                "Infinity",
+                "-Infinity",
+                "--",
+                "N/A",
+                "unknown"
+        );
+
+        for (String invalid : invalidInputs) {
+            BusinessValidationException ex = assertThrows(
+                    BusinessValidationException.class,
+                    () -> FinancialResearchService.validateAndNormalizeFinancialNumber(invalid, "Chỉ số test"),
+                    "Expected invalid input to be rejected: " + invalid
+            );
+            assertThat(ex.getMessage()).contains("Giá trị chỉ số tài chính phải là số");
+        }
+    }
+
+    @Test
+    @DisplayName("Test 35: saveManualMetricsBatch accepts valid formatted numbers and rejects malformed values with atomic rollback")
+    void test35_saveManualMetricsBatch_numericValidation() {
+        FinancialReportEntry manualReport = FinancialReportEntry.builder()
+                .id("rep-manual-num-1")
+                .title("Manual Report Numeric")
+                .dataEntryMethod(FinancialDataEntryMethod.MANUAL)
+                .reportingPeriod(ReportingPeriod.builder().year(2026).period("Q1").build())
+                .build();
+        research.getReports().add(manualReport);
+
+        // 1. Successful batch with formatted thousands and decimals
+        List<CreateFinancialMetricRequest> batchList = List.of(
+                CreateFinancialMetricRequest.builder().metricCode("TOTAL_ASSETS").label("Tổng tài sản").rawValue("1,000,000").rawUnit("MILLION_VND").build(),
+                CreateFinancialMetricRequest.builder().metricCode("CURRENT_ASSETS").label("Tài sản ngắn hạn").rawValue("-1,000.50").rawUnit("MILLION_VND").build(),
+                CreateFinancialMetricRequest.builder().metricCode("CASH_AND_EQUIVALENTS").label("Tiền và tương đương tiền").rawValue("0").rawUnit("MILLION_VND").build()
+        );
+        BatchCreateFinancialMetricsRequest req = BatchCreateFinancialMetricsRequest.builder().metrics(batchList).build();
+
+        FinancialResearchResponse response = researchService.saveManualMetricsBatch(projectId, taskId, "rep-manual-num-1", req);
+        assertThat(response.getMetrics()).hasSize(3);
+        FinancialMetricResponse mTotal = response.getMetrics().stream().filter(m -> "TOTAL_ASSETS".equals(m.getMetricCode())).findFirst().orElseThrow();
+        // 1,000,000 MILLION_VND = 1,000,000,000,000 VND
+        assertThat(mTotal.getNormalizedValue()).isEqualTo("1000000000000");
+        assertThat(mTotal.getNormalizedUnit()).isEqualTo("VND");
+
+        FinancialMetricResponse mCash = response.getMetrics().stream().filter(m -> "CASH_AND_EQUIVALENTS".equals(m.getMetricCode())).findFirst().orElseThrow();
+        assertThat(mCash.getNormalizedValue()).isEqualTo("0");
+
+        // 2. Rejected batch with mixed text (e.g. "12 triệu")
+        List<CreateFinancialMetricRequest> invalidBatch = List.of(
+                CreateFinancialMetricRequest.builder().metricCode("NET_REVENUE").label("Doanh thu thuần").rawValue("500 triệu").rawUnit("MILLION_VND").build()
+        );
+        BatchCreateFinancialMetricsRequest badReq = BatchCreateFinancialMetricsRequest.builder().metrics(invalidBatch).build();
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
+                researchService.saveManualMetricsBatch(projectId, taskId, "rep-manual-num-1", badReq));
+        assertThat(ex.getMessage()).contains("Giá trị chỉ số tài chính phải là số");
+    }
+
+    @Test
+    @DisplayName("Test 36: addManualMetric strictly validates numeric values for custom metrics")
+    void test36_addManualMetric_validatesNumericValue() {
+        FinancialReportEntry manualReport = FinancialReportEntry.builder()
+                .id("rep-manual-custom-1")
+                .title("Manual Report Custom")
+                .dataEntryMethod(FinancialDataEntryMethod.MANUAL)
+                .reportingPeriod(ReportingPeriod.builder().year(2026).period("Q1").build())
+                .build();
+        research.getReports().add(manualReport);
+
+        // Rejected custom metric with invalid value "abc"
+        CreateFinancialMetricRequest badReq = CreateFinancialMetricRequest.builder()
+                .reportId("rep-manual-custom-1")
+                .label("Chi phí chuyển đổi số")
+                .rawValue("abc")
+                .rawUnit("MILLION_VND")
+                .build();
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
+                researchService.addManualMetric(projectId, taskId, badReq));
+        assertThat(ex.getMessage()).contains("Giá trị chỉ số tài chính phải là số");
+
+        // Accepted custom metric with negative decimal "-125.5"
+        CreateFinancialMetricRequest goodReq = CreateFinancialMetricRequest.builder()
+                .reportId("rep-manual-custom-1")
+                .label("Chi phí chuyển đổi số")
+                .rawValue("-125.5")
+                .rawUnit("MILLION_VND")
+                .build();
+
+        FinancialResearchResponse response = researchService.addManualMetric(projectId, taskId, goodReq);
+        FinancialMetricResponse custom = response.getMetrics().stream()
+                .filter(m -> "Chi phí chuyển đổi số".equals(m.getLabel()))
+                .findFirst().orElseThrow();
+        assertThat(custom.getNormalizedValue()).isEqualTo("-125500000.0");
+    }
+
+    @Test
+    @DisplayName("Test 37: submitForReview rejects manual report containing malformed numeric values")
+    void test37_submitForReview_rejectsMalformedNumericMetrics() {
+        FinancialReportEntry manualReport = FinancialReportEntry.builder()
+                .id("rep-manual-submit-err")
+                .title("Báo cáo tài chính Q1")
+                .dataEntryMethod(FinancialDataEntryMethod.MANUAL)
+                .reportingPeriod(ReportingPeriod.builder().year(2026).period("Q1").build())
+                .build();
+        research.getReports().add(manualReport);
+
+        // Legacy / malformed metric directly attached
+        FinancialMetric badMetric = FinancialMetric.builder()
+                .id("met-bad-1")
+                .label("Lợi nhuận ròng")
+                .rawValue("12 triệu")
+                .rawUnit("VND")
+                .inputMethod(MetricInputMethod.MANUAL)
+                .source(MetricSource.builder().reportEntryId("rep-manual-submit-err").build())
+                .build();
+        research.getMetrics().add(badMetric);
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
+                researchService.submitForReview(projectId, taskId, staffId, List.of("rep-manual-submit-err")));
+        assertThat(ex.getMessage()).contains("Giá trị chỉ số tài chính phải là số");
+        assertThat(ex.getMessage()).contains("Lợi nhuận ròng");
+    }
 }

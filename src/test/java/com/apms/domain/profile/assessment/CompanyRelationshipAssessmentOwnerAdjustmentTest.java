@@ -280,6 +280,7 @@ public class CompanyRelationshipAssessmentOwnerAdjustmentTest {
      */
     @Test
     void testOwnerAdjustmentFinalized_OfficialScoreUsesOwnerValues() {
+        CompanyRelationshipAssessment v6 = buildFinalizedV6();
         CompanyRelationshipAssessment v7Adj = CompanyRelationshipAssessment.builder()
                 .id(700L)
                 .ownerCompanyProfileId(ownerId)
@@ -308,6 +309,9 @@ public class CompanyRelationshipAssessmentOwnerAdjustmentTest {
                 .build();
 
         when(assessmentRepository.findById(700L)).thenReturn(Optional.of(v7Adj));
+        when(assessmentRepository.findById(600L)).thenReturn(Optional.of(v6));
+        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(Optional.of(v6));
         when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         RelationshipAssessmentResponse finalized = service.completeOwnerAdjustment(700L, null, ownerUser);
@@ -415,10 +419,10 @@ public class CompanyRelationshipAssessmentOwnerAdjustmentTest {
     }
 
     /**
-     * Case 9: Cannot adjust an existing Owner Adjustment (repeated Owner-on-Owner restricted)
+     * Case 9: Owner CAN adjust an existing Owner Adjustment (V2 Owner -> V3 Owner consecutive adjustment)
      */
     @Test
-    void testCannotAdjustExistingOwnerAdjustment() {
+    void testOwnerCanAdjustExistingOwnerAdjustment_ConsecutiveAdjustmentSupported() {
         CompanyRelationshipAssessment v7OwnerAdjFinalized = CompanyRelationshipAssessment.builder()
                 .id(700L)
                 .ownerCompanyProfileId(ownerId)
@@ -426,21 +430,178 @@ public class CompanyRelationshipAssessmentOwnerAdjustmentTest {
                 .versionNumber(7)
                 .status(RelationshipAssessmentStatus.FINALIZED)
                 .assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .sourceAssessmentId(600L)
+                .managerAccountId(null)
+                .ownerCommercialScore(5)
+                .ownerCooperationScore(4)
+                .ownerStrategicScore(4)
+                .ownerRelationshipNetworkScore(3)
+                .ownerEngagementScore(4)
+                .ownerQualitativeScore(4)
+                .ownerRawScorableScore(24)
+                .ownerFinalTotalScore(80)
+                .ownerFinalRank("B")
+                .createdByAccountId(ownerUser.getId())
                 .build();
 
         when(assessmentRepository.findById(700L)).thenReturn(Optional.of(v7OwnerAdjFinalized));
+        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(Optional.of(v7OwnerAdjFinalized));
+        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdOrderByVersionNumberDesc(
+                ownerId, targetId)).thenReturn(Optional.of(v7OwnerAdjFinalized));
+        when(assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(eq(ownerId), eq(targetId), any()))
+                .thenReturn(false);
 
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
-                service.createOwnerAdjustment(700L, ownerUser)
-        );
-        assertTrue(ex.getMessage().contains("Cannot adjust an existing Owner Adjustment"));
+        when(assessmentRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        RelationshipAssessmentResponse v8Draft = service.createOwnerAdjustment(700L, ownerUser);
+
+        assertNotNull(v8Draft);
+        assertEquals(8, v8Draft.getVersionNumber());
+        assertEquals(RelationshipAssessmentStatus.DRAFT, v8Draft.getStatus());
+        assertTrue(v8Draft.getIsOwnerAdjustment());
+        assertEquals(700L, v8Draft.getSourceAssessmentId());
+        // Baseline must be V7's owner scores
+        assertEquals(5, v8Draft.getCommercialAwardedScore());
+        assertEquals(4, v8Draft.getCooperationScore());
+        assertEquals(4, v8Draft.getStrategicScore());
+        assertEquals(3, v8Draft.getRelationshipNetworkScore());
+        assertEquals(4, v8Draft.getEngagementScore());
+        assertEquals(4, v8Draft.getQualitativeScore());
+        assertEquals(80, v8Draft.getManagerTotalScore());
+        assertEquals("B", v8Draft.getManagerRank());
     }
 
     /**
-     * Case 10: Complete Owner adjustment fails if no scores changed or if adjustment reason is missing
+     * Case 10: Notification traverses sourceAssessmentId chain to find originating Manager
+     * (V6 Manager A -> V7 Owner -> V8 Owner -> completes V8 notifies Manager A)
      */
     @Test
-    void testCompleteOwnerAdjustment_RequiresScoreDiffAndReason() {
+    void testConsecutiveAdjustments_NotificationTraversesChainToOriginatingManager() {
+        CompanyRelationshipAssessment v6Manager = buildFinalizedV6(); // managerAccountId = 10L
+        CompanyRelationshipAssessment v7Owner = CompanyRelationshipAssessment.builder()
+                .id(700L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(7)
+                .status(RelationshipAssessmentStatus.FINALIZED)
+                .assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .sourceAssessmentId(600L)
+                .managerAccountId(null)
+                .ownerCommercialScore(5)
+                .ownerCooperationScore(4)
+                .ownerStrategicScore(4)
+                .ownerRelationshipNetworkScore(3)
+                .ownerEngagementScore(4)
+                .ownerQualitativeScore(4)
+                .ownerFinalTotalScore(80)
+                .ownerFinalRank("B")
+                .build();
+
+        CompanyRelationshipAssessment v8Draft = CompanyRelationshipAssessment.builder()
+                .id(800L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(8)
+                .status(RelationshipAssessmentStatus.DRAFT)
+                .assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .sourceAssessmentId(700L)
+                .managerAccountId(null)
+                .commercialAwardedScore(5)
+                .cooperationScore(4)
+                .strategicScore(4)
+                .relationshipNetworkScore(3)
+                .engagementScore(4)
+                .qualitativeScore(4)
+                .ownerCommercialScore(5)
+                .ownerCooperationScore(4)
+                .ownerStrategicScore(5) // changed from 4 to 5
+                .ownerRelationshipNetworkScore(3)
+                .ownerEngagementScore(4)
+                .ownerQualitativeScore(4)
+                .ownerAdjustmentReason("Strategic: Promoted to top-tier strategic partner in 2027")
+                .createdByAccountId(ownerUser.getId())
+                .build();
+
+        when(assessmentRepository.findById(800L)).thenReturn(Optional.of(v8Draft));
+        when(assessmentRepository.findById(700L)).thenReturn(Optional.of(v7Owner));
+        when(assessmentRepository.findById(600L)).thenReturn(Optional.of(v6Manager));
+        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(Optional.of(v7Owner));
+        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        RelationshipAssessmentResponse resp = service.completeOwnerAdjustment(800L, null, ownerUser);
+
+        assertEquals(RelationshipAssessmentStatus.FINALIZED, resp.getStatus());
+        // Verify notification traversed V8 -> V7 -> V6 to find managerAccountId = 10L
+        verify(notificationService).notifyRelationshipAssessmentOwnerAdjusted(
+                any(CompanyRelationshipAssessment.class), eq(v7Owner), eq(10L), eq(ownerUser.getId()));
+    }
+
+    /**
+     * Case 11: Initial relationship assessment rejected for Owner and Staff
+     */
+    @Test
+    void testInitialAssessment_RejectedForOwnerAndStaff() {
+        // Owner attempting to create initial draft
+        assertThrows(AccessDeniedException.class, () ->
+                service.createDraft(targetId, null, ownerUser)
+        );
+
+        UserDetailsImpl staffUser = new UserDetailsImpl(
+                20L, "staff@apms.com", "hash",
+                List.of(new SimpleGrantedAuthority("ROLE_" + SystemRole.BUSINESS_DEVELOPMENT_STAFF.name())),
+                true
+        );
+
+        // Staff attempting to create initial draft
+        assertThrows(AccessDeniedException.class, () ->
+                service.createDraft(targetId, null, staffUser)
+        );
+    }
+
+    /**
+     * Case 12: Owner adjustment completion rejected when source is no longer latest finalized
+     */
+    @Test
+    void testOwnerAdjustmentCompletion_RejectedWhenSourceNoLongerLatestFinalized() {
+        CompanyRelationshipAssessment v6 = buildFinalizedV6();
+        CompanyRelationshipAssessment v7Newer = CompanyRelationshipAssessment.builder()
+                .id(750L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(7)
+                .status(RelationshipAssessmentStatus.FINALIZED)
+                .assessmentType(RelationshipAssessmentType.MANAGER_ASSESSMENT)
+                .build();
+
+        CompanyRelationshipAssessment v7DraftBasedOnV6 = CompanyRelationshipAssessment.builder()
+                .id(700L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(7)
+                .status(RelationshipAssessmentStatus.DRAFT)
+                .assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .sourceAssessmentId(600L) // points to V6, but V7Newer is now latest!
+                .build();
+
+        when(assessmentRepository.findById(700L)).thenReturn(Optional.of(v7DraftBasedOnV6));
+        // DB returns V7Newer as latest finalized
+        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(Optional.of(v7Newer));
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
+                service.completeOwnerAdjustment(700L, null, ownerUser)
+        );
+        assertTrue(ex.getMessage().contains("Phiên bản đánh giá hiện tại đã thay đổi"));
+    }
+
+    /**
+     * Case 13.1: Owner changes one criterion, all notes null -> completion succeeds
+     */
+    @Test
+    void testCompleteOwnerAdjustment_OneCriterionChanged_AllNotesNull_Success() {
+        CompanyRelationshipAssessment v6 = buildFinalizedV6();
         CompanyRelationshipAssessment v7Adj = CompanyRelationshipAssessment.builder()
                 .id(700L)
                 .ownerCompanyProfileId(ownerId)
@@ -456,37 +617,228 @@ public class CompanyRelationshipAssessmentOwnerAdjustmentTest {
                 .relationshipNetworkScore(2)
                 .engagementScore(4)
                 .qualitativeScore(4)
-                // Owner scores identical to Manager scores!
+                .ownerCommercialScore(5)
+                .ownerCooperationScore(4)
+                .ownerStrategicScore(5) // changed from 3 to 5
+                .ownerRelationshipNetworkScore(2)
+                .ownerEngagementScore(4)
+                .ownerQualitativeScore(4)
+                .ownerRelationshipNetworkNote(null)
+                .ownerAdjustmentReason(null)
+                .ownerNote(null)
+                .createdByAccountId(ownerUser.getId())
+                .build();
+
+        when(assessmentRepository.findById(700L)).thenReturn(Optional.of(v7Adj));
+        when(assessmentRepository.findById(600L)).thenReturn(Optional.of(v6));
+        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(Optional.of(v6));
+        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        RelationshipAssessmentResponse response = service.completeOwnerAdjustment(700L, null, ownerUser);
+
+        assertEquals(RelationshipAssessmentStatus.FINALIZED, response.getStatus());
+        assertEquals(5, response.getOwnerStrategicScore());
+        assertNull(response.getOwnerAdjustmentReason());
+        assertNull(response.getOwnerRelationshipNetworkNote());
+        assertNull(response.getOwnerNote());
+    }
+
+    /**
+     * Case 13.2: Owner changes multiple criteria, notes empty string/whitespace -> completion succeeds
+     */
+    @Test
+    void testCompleteOwnerAdjustment_MultipleCriteriaChanged_NotesEmpty_Success() {
+        CompanyRelationshipAssessment v6 = buildFinalizedV6();
+        CompanyRelationshipAssessment v7Adj = CompanyRelationshipAssessment.builder()
+                .id(700L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(7)
+                .status(RelationshipAssessmentStatus.DRAFT)
+                .assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .sourceAssessmentId(600L)
+                .scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5)
+                .commercialAwardedScore(5)
+                .cooperationScore(4)
+                .strategicScore(3)
+                .relationshipNetworkScore(2)
+                .engagementScore(4)
+                .qualitativeScore(4)
+                .ownerCommercialScore(4) // changed from 5 to 4
+                .ownerCooperationScore(4)
+                .ownerStrategicScore(5)  // changed from 3 to 5
+                .ownerRelationshipNetworkScore(2)
+                .ownerEngagementScore(4)
+                .ownerQualitativeScore(4)
+                .ownerRelationshipNetworkNote("   ")
+                .ownerAdjustmentReason("")
+                .ownerNote("")
+                .createdByAccountId(ownerUser.getId())
+                .build();
+
+        when(assessmentRepository.findById(700L)).thenReturn(Optional.of(v7Adj));
+        when(assessmentRepository.findById(600L)).thenReturn(Optional.of(v6));
+        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(Optional.of(v6));
+        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        RelationshipAssessmentResponse response = service.completeOwnerAdjustment(700L, null, ownerUser);
+
+        assertEquals(RelationshipAssessmentStatus.FINALIZED, response.getStatus());
+        assertEquals(4, response.getOwnerCommercialScore());
+        assertEquals(5, response.getOwnerStrategicScore());
+    }
+
+    /**
+     * Case 13.3: Owner enters optional note -> note is preserved after completion
+     */
+    @Test
+    void testCompleteOwnerAdjustment_WithOptionalNotes_NotesPreserved() {
+        CompanyRelationshipAssessment v6 = buildFinalizedV6();
+        CompanyRelationshipAssessment v7Adj = CompanyRelationshipAssessment.builder()
+                .id(700L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(7)
+                .status(RelationshipAssessmentStatus.DRAFT)
+                .assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .sourceAssessmentId(600L)
+                .scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5)
+                .commercialAwardedScore(5)
+                .cooperationScore(4)
+                .strategicScore(3)
+                .relationshipNetworkScore(2)
+                .engagementScore(4)
+                .qualitativeScore(4)
+                .ownerCommercialScore(5)
+                .ownerCooperationScore(4)
+                .ownerStrategicScore(4) // changed from 3 to 4
+                .ownerRelationshipNetworkScore(2)
+                .ownerEngagementScore(4)
+                .ownerQualitativeScore(4)
+                .createdByAccountId(ownerUser.getId())
+                .build();
+
+        when(assessmentRepository.findById(700L)).thenReturn(Optional.of(v7Adj));
+        when(assessmentRepository.findById(600L)).thenReturn(Optional.of(v6));
+        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(Optional.of(v6));
+        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        OwnerAdjustmentUpdateRequest req = OwnerAdjustmentUpdateRequest.builder()
+                .ownerStrategicScore(4)
+                .ownerAdjustmentReason("Strategic Importance: Expanding partnership into AI domain")
+                .ownerRelationshipNetworkNote("Strong connection with leadership")
+                .ownerNote("{\"strategic\":\"Expanding partnership into AI domain\"}")
+                .build();
+
+        RelationshipAssessmentResponse response = service.completeOwnerAdjustment(700L, req, ownerUser);
+
+        assertEquals(RelationshipAssessmentStatus.FINALIZED, response.getStatus());
+        assertEquals("Strategic Importance: Expanding partnership into AI domain", response.getOwnerAdjustmentReason());
+        assertEquals("Strong connection with leadership", response.getOwnerRelationshipNetworkNote());
+        assertEquals("{\"strategic\":\"Expanding partnership into AI domain\"}", response.getOwnerNote());
+    }
+
+    /**
+     * Case 13.4: No score changes -> completion still rejected
+     */
+    @Test
+    void testCompleteOwnerAdjustment_NoScoreChanges_Rejected() {
+        CompanyRelationshipAssessment v6 = buildFinalizedV6();
+        CompanyRelationshipAssessment v7Adj = CompanyRelationshipAssessment.builder()
+                .id(700L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(7)
+                .status(RelationshipAssessmentStatus.DRAFT)
+                .assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .sourceAssessmentId(600L)
+                .scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5)
+                .commercialAwardedScore(5)
+                .cooperationScore(4)
+                .strategicScore(3)
+                .relationshipNetworkScore(2)
+                .engagementScore(4)
+                .qualitativeScore(4)
+                // All owner scores match V6 official scores
                 .ownerCommercialScore(5)
                 .ownerCooperationScore(4)
                 .ownerStrategicScore(3)
                 .ownerRelationshipNetworkScore(2)
                 .ownerEngagementScore(4)
                 .ownerQualitativeScore(4)
-                .ownerAdjustmentReason("Some reason")
+                .ownerAdjustmentReason("Some optional note")
+                .createdByAccountId(ownerUser.getId())
+                .build();
+
+        when(assessmentRepository.findById(700L)).thenReturn(Optional.of(v7Adj));
+        lenient().when(assessmentRepository.findById(600L)).thenReturn(Optional.of(v6));
+        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(Optional.of(v6));
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
+                service.completeOwnerAdjustment(700L, null, ownerUser)
+        );
+        assertTrue(ex.getMessage().contains("At least one criterion score must be changed"));
+    }
+
+    /**
+     * Case 13.5: Invalid score outside 0-5 -> completion rejected
+     */
+    @Test
+    void testCompleteOwnerAdjustment_InvalidScoreOutsideZeroToFive_Rejected() {
+        CompanyRelationshipAssessment v6 = buildFinalizedV6();
+        CompanyRelationshipAssessment v7Adj = CompanyRelationshipAssessment.builder()
+                .id(700L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(7)
+                .status(RelationshipAssessmentStatus.DRAFT)
+                .assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .sourceAssessmentId(600L)
+                .scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5)
+                .commercialAwardedScore(5)
+                .cooperationScore(4)
+                .strategicScore(3)
+                .relationshipNetworkScore(2)
+                .engagementScore(4)
+                .qualitativeScore(4)
+                .ownerCommercialScore(5)
+                .ownerCooperationScore(4)
+                .ownerStrategicScore(3)
+                .ownerRelationshipNetworkScore(2)
+                .ownerEngagementScore(4)
+                .ownerQualitativeScore(4)
                 .createdByAccountId(ownerUser.getId())
                 .build();
 
         when(assessmentRepository.findById(700L)).thenReturn(Optional.of(v7Adj));
 
-        // Subcase 1: No scores changed
-        BusinessValidationException ex1 = assertThrows(BusinessValidationException.class, () ->
-                service.completeOwnerAdjustment(700L, null, ownerUser)
-        );
-        assertTrue(ex1.getMessage().contains("At least one criterion score must be changed"));
+        // Subcase A: Score > 5 in request
+        OwnerAdjustmentUpdateRequest invalidReq = OwnerAdjustmentUpdateRequest.builder()
+                .ownerStrategicScore(6)
+                .build();
 
-        // Subcase 2: Scores changed but no adjustment reason
-        v7Adj.setOwnerStrategicScore(5); // changed
-        v7Adj.setOwnerAdjustmentReason(null); // missing reason
+        BusinessValidationException ex1 = assertThrows(BusinessValidationException.class, () ->
+                service.completeOwnerAdjustment(700L, invalidReq, ownerUser)
+        );
+        assertTrue(ex1.getMessage().contains("must be between 0 and 5"));
+
+        // Subcase B: Score < 0 in request
+        OwnerAdjustmentUpdateRequest invalidReqNeg = OwnerAdjustmentUpdateRequest.builder()
+                .ownerStrategicScore(-1)
+                .build();
 
         BusinessValidationException ex2 = assertThrows(BusinessValidationException.class, () ->
-                service.completeOwnerAdjustment(700L, null, ownerUser)
+                service.completeOwnerAdjustment(700L, invalidReqNeg, ownerUser)
         );
-        assertTrue(ex2.getMessage().contains("Owner Adjustment Reason is mandatory"));
+        assertTrue(ex2.getMessage().contains("must be between 0 and 5"));
     }
 
     /**
-     * Case 11: Cancel Owner Adjustment releases active slot
+     * Case 14: Cancel Owner Adjustment releases active slot
      */
     @Test
     void testCancelOwnerAdjustment_ReleasesActiveSlot() {

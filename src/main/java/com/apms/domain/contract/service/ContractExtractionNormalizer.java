@@ -541,6 +541,9 @@ public class ContractExtractionNormalizer {
         if (hasExplicitTerminationFact) {
             return ContractStatus.TERMINATED;
         }
+        if (effectiveDate != null && expiryDate != null && !expiryDate.isAfter(effectiveDate)) {
+            return ContractStatus.UNKNOWN;
+        }
         LocalDate now = LocalDate.now();
         if (expiryDate != null && expiryDate.isBefore(now)) {
             return ContractStatus.EXPIRED;

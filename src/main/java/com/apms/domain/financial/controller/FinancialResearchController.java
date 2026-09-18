@@ -192,6 +192,7 @@ public class FinancialResearchController {
     }
 
     @GetMapping("/company-profiles/{companyProfileId}/financials/research")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyProfileId)")
     public ResponseEntity<List<FinancialResearchResponse>> getApprovedFinancials(
             @PathVariable String companyProfileId) {
         return ResponseEntity.ok(researchService.getApprovedFinancials(companyProfileId));

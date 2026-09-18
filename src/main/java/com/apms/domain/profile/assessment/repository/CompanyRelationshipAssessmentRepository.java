@@ -67,4 +67,28 @@ public interface CompanyRelationshipAssessmentRepository extends JpaRepository<C
             Collection<String> companyProfileIds,
             Collection<RelationshipAssessmentStatus> statuses
     );
+
+    boolean existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusAndIdNot(
+            String ownerCompanyProfileId,
+            String companyProfileId,
+            RelationshipAssessmentStatus status,
+            Long id
+    );
+
+    @org.springframework.data.jpa.repository.Query(value = """
+        WITH RankedAssessments AS (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY company_profile_id ORDER BY version_number DESC) AS rn
+            FROM company_relationship_assessments
+            WHERE owner_company_profile_id = :ownerId AND status = 'FINALIZED'
+        )
+        SELECT * FROM RankedAssessments WHERE rn <= 2 ORDER BY company_profile_id, version_number DESC
+    """, nativeQuery = true)
+    List<CompanyRelationshipAssessment> findTop2FinalizedPerCompany(
+            @org.springframework.data.repository.query.Param("ownerId") String ownerId
+    );
+
+    List<CompanyRelationshipAssessment> findAllByOwnerCompanyProfileIdAndStatusOrderByVersionNumberDesc(
+            String ownerCompanyProfileId,
+            RelationshipAssessmentStatus status
+    );
 }

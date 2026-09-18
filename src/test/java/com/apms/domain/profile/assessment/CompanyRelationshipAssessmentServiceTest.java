@@ -1460,4 +1460,112 @@ public class CompanyRelationshipAssessmentServiceTest {
 
         assertEquals("Relationship Closeness assessment is not available for this company relationship type.", ex.getMessage());
     }
+
+    @Test
+    void testRecentAssessmentsSummary_FirstAssessment_NewlyScored() {
+        when(ownerOrganizationService.getOwnerCompanyProfileId()).thenReturn(ownerId);
+
+        CompanyRelationshipAssessment v1 = CompanyRelationshipAssessment.builder()
+                .id(101L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(1)
+                .status(RelationshipAssessmentStatus.FINALIZED)
+                .assessmentType(RelationshipAssessmentType.MANAGER_ASSESSMENT)
+                .managerTotalScore(74)
+                .managerRank("B")
+                .finalizedAt(java.time.LocalDateTime.now().minusHours(2))
+                .commercialAwardedScore(25)
+                .cooperationScore(4)
+                .strategicScore(4)
+                .relationshipNetworkScore(3)
+                .engagementScore(4)
+                .qualitativeScore(4)
+                .build();
+
+        when(assessmentRepository.findTop2FinalizedPerCompany(ownerId)).thenReturn(List.of(v1));
+
+        CompanyProfile profile = CompanyProfile.builder()
+                .id(targetId)
+                .companyId(targetId)
+                .identity(CompanyProfile.Identity.builder().tradeName("Vietnam Airlines").build())
+                .build();
+        when(companyProfileRepository.findAllById(anySet())).thenReturn(List.of(profile));
+        when(accessEvaluator.resolveRelationshipType(targetId)).thenReturn("PARTNER");
+
+        List<CompanyRecentAssessmentSummaryDto> summaries = service.getRecentAssessmentsSummary(ownerUser);
+
+        assertNotNull(summaries);
+        assertEquals(1, summaries.size());
+        CompanyRecentAssessmentSummaryDto summary = summaries.get(0);
+        assertEquals(targetId, summary.getCompanyProfileId());
+        assertEquals("Vietnam Airlines", summary.getCompanyName());
+        assertEquals("PARTNER", summary.getRelationshipType());
+
+        assertNotNull(summary.getLatestAssessment());
+        assertEquals(1, summary.getLatestAssessment().getVersionNumber());
+        assertEquals(74, summary.getLatestAssessment().getScore());
+        assertEquals("B", summary.getLatestAssessment().getRank());
+        assertEquals("BUSINESS_DEVELOPMENT_MANAGER", summary.getLatestAssessment().getActorRole());
+        assertNotNull(summary.getLatestAssessment().getFinalizedAt());
+        assertTrue(summary.getLatestAssessment().getFinalizedAt().contains("+07:00"));
+
+        assertNull(summary.getPreviousAssessment());
+    }
+
+    @Test
+    void testRecentAssessmentsSummary_TwoAssessments_TrendDelta() {
+        when(ownerOrganizationService.getOwnerCompanyProfileId()).thenReturn(ownerId);
+
+        CompanyRelationshipAssessment v1 = CompanyRelationshipAssessment.builder()
+                .id(101L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(1)
+                .status(RelationshipAssessmentStatus.FINALIZED)
+                .assessmentType(RelationshipAssessmentType.MANAGER_ASSESSMENT)
+                .managerTotalScore(74)
+                .managerRank("B")
+                .finalizedAt(java.time.LocalDateTime.now().minusHours(24))
+                .commercialAwardedScore(25)
+                .build();
+
+        CompanyRelationshipAssessment v2 = CompanyRelationshipAssessment.builder()
+                .id(102L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(2)
+                .status(RelationshipAssessmentStatus.FINALIZED)
+                .assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .ownerFinalTotalScore(82)
+                .ownerFinalRank("A")
+                .finalizedAt(java.time.LocalDateTime.now().minusHours(1))
+                .ownerCommercialScore(28)
+                .build();
+
+        when(assessmentRepository.findTop2FinalizedPerCompany(ownerId)).thenReturn(List.of(v2, v1));
+
+        CompanyProfile profile = CompanyProfile.builder()
+                .id(targetId)
+                .companyId(targetId)
+                .identity(CompanyProfile.Identity.builder().tradeName("Vingroup").build())
+                .build();
+        when(companyProfileRepository.findAllById(anySet())).thenReturn(List.of(profile));
+        when(accessEvaluator.resolveRelationshipType(targetId)).thenReturn("PARTNER");
+
+        List<CompanyRecentAssessmentSummaryDto> summaries = service.getRecentAssessmentsSummary(ownerUser);
+
+        assertNotNull(summaries);
+        assertEquals(1, summaries.size());
+        CompanyRecentAssessmentSummaryDto summary = summaries.get(0);
+
+        assertEquals(82, summary.getLatestAssessment().getScore());
+        assertEquals("A", summary.getLatestAssessment().getRank());
+        assertEquals("BUSINESS_OWNER", summary.getLatestAssessment().getActorRole());
+
+        assertNotNull(summary.getPreviousAssessment());
+        assertEquals(1, summary.getPreviousAssessment().getVersionNumber());
+        assertEquals(74, summary.getPreviousAssessment().getScore());
+        assertEquals("B", summary.getPreviousAssessment().getRank());
+    }
 }

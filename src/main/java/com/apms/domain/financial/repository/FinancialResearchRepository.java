@@ -12,6 +12,7 @@ import java.util.Optional;
 public interface FinancialResearchRepository extends MongoRepository<FinancialResearch, String> {
     Optional<FinancialResearch> findByTaskId(Long taskId);
     List<FinancialResearch> findByCompanyProfileIdAndStatus(String companyProfileId, FinancialResearchStatus status);
+    List<FinancialResearch> findByCompanyProfileIdInAndStatus(java.util.Collection<String> companyProfileIds, FinancialResearchStatus status);
     List<FinancialResearch> findByProjectId(Long projectId);
     boolean existsByTaskId(Long taskId);
 }

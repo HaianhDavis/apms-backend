@@ -5,6 +5,7 @@ import com.apms.domain.user.Account;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.Nationalized;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
@@ -33,9 +34,11 @@ public class Notification {
     @EqualsAndHashCode.Exclude
     private Account senderAccount;
 
-    @Column(nullable = false)
+    @Nationalized
+    @Column(nullable = false, length = 255)
     private String title;
 
+    @Nationalized
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String message;
 
@@ -55,6 +58,7 @@ public class Notification {
     @Column(length = 100)
     private String documentId;
 
+    @Nationalized
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String rejectReason;
 

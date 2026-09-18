@@ -13,7 +13,11 @@ import com.apms.domain.notification.dto.SendNotificationRequest;
 import com.apms.domain.notification.repository.sql.FcmDeviceTokenRepository;
 import com.apms.domain.notification.repository.sql.NotificationRepository;
 import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
+import java.util.Optional;
 import com.apms.domain.profile.assessment.CompanyRelationshipAssessment;
+import com.apms.domain.profile.assessment.RelationshipAssessmentStatus;
+import com.apms.domain.profile.assessment.repository.CompanyRelationshipAssessmentRepository;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectTask;
 import com.apms.domain.project.ProjectTaskSubmission;
@@ -52,6 +56,8 @@ public class NotificationService {
     private final AccountRepository accountRepository;
     private final AuditLogService auditLogService;
     private final ObjectProvider<FirebaseMessaging> firebaseMessagingProvider;
+    private final CompanyProfileRepository companyProfileRepository;
+    private final CompanyRelationshipAssessmentRepository assessmentRepository;
 
     @Transactional(readOnly = true)
     public Page<NotificationResponse> getNotifications(Boolean unreadOnly, NotificationType type, Long targetUserId, Pageable pageable) {
@@ -125,6 +131,41 @@ public class NotificationService {
             notificationRepository.saveAll(unread);
 
             auditLogService.log(currentUser.getId(), AuditAction.NOTIFICATION_READ, "Notification", "ALL", "All notifications marked as read");
+        }
+    }
+
+    @Transactional
+    public void markAsReadBatch(List<Long> notificationIds) {
+        if (notificationIds == null || notificationIds.isEmpty()) {
+            return;
+        }
+
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
+
+        List<Notification> notifications = notificationRepository.findAllById(notificationIds);
+        if (notifications.isEmpty()) {
+            return;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        List<Notification> toUpdate = new ArrayList<>();
+
+        for (Notification n : notifications) {
+            if (!n.getRecipientAccount().getId().equals(currentUser.getId()) && !hasRole(currentUser, SystemRole.SYSTEM_ADMIN)) {
+                throw new AccessDeniedException("Access denied to notification " + n.getId());
+            }
+
+            if (Boolean.FALSE.equals(n.getIsRead()) && Boolean.FALSE.equals(n.getIsDeleted())) {
+                n.setIsRead(true);
+                n.setReadAt(now);
+                toUpdate.add(n);
+            }
+        }
+
+        if (!toUpdate.isEmpty()) {
+            notificationRepository.saveAll(toUpdate);
+            auditLogService.log(currentUser.getId(), AuditAction.NOTIFICATION_READ, "Notification", "BATCH", "Marked " + toUpdate.size() + " notifications as read");
         }
     }
 
@@ -512,6 +553,28 @@ public class NotificationService {
                 )));
     }
 
+    private String resolveCompanyName(String identifier) {
+        if (!StringUtils.hasText(identifier)) {
+            return "Doanh nghiệp";
+        }
+        String trimmed = identifier.trim();
+        if (companyProfileRepository != null) {
+            try {
+                Optional<CompanyProfile> profileOpt = companyProfileRepository.findById(trimmed)
+                        .or(() -> companyProfileRepository.findByCompanyId(trimmed));
+                if (profileOpt.isPresent()) {
+                    String canonical = CompanyProfile.getCanonicalDisplayName(profileOpt.get(), null);
+                    if (StringUtils.hasText(canonical) && !"Unknown Company".equalsIgnoreCase(canonical)) {
+                        return canonical;
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to resolve company name for identifier: {}", identifier, e);
+            }
+        }
+        return "Doanh nghiệp";
+    }
+
     @Transactional
     public void notifyCompanyProfileUpdated(CompanyProfile profile, String versionIdentity, Long actorId) {
         if (profile == null) {
@@ -532,8 +595,8 @@ public class NotificationService {
                 companyName = profile.getIdentity().getLegalName();
             }
         }
-        if (!StringUtils.hasText(companyName)) {
-            companyName = profile.getCompanyId();
+        if (!StringUtils.hasText(companyName) || "Unknown Company".equalsIgnoreCase(companyName)) {
+            companyName = resolveCompanyName(companyProfileId);
         }
 
         List<Account> owners = accountRepository.findActiveAccountsByRole(SystemRole.BUSINESS_OWNER);
@@ -543,8 +606,8 @@ public class NotificationService {
         }
 
         Account sender = actorId != null ? accountRepository.findById(actorId).orElse(null) : null;
-        String title = "Hồ sơ doanh nghiệp được cập nhật";
-        String message = String.format("Hồ sơ doanh nghiệp \"%s\" đã được cập nhật phiên bản mới (%s).", companyName, identity);
+        String title = "Hồ sơ công ty đã được cập nhật";
+        String message = String.format("Thông tin của %s vừa được cập nhật trong hệ thống.", companyName);
 
         for (Account owner : owners) {
             if (actorId != null && owner.getId().equals(actorId)) {
@@ -591,6 +654,15 @@ public class NotificationService {
         }
     }
 
+    @Transactional(readOnly = true)
+    public List<NotificationResponse> getUnreadRelationshipAssessmentNotifications() {
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
+
+        List<Notification> notifications = notificationRepository.findUnreadRelationshipAssessmentNotifications(currentUser.getId());
+        return notifications.stream().map(this::toResponse).toList();
+    }
+
     @Transactional
     public void notifyRelationshipAssessmentCompleted(CompanyRelationshipAssessment assessment, Long actorId) {
         if (assessment == null) {
@@ -606,16 +678,43 @@ public class NotificationService {
         }
 
         Account sender = actorId != null ? accountRepository.findById(actorId).orElse(null) : null;
-        String title = "Đánh giá độ thân thiết đã hoàn thành";
-        String message = String.format("Đánh giá độ thân thiết v%d cho công ty \"%s\" đã được Manager hoàn thành.",
-                assessment.getVersionNumber(), companyProfileId);
+        String companyName = resolveCompanyName(companyProfileId);
+
+        boolean hasPreviousFinalized = assessmentRepository != null
+                && StringUtils.hasText(assessment.getOwnerCompanyProfileId())
+                && StringUtils.hasText(companyProfileId)
+                && assessment.getId() != null
+                && assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusAndIdNot(
+                        assessment.getOwnerCompanyProfileId(),
+                        companyProfileId,
+                        RelationshipAssessmentStatus.FINALIZED,
+                        assessment.getId()
+                );
+
+        String actionType = hasPreviousFinalized ? "RELATIONSHIP_ASSESSMENT_UPDATED" : "RELATIONSHIP_ASSESSMENT_INITIAL";
+        String title = hasPreviousFinalized ? "Cập nhật đánh giá mức độ thân thiết" : "Đánh giá mức độ thân thiết mới";
+
+        Integer score = assessment.getManagerTotalScore() != null 
+                ? assessment.getManagerTotalScore() 
+                : assessment.getOwnerFinalTotalScore();
+        String rank = StringUtils.hasText(assessment.getManagerRank()) 
+                ? assessment.getManagerRank() 
+                : assessment.getOwnerFinalRank();
+
+        String message;
+        if (score != null && StringUtils.hasText(rank)) {
+            message = String.format("%s · V%d · %d/100 · Rank %s", companyName, assessment.getVersionNumber(), score, rank);
+        } else {
+            message = String.format("%s · V%d", companyName, assessment.getVersionNumber());
+        }
 
         for (Account owner : owners) {
             if (actorId != null && owner.getId().equals(actorId)) {
                 continue;
             }
 
-            if (notificationRepository.existsLifecycleNotification(owner.getId(), "RELATIONSHIP_ASSESSMENT_COMPLETED", entityId, companyProfileId)) {
+            if (notificationRepository.existsLifecycleNotification(owner.getId(), actionType, entityId, companyProfileId)
+                    || notificationRepository.existsLifecycleNotification(owner.getId(), "RELATIONSHIP_ASSESSMENT_COMPLETED", entityId, companyProfileId)) {
                 log.debug("Notification already exists for owner={}, assessment={}", owner.getId(), assessment.getId());
                 continue;
             }
@@ -626,7 +725,7 @@ public class NotificationService {
                     .title(title)
                     .message(message)
                     .type(NotificationType.SYSTEM)
-                    .actionType("RELATIONSHIP_ASSESSMENT_COMPLETED")
+                    .actionType(actionType)
                     .companyProfileId(companyProfileId)
                     .entityId(entityId)
                     .entityType("RELATIONSHIP_ASSESSMENT")
@@ -645,7 +744,7 @@ public class NotificationService {
                     title,
                     pushMessage,
                     java.util.Map.of(
-                            "type", "RELATIONSHIP_ASSESSMENT_COMPLETED",
+                            "type", actionType,
                             "notificationId", String.valueOf(savedNotification.getId()),
                             "companyProfileId", companyProfileId,
                             "entityId", entityId
@@ -663,8 +762,18 @@ public class NotificationService {
                 ? sourceAssessment.getManagerAccountId()
                 : assessment.getManagerAccountId();
 
-        if (managerId == null) {
-            log.warn("Cannot find source manager account for Owner Adjustment assessment={}", assessment.getId());
+        notifyRelationshipAssessmentOwnerAdjusted(assessment, sourceAssessment, managerId, actorId);
+    }
+
+    @Transactional
+    public void notifyRelationshipAssessmentOwnerAdjusted(CompanyRelationshipAssessment assessment, Long managerId, Long actorId) {
+        notifyRelationshipAssessmentOwnerAdjusted(assessment, null, managerId, actorId);
+    }
+
+    @Transactional
+    public void notifyRelationshipAssessmentOwnerAdjusted(CompanyRelationshipAssessment assessment, CompanyRelationshipAssessment sourceAssessment, Long managerId, Long actorId) {
+        if (assessment == null || managerId == null) {
+            log.warn("Cannot find source manager account for Owner Adjustment assessment={}", assessment != null ? assessment.getId() : null);
             return;
         }
 
@@ -687,9 +796,31 @@ public class NotificationService {
         }
 
         Account sender = actorId != null ? accountRepository.findById(actorId).orElse(null) : null;
-        String title = "Đánh giá độ thân thiết đã được Owner điều chỉnh";
-        String message = String.format("Business Owner đã hoàn thành điều chỉnh đánh giá độ thân thiết v%d cho công ty \"%s\".",
-                assessment.getVersionNumber(), companyProfileId);
+        String companyName = resolveCompanyName(companyProfileId);
+        String title = "Business Owner đã điều chỉnh đánh giá";
+
+        Integer oldScore = sourceAssessment != null 
+                ? (sourceAssessment.getOwnerFinalTotalScore() != null ? sourceAssessment.getOwnerFinalTotalScore() : sourceAssessment.getManagerTotalScore())
+                : null;
+        String oldRank = sourceAssessment != null 
+                ? (StringUtils.hasText(sourceAssessment.getOwnerFinalRank()) ? sourceAssessment.getOwnerFinalRank() : sourceAssessment.getManagerRank())
+                : null;
+
+        Integer newScore = assessment.getOwnerFinalTotalScore() != null 
+                ? assessment.getOwnerFinalTotalScore() 
+                : assessment.getManagerTotalScore();
+        String newRank = StringUtils.hasText(assessment.getOwnerFinalRank()) 
+                ? assessment.getOwnerFinalRank() 
+                : assessment.getManagerRank();
+
+        String message;
+        if (oldScore != null && StringUtils.hasText(oldRank) && newScore != null && StringUtils.hasText(newRank)) {
+            message = String.format("%s · %d/100 · Rank %s → %d/100 · Rank %s", companyName, oldScore, oldRank, newScore, newRank);
+        } else if (newScore != null && StringUtils.hasText(newRank)) {
+            message = String.format("%s · %d/100 · Rank %s", companyName, newScore, newRank);
+        } else {
+            message = String.format("%s · V%d", companyName, assessment.getVersionNumber());
+        }
 
         Notification notification = Notification.builder()
                 .recipientAccount(recipient)

@@ -38,7 +38,10 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -106,7 +109,7 @@ public class CompanyRelationshipAssessmentService {
         result.put("officialFinalizedAssessment", effectiveFinalized.map(a -> toResponse(a, currentUser, null)).orElse(null));
         result.put("liveCommercialEvidence", liveCommercial);
         result.put("hasActiveAssessment", activeOpt.isPresent());
-        result.put("canCreateAssessment", canCreateNewAssessment(targetCompanyProfileId, currentUser, activeOpt.isPresent()));
+        result.put("canCreateAssessment", canCreateNewAssessment(targetCompanyProfileId, currentUser, activeOpt.isPresent(), effectiveFinalized.isPresent()));
 
         return result;
     }
@@ -129,6 +132,137 @@ public class CompanyRelationshipAssessmentService {
                 .filter(a -> a.getStatus() == RelationshipAssessmentStatus.FINALIZED)
                 .map(a -> toResponse(a, currentUser, null))
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<CompanyRecentAssessmentSummaryDto> getRecentAssessmentsSummary(UserDetailsImpl currentUser) {
+        String ownerId = ownerOrganizationService.getOwnerCompanyProfileId();
+
+        // 1. Fetch at most 2 latest finalized assessments per company (Zero N+1 DB query)
+        List<CompanyRelationshipAssessment> assessments;
+        try {
+            assessments = assessmentRepository.findTop2FinalizedPerCompany(ownerId);
+        } catch (Exception e) {
+            log.warn("Failed native query findTop2FinalizedPerCompany, falling back to in-memory group: {}", e.getMessage());
+            assessments = assessmentRepository.findAllByOwnerCompanyProfileIdAndStatusOrderByVersionNumberDesc(
+                    ownerId, RelationshipAssessmentStatus.FINALIZED);
+        }
+
+        if (assessments == null || assessments.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 2. Group by companyProfileId preserving version order
+        Map<String, List<CompanyRelationshipAssessment>> grouped = new LinkedHashMap<>();
+        for (CompanyRelationshipAssessment a : assessments) {
+            grouped.computeIfAbsent(a.getCompanyProfileId(), k -> new ArrayList<>()).add(a);
+        }
+
+        // 3. Batch load company profiles (Zero N+1 DB queries)
+        Set<String> profileIds = grouped.keySet();
+        List<CompanyProfile> loadedProfiles = companyProfileRepository.findAllById(profileIds);
+        Map<String, CompanyProfile> profileMap = new HashMap<>();
+        for (CompanyProfile p : loadedProfiles) {
+            if (p.getId() != null) profileMap.put(p.getId(), p);
+            if (p.getCompanyId() != null) profileMap.put(p.getCompanyId(), p);
+        }
+
+        Set<String> missing = profileIds.stream().filter(id -> !profileMap.containsKey(id)).collect(Collectors.toSet());
+        if (!missing.isEmpty()) {
+            List<CompanyProfile> byCompanyId = companyProfileRepository.findByCompanyIdIn(missing);
+            for (CompanyProfile p : byCompanyId) {
+                if (p.getId() != null) profileMap.put(p.getId(), p);
+                if (p.getCompanyId() != null) profileMap.put(p.getCompanyId(), p);
+            }
+        }
+
+        ZoneId vnZone = ZoneId.of("Asia/Ho_Chi_Minh");
+        DateTimeFormatter isoFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+
+        List<CompanyRecentAssessmentSummaryDto> results = new ArrayList<>();
+
+        for (Map.Entry<String, List<CompanyRelationshipAssessment>> entry : grouped.entrySet()) {
+            String companyProfileId = entry.getKey();
+            List<CompanyRelationshipAssessment> list = entry.getValue();
+            if (list.isEmpty()) continue;
+
+            list.sort(Comparator.comparing(CompanyRelationshipAssessment::getVersionNumber).reversed());
+
+            CompanyRelationshipAssessment latestEntity = list.get(0);
+            CompanyRelationshipAssessment previousEntity = list.size() > 1 ? list.get(1) : null;
+
+            CompanyProfile profile = profileMap.get(companyProfileId);
+            String companyId = profile != null && StringUtils.hasText(profile.getCompanyId())
+                    ? profile.getCompanyId()
+                    : companyProfileId;
+
+            String companyName = profile != null
+                    ? CompanyProfile.getCanonicalDisplayName(profile, companyId)
+                    : companyProfileId;
+
+            String relationshipType = accessEvaluator.resolveRelationshipType(companyId);
+
+            RecentAssessmentItemDto latestDto = mapToRecentItemDto(latestEntity, vnZone, isoFormatter);
+            RecentAssessmentItemDto prevDto = previousEntity != null ? mapToRecentItemDto(previousEntity, vnZone, isoFormatter) : null;
+
+            results.add(CompanyRecentAssessmentSummaryDto.builder()
+                    .companyProfileId(companyProfileId)
+                    .companyId(companyId)
+                    .companyName(companyName)
+                    .relationshipType(relationshipType)
+                    .latestAssessment(latestDto)
+                    .previousAssessment(prevDto)
+                    .build());
+        }
+
+        return results;
+    }
+
+    private RecentAssessmentItemDto mapToRecentItemDto(
+            CompanyRelationshipAssessment entity,
+            ZoneId zoneId,
+            DateTimeFormatter formatter) {
+        if (entity == null) return null;
+
+        Integer officialScore = getOfficialTotalScore(entity);
+        String officialRank = getOfficialRank(entity);
+        String officialRankDesc = null;
+        if (officialRank != null) {
+            try {
+                officialRankDesc = RelationshipAssessmentRank.valueOf(officialRank).getDescription();
+            } catch (Exception ignored) {}
+        }
+
+        String finalizedAtIso = null;
+        LocalDateTime finTime = entity.getFinalizedAt() != null ? entity.getFinalizedAt() : entity.getUpdatedAt();
+        if (finTime != null) {
+            finalizedAtIso = finTime.atZone(zoneId).format(formatter);
+        }
+
+        String actorRole = entity.getAssessmentType() == RelationshipAssessmentType.OWNER_ADJUSTMENT
+                ? "BUSINESS_OWNER"
+                : "BUSINESS_DEVELOPMENT_MANAGER";
+
+        OfficialCriterionScores crit = getOfficialCriterionScores(entity);
+        Map<String, Integer> criteriaMap = new LinkedHashMap<>();
+        criteriaMap.put("commercial", crit.commercial());
+        criteriaMap.put("interaction", crit.cooperation());
+        criteriaMap.put("strategic", crit.strategic());
+        criteriaMap.put("network", crit.relationshipNetwork());
+        criteriaMap.put("engagement", crit.engagement());
+        criteriaMap.put("trust", crit.qualitative());
+
+        return RecentAssessmentItemDto.builder()
+                .id(entity.getId())
+                .versionNumber(entity.getVersionNumber())
+                .assessmentType(entity.getAssessmentType() != null ? entity.getAssessmentType().name() : null)
+                .score(officialScore)
+                .rank(officialRank)
+                .rankDescription(officialRankDesc)
+                .finalizedAt(finalizedAtIso)
+                .actorRole(actorRole)
+                .criteria(criteriaMap)
+                .build();
     }
 
     @Transactional(readOnly = true)
@@ -1420,7 +1554,7 @@ public class CompanyRelationshipAssessmentService {
     @Transactional
     public RelationshipAssessmentResponse createNewVersion(String targetCompanyProfileId, UserDetailsImpl currentUser) {
         validateTargetProfile(targetCompanyProfileId);
-        validateManagerOrOwnerAccess(targetCompanyProfileId, currentUser);
+        validateManagerAccess(targetCompanyProfileId, currentUser);
 
         String ownerId = ownerOrganizationService.getOwnerCompanyProfileId();
         CompanyProfile target = resolveTargetProfile(targetCompanyProfileId);
@@ -1511,15 +1645,10 @@ public class CompanyRelationshipAssessmentService {
             throw new BusinessValidationException("Only FINALIZED assessments can be adjusted.");
         }
 
-        // Correction 6: Restrict repeated Owner-on-Owner adjustment for current MVP
-        if (source.getAssessmentType() == RelationshipAssessmentType.OWNER_ADJUSTMENT) {
-            throw new BusinessValidationException("Cannot adjust an existing Owner Adjustment. Please wait for a new Manager assessment before adjusting.");
-        }
-
         String ownerId = ownerOrganizationService.getOwnerCompanyProfileId();
         List<String> targetIds = resolveTargetProfileIds(source.getCompanyProfileId());
 
-        // Correction 4: Verify source is the latest official finalized assessment
+        // Verify source is the latest official finalized assessment
         Optional<CompanyRelationshipAssessment> latestFinalizedOpt = assessmentRepository
                 .findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
                         ownerId, source.getCompanyProfileId(), RelationshipAssessmentStatus.FINALIZED);
@@ -1546,7 +1675,8 @@ public class CompanyRelationshipAssessmentService {
 
         int nextVersion = resolveNextVersionNumber(ownerId, source.getCompanyProfileId(), targetIds, latestFinalized.getVersionNumber());
 
-        // Correction 3: OWNER ADJUSTMENT MUST COPY SOURCE EVIDENCE SNAPSHOT (DO NOT query current contracts!)
+        OfficialCriterionScores officialBaseline = getOfficialCriterionScores(source);
+
         CompanyRelationshipAssessment adjustment = CompanyRelationshipAssessment.builder()
                 .ownerCompanyProfileId(ownerId)
                 .companyProfileId(source.getCompanyProfileId())
@@ -1572,36 +1702,36 @@ public class CompanyRelationshipAssessmentService {
                 .upcomingContractCount(source.getUpcomingContractCount())
                 .scorableBase(source.getScorableBase())
                 .normalizationApplied(source.getNormalizationApplied())
-                // Copy Manager baseline scores snapshot
-                .commercialAwardedScore(source.getCommercialAwardedScore())
-                .commercialAdjustmentReason(source.getCommercialAdjustmentReason())
+                // Baseline snapshot scores populated with official values from source
+                .commercialAwardedScore(officialBaseline.commercial())
+                .commercialAdjustmentReason(null)
                 .commercialEvidenceNote(source.getCommercialEvidenceNote())
-                .cooperationScore(source.getCooperationScore())
+                .cooperationScore(officialBaseline.cooperation())
                 .cooperationEvidenceNote(source.getCooperationEvidenceNote())
-                .strategicScore(source.getStrategicScore())
+                .strategicScore(officialBaseline.strategic())
                 .strategicEvidenceNote(source.getStrategicEvidenceNote())
-                .relationshipNetworkScore(source.getRelationshipNetworkScore())
-                .relationshipNetworkNote(source.getRelationshipNetworkNote())
-                .engagementScore(source.getEngagementScore())
+                .relationshipNetworkScore(officialBaseline.relationshipNetwork())
+                .relationshipNetworkNote(officialBaseline.relationshipNetworkNote())
+                .engagementScore(officialBaseline.engagement())
                 .engagementEvidenceNote(source.getEngagementEvidenceNote())
-                .qualitativeScore(source.getQualitativeScore())
+                .qualitativeScore(officialBaseline.qualitative())
                 .qualitativeEvidenceNote(source.getQualitativeEvidenceNote())
-                .managerNote(source.getManagerNote())
-                .managerRawScorableScore(source.getManagerRawScorableScore())
-                .managerTotalScore(source.getManagerTotalScore())
-                .managerRank(source.getManagerRank())
-                .managerAccountId(source.getManagerAccountId())
-                // Prefill Owner scores from Manager baseline
-                .ownerCommercialScore(source.getCommercialAwardedScore())
-                .ownerCooperationScore(source.getCooperationScore())
-                .ownerStrategicScore(source.getStrategicScore())
-                .ownerRelationshipNetworkScore(source.getRelationshipNetworkScore())
-                .ownerRelationshipNetworkNote(source.getRelationshipNetworkNote())
-                .ownerEngagementScore(source.getEngagementScore())
-                .ownerQualitativeScore(source.getQualitativeScore())
-                .ownerRawScorableScore(source.getManagerRawScorableScore())
-                .ownerFinalTotalScore(source.getManagerTotalScore())
-                .ownerFinalRank(source.getManagerRank())
+                .managerNote(null)
+                .managerRawScorableScore(officialBaseline.rawScorableScore())
+                .managerTotalScore(officialBaseline.totalScore())
+                .managerRank(officialBaseline.rank())
+                .managerAccountId(null) // Correction 2: DO NOT set managerAccountId on Owner Adjustment
+                // Prefill Owner scores from official baseline
+                .ownerCommercialScore(officialBaseline.commercial())
+                .ownerCooperationScore(officialBaseline.cooperation())
+                .ownerStrategicScore(officialBaseline.strategic())
+                .ownerRelationshipNetworkScore(officialBaseline.relationshipNetwork())
+                .ownerRelationshipNetworkNote(officialBaseline.relationshipNetworkNote())
+                .ownerEngagementScore(officialBaseline.engagement())
+                .ownerQualitativeScore(officialBaseline.qualitative())
+                .ownerRawScorableScore(officialBaseline.rawScorableScore())
+                .ownerFinalTotalScore(officialBaseline.totalScore())
+                .ownerFinalRank(officialBaseline.rank())
                 .ownerNote(null)
                 .ownerAdjustmentReason(null)
                 .createdByAccountId(currentUser.getId())
@@ -1652,11 +1782,11 @@ public class CompanyRelationshipAssessmentService {
             if (request.getOwnerCooperationScore() != null) assessment.setOwnerCooperationScore(request.getOwnerCooperationScore());
             if (request.getOwnerStrategicScore() != null) assessment.setOwnerStrategicScore(request.getOwnerStrategicScore());
             if (request.getOwnerRelationshipNetworkScore() != null) assessment.setOwnerRelationshipNetworkScore(request.getOwnerRelationshipNetworkScore());
-            if (request.getOwnerRelationshipNetworkNote() != null) assessment.setOwnerRelationshipNetworkNote(request.getOwnerRelationshipNetworkNote());
             if (request.getOwnerEngagementScore() != null) assessment.setOwnerEngagementScore(request.getOwnerEngagementScore());
             if (request.getOwnerQualitativeScore() != null) assessment.setOwnerQualitativeScore(request.getOwnerQualitativeScore());
-            if (request.getOwnerAdjustmentReason() != null) assessment.setOwnerAdjustmentReason(request.getOwnerAdjustmentReason());
-            if (request.getOwnerNote() != null) assessment.setOwnerNote(request.getOwnerNote());
+            assessment.setOwnerRelationshipNetworkNote(request.getOwnerRelationshipNetworkNote());
+            assessment.setOwnerAdjustmentReason(request.getOwnerAdjustmentReason());
+            assessment.setOwnerNote(request.getOwnerNote());
         }
 
         // Live preview score calculation for owner if all 6 owner scores are present
@@ -1725,11 +1855,32 @@ public class CompanyRelationshipAssessmentService {
             if (request.getOwnerCooperationScore() != null) assessment.setOwnerCooperationScore(request.getOwnerCooperationScore());
             if (request.getOwnerStrategicScore() != null) assessment.setOwnerStrategicScore(request.getOwnerStrategicScore());
             if (request.getOwnerRelationshipNetworkScore() != null) assessment.setOwnerRelationshipNetworkScore(request.getOwnerRelationshipNetworkScore());
-            if (request.getOwnerRelationshipNetworkNote() != null) assessment.setOwnerRelationshipNetworkNote(request.getOwnerRelationshipNetworkNote());
             if (request.getOwnerEngagementScore() != null) assessment.setOwnerEngagementScore(request.getOwnerEngagementScore());
             if (request.getOwnerQualitativeScore() != null) assessment.setOwnerQualitativeScore(request.getOwnerQualitativeScore());
-            if (request.getOwnerAdjustmentReason() != null) assessment.setOwnerAdjustmentReason(request.getOwnerAdjustmentReason());
-            if (request.getOwnerNote() != null) assessment.setOwnerNote(request.getOwnerNote());
+            assessment.setOwnerRelationshipNetworkNote(request.getOwnerRelationshipNetworkNote());
+            assessment.setOwnerAdjustmentReason(request.getOwnerAdjustmentReason());
+            assessment.setOwnerNote(request.getOwnerNote());
+        }
+
+        // Verify source assessment exists and is still the latest official finalized assessment (Correction 4)
+        if (assessment.getSourceAssessmentId() == null) {
+            throw new BusinessValidationException("Bản điều chỉnh không có phiên bản nguồn hợp lệ.");
+        }
+
+        String ownerId = assessment.getOwnerCompanyProfileId();
+        List<String> targetIds = resolveTargetProfileIds(assessment.getCompanyProfileId());
+        Optional<CompanyRelationshipAssessment> latestFinalizedOpt = assessmentRepository
+                .findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
+                        ownerId, assessment.getCompanyProfileId(), RelationshipAssessmentStatus.FINALIZED);
+        if (latestFinalizedOpt.isEmpty() && targetIds.size() > 1) {
+            latestFinalizedOpt = assessmentRepository
+                    .findFirstByOwnerCompanyProfileIdAndCompanyProfileIdInAndStatusOrderByVersionNumberDesc(
+                            ownerId, targetIds, RelationshipAssessmentStatus.FINALIZED);
+        }
+        CompanyRelationshipAssessment currentLatest = latestFinalizedOpt
+                .orElseThrow(() -> new BusinessValidationException("Không tìm thấy bản đánh giá chính thức cho doanh nghiệp này."));
+        if (!currentLatest.getId().equals(assessment.getSourceAssessmentId())) {
+            throw new BusinessValidationException("Phiên bản đánh giá hiện tại đã thay đổi. Vui lòng tạo lại bản điều chỉnh từ kết quả mới nhất.");
         }
 
         // Validate all 6 owner scores must be present (0..5)
@@ -1742,22 +1893,19 @@ public class CompanyRelationshipAssessmentService {
                 assessment.getOwnerQualitativeScore()
         );
 
-        // Validate at least one score differs from Manager baseline
-        boolean criteriaAdjusted =
-                !Objects.equals(assessment.getOwnerCommercialScore(), assessment.getCommercialAwardedScore()) ||
-                !Objects.equals(assessment.getOwnerCooperationScore(), assessment.getCooperationScore()) ||
-                !Objects.equals(assessment.getOwnerStrategicScore(), assessment.getStrategicScore()) ||
-                !Objects.equals(assessment.getOwnerRelationshipNetworkScore(), assessment.getRelationshipNetworkScore()) ||
-                !Objects.equals(assessment.getOwnerEngagementScore(), assessment.getEngagementScore()) ||
-                !Objects.equals(assessment.getOwnerQualitativeScore(), assessment.getQualitativeScore());
+        OfficialCriterionScores sourceOfficial = getOfficialCriterionScores(currentLatest);
+
+        boolean commChanged = !Objects.equals(assessment.getOwnerCommercialScore(), sourceOfficial.commercial());
+        boolean coopChanged = !Objects.equals(assessment.getOwnerCooperationScore(), sourceOfficial.cooperation());
+        boolean stratChanged = !Objects.equals(assessment.getOwnerStrategicScore(), sourceOfficial.strategic());
+        boolean netChanged = !Objects.equals(assessment.getOwnerRelationshipNetworkScore(), sourceOfficial.relationshipNetwork());
+        boolean engChanged = !Objects.equals(assessment.getOwnerEngagementScore(), sourceOfficial.engagement());
+        boolean qualChanged = !Objects.equals(assessment.getOwnerQualitativeScore(), sourceOfficial.qualitative());
+
+        boolean criteriaAdjusted = commChanged || coopChanged || stratChanged || netChanged || engChanged || qualChanged;
 
         if (!criteriaAdjusted) {
-            throw new BusinessValidationException("At least one criterion score must be changed from Manager baseline to complete an adjustment.");
-        }
-
-        // Validate ownerAdjustmentReason is mandatory when modifying scores
-        if (!StringUtils.hasText(assessment.getOwnerAdjustmentReason())) {
-            throw new BusinessValidationException("Owner Adjustment Reason is mandatory when modifying Manager criteria.");
+            throw new BusinessValidationException("At least one criterion score must be changed from the current official assessment to complete an adjustment.");
         }
 
         CalculationResult ownerCalc = scoreCalculator.calculateV5(
@@ -1783,10 +1931,8 @@ public class CompanyRelationshipAssessmentService {
                 String.format("Finalized Owner Adjustment v%d (Final Score: %d, Rank: %s) for company %s",
                         assessment.getVersionNumber(), ownerCalc.getNormalizedTotalScore(), ownerCalc.getRank(), assessment.getCompanyProfileId()));
 
-        CompanyRelationshipAssessment sourceAssessment = assessment.getSourceAssessmentId() != null
-                ? assessmentRepository.findById(assessment.getSourceAssessmentId()).orElse(null)
-                : null;
-        notificationService.notifyRelationshipAssessmentOwnerAdjusted(assessment, sourceAssessment, currentUser != null ? currentUser.getId() : null);
+        Long sourceManagerId = resolveSourceManagerAccountId(assessment.getSourceAssessmentId());
+        notificationService.notifyRelationshipAssessmentOwnerAdjusted(assessment, currentLatest, sourceManagerId, currentUser != null ? currentUser.getId() : null);
 
         return toResponse(assessment, currentUser, null);
     }
@@ -1987,15 +2133,15 @@ public class CompanyRelationshipAssessmentService {
             canEditDraft = false;
         }
 
+        boolean activeExists = assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(
+                entity.getOwnerCompanyProfileId(), entity.getCompanyProfileId(), ACTIVE_STATUSES);
+
         boolean canCancelAdjustment = isDraft && isOwnerAdjustment && isOwner;
         boolean canSubmit = (isDraft || isChangesRequested) && isManager && !isOwnerAdjustment;
         boolean canComplete = isDraft && (isOwnerAdjustment ? isOwner : isManager);
         boolean canRequestChanges = isSubmitted && isOwner;
         boolean canFinalize = isSubmitted && isOwner;
-        boolean canCreateNewVersion = isFinalized && canCreateNewAssessment(entity.getCompanyProfileId(), currentUser, false);
-
-        boolean activeExists = assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(
-                entity.getOwnerCompanyProfileId(), entity.getCompanyProfileId(), ACTIVE_STATUSES);
+        boolean canCreateNewVersion = isFinalized && !activeExists && isManager && canCreateNewAssessment(entity.getCompanyProfileId(), currentUser, false, true);
 
         boolean isLatestOfficialFinalized = false;
         if (isFinalized) {
@@ -2009,7 +2155,7 @@ public class CompanyRelationshipAssessmentService {
             }
         }
 
-        boolean canAdjust = isLatestOfficialFinalized && !activeExists && isOwner && !isOwnerAdjustment;
+        boolean canAdjust = isLatestOfficialFinalized && !activeExists && isOwner;
 
         Integer sourceVersionNumber = null;
         if (entity.getSourceAssessmentId() != null) {
@@ -2069,34 +2215,16 @@ public class CompanyRelationshipAssessmentService {
         String officialRankDesc = null;
 
         if (isFinalized) {
-            if (isOwnerAdjustment || entity.getOwnerFinalTotalScore() != null) {
-                officialScore = entity.getOwnerFinalTotalScore();
-                officialRank = entity.getOwnerFinalRank();
-            } else if (isV5) {
-                officialScore = entity.getManagerTotalScore();
-                officialRank = entity.getManagerRank();
-            } else {
-                officialScore = entity.getOwnerFinalTotalScore();
-                officialRank = entity.getOwnerFinalRank();
-            }
+            officialScore = getOfficialTotalScore(entity);
+            officialRank = getOfficialRank(entity);
             if (officialRank != null) {
                 try {
                     officialRankDesc = RelationshipAssessmentRank.valueOf(officialRank).getDescription();
                 } catch (Exception ignored) {}
             }
         } else if (latestFinalized != null) {
-            boolean latestIsV5 = RelationshipCommercialScoringPolicy.POLICY_VERSION_V5.equals(latestFinalized.getScoringPolicyVersion());
-            boolean latestIsOwner = latestFinalized.getAssessmentType() == RelationshipAssessmentType.OWNER_ADJUSTMENT;
-            if (latestIsOwner || latestFinalized.getOwnerFinalTotalScore() != null) {
-                officialScore = latestFinalized.getOwnerFinalTotalScore();
-                officialRank = latestFinalized.getOwnerFinalRank();
-            } else if (latestIsV5) {
-                officialScore = latestFinalized.getManagerTotalScore();
-                officialRank = latestFinalized.getManagerRank();
-            } else {
-                officialScore = latestFinalized.getOwnerFinalTotalScore();
-                officialRank = latestFinalized.getOwnerFinalRank();
-            }
+            officialScore = getOfficialTotalScore(latestFinalized);
+            officialRank = getOfficialRank(latestFinalized);
             if (officialRank != null) {
                 try {
                     officialRankDesc = RelationshipAssessmentRank.valueOf(officialRank).getDescription();
@@ -2271,12 +2399,113 @@ public class CompanyRelationshipAssessmentService {
         accessEvaluator.validateAssessmentAccess(targetCompanyProfileId, user, isWrite);
     }
 
+    public record OfficialCriterionScores(
+            Integer commercial,
+            Integer cooperation,
+            Integer strategic,
+            Integer relationshipNetwork,
+            String relationshipNetworkNote,
+            Integer engagement,
+            Integer qualitative,
+            Integer rawScorableScore,
+            Integer totalScore,
+            String rank
+    ) {}
+
+    public OfficialCriterionScores getOfficialCriterionScores(CompanyRelationshipAssessment assessment) {
+        if (assessment == null) {
+            return new OfficialCriterionScores(null, null, null, null, null, null, null, null, null, null);
+        }
+
+        boolean isOwnerAdj = assessment.getAssessmentType() == RelationshipAssessmentType.OWNER_ADJUSTMENT;
+        boolean hasOwnerFinal = assessment.getOwnerFinalTotalScore() != null;
+
+        if (isOwnerAdj || hasOwnerFinal) {
+            return new OfficialCriterionScores(
+                    assessment.getOwnerCommercialScore() != null ? assessment.getOwnerCommercialScore() : assessment.getCommercialAwardedScore(),
+                    assessment.getOwnerCooperationScore() != null ? assessment.getOwnerCooperationScore() : assessment.getCooperationScore(),
+                    assessment.getOwnerStrategicScore() != null ? assessment.getOwnerStrategicScore() : assessment.getStrategicScore(),
+                    assessment.getOwnerRelationshipNetworkScore() != null ? assessment.getOwnerRelationshipNetworkScore() : assessment.getRelationshipNetworkScore(),
+                    StringUtils.hasText(assessment.getOwnerRelationshipNetworkNote()) ? assessment.getOwnerRelationshipNetworkNote() : assessment.getRelationshipNetworkNote(),
+                    assessment.getOwnerEngagementScore() != null ? assessment.getOwnerEngagementScore() : assessment.getEngagementScore(),
+                    assessment.getOwnerQualitativeScore() != null ? assessment.getOwnerQualitativeScore() : assessment.getQualitativeScore(),
+                    assessment.getOwnerRawScorableScore() != null ? assessment.getOwnerRawScorableScore() : assessment.getManagerRawScorableScore(),
+                    assessment.getOwnerFinalTotalScore() != null ? assessment.getOwnerFinalTotalScore() : assessment.getManagerTotalScore(),
+                    assessment.getOwnerFinalRank() != null ? assessment.getOwnerFinalRank() : assessment.getManagerRank()
+            );
+        } else {
+            return new OfficialCriterionScores(
+                    assessment.getCommercialAwardedScore() != null ? assessment.getCommercialAwardedScore() : assessment.getCommercialScore(),
+                    assessment.getCooperationScore(),
+                    assessment.getStrategicScore(),
+                    assessment.getRelationshipNetworkScore(),
+                    assessment.getRelationshipNetworkNote(),
+                    assessment.getEngagementScore(),
+                    assessment.getQualitativeScore(),
+                    assessment.getManagerRawScorableScore(),
+                    assessment.getManagerTotalScore(),
+                    assessment.getManagerRank()
+            );
+        }
+    }
+
+    public Integer getOfficialTotalScore(CompanyRelationshipAssessment assessment) {
+        if (assessment == null) return null;
+        if (assessment.getStatus() != RelationshipAssessmentStatus.FINALIZED) return null;
+        boolean isV3 = RelationshipCommercialScoringPolicy.POLICY_VERSION_V3.equals(assessment.getScoringPolicyVersion());
+        if (isV3 && assessment.getOwnerFinalTotalScore() == null) {
+            return null;
+        }
+        if (assessment.getAssessmentType() == RelationshipAssessmentType.OWNER_ADJUSTMENT || assessment.getOwnerFinalTotalScore() != null) {
+            return assessment.getOwnerFinalTotalScore();
+        }
+        return assessment.getManagerTotalScore();
+    }
+
+    public String getOfficialRank(CompanyRelationshipAssessment assessment) {
+        if (assessment == null) return null;
+        if (assessment.getStatus() != RelationshipAssessmentStatus.FINALIZED) return null;
+        boolean isV3 = RelationshipCommercialScoringPolicy.POLICY_VERSION_V3.equals(assessment.getScoringPolicyVersion());
+        if (isV3 && assessment.getOwnerFinalRank() == null) {
+            return null;
+        }
+        if (assessment.getAssessmentType() == RelationshipAssessmentType.OWNER_ADJUSTMENT || assessment.getOwnerFinalRank() != null) {
+            return assessment.getOwnerFinalRank();
+        }
+        return assessment.getManagerRank();
+    }
+
+    public Long resolveSourceManagerAccountId(Long sourceAssessmentId) {
+        Long currentSourceId = sourceAssessmentId;
+        Set<Long> visited = new HashSet<>();
+
+        while (currentSourceId != null && visited.add(currentSourceId)) {
+            Optional<CompanyRelationshipAssessment> sourceOpt = assessmentRepository.findById(currentSourceId);
+            if (sourceOpt.isEmpty()) {
+                break;
+            }
+            CompanyRelationshipAssessment source = sourceOpt.get();
+            if (source.getAssessmentType() == RelationshipAssessmentType.MANAGER_ASSESSMENT) {
+                if (source.getManagerAccountId() != null) {
+                    return source.getManagerAccountId();
+                }
+                if (source.getCreatedByAccountId() != null) {
+                    return source.getCreatedByAccountId();
+                }
+            }
+            if (source.getManagerAccountId() != null) {
+                return source.getManagerAccountId();
+            }
+            currentSourceId = source.getSourceAssessmentId();
+        }
+        return null;
+    }
+
     private void validateDraftCreateAccess(String targetCompanyProfileId, UserDetailsImpl user) {
         validateAccess(targetCompanyProfileId, user, true);
-        if (!hasRole(user, SystemRole.BUSINESS_OWNER) &&
-            !hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER) &&
-            !hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_STAFF)) {
-            throw new AccessDeniedException("You do not have permission to create draft relationship assessments.");
+        // Correction 1: Initial assessment creation MUST be BD Manager only
+        if (!hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
+            throw new AccessDeniedException("Only Business Development Manager can create an initial relationship assessment.");
         }
     }
 
@@ -2286,6 +2515,13 @@ public class CompanyRelationshipAssessmentService {
             if (status != RelationshipAssessmentStatus.DRAFT) {
                 throw new AccessDeniedException("Staff can only edit assessments in DRAFT status.");
             }
+        }
+    }
+
+    private void validateManagerAccess(String targetCompanyProfileId, UserDetailsImpl user) {
+        validateAccess(targetCompanyProfileId, user, true);
+        if (!hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
+            throw new AccessDeniedException("Only Business Development Manager can create a reassessment version.");
         }
     }
 
@@ -2302,22 +2538,34 @@ public class CompanyRelationshipAssessmentService {
         }
     }
 
-    private boolean canCreateNewAssessment(String targetCompanyProfileId, UserDetailsImpl user, boolean hasActive) {
+    private boolean canCreateNewAssessment(String targetCompanyProfileId, UserDetailsImpl user, boolean hasActive, boolean hasFinalized) {
         if (hasActive) return false;
-        if (hasRole(user, SystemRole.BUSINESS_OWNER)) return true;
-        if (hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER) || hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_STAFF)) {
+        if (hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
             CompanyProfile target = companyProfileRepository.findById(targetCompanyProfileId)
                     .or(() -> companyProfileRepository.findByCompanyId(targetCompanyProfileId))
                     .orElse(null);
             if (target == null) return false;
-            if (hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
-                boolean isResponsible = target.getResponsibleManagerId() != null
-                        && target.getResponsibleManagerId().equals(user.getId());
-                return isResponsible || accessEvaluator.isInProjectScope(target, user.getId(), List.of(ProjectStatus.DRAFT, ProjectStatus.ACTIVE));
-            }
-            return accessEvaluator.isInProjectScope(target, user.getId(), List.of(ProjectStatus.DRAFT, ProjectStatus.ACTIVE));
+            boolean isResponsible = target.getResponsibleManagerId() != null
+                    && target.getResponsibleManagerId().equals(user.getId());
+            return isResponsible || accessEvaluator.isInProjectScope(target, user.getId(), List.of(ProjectStatus.DRAFT, ProjectStatus.ACTIVE));
+        }
+        if (hasRole(user, SystemRole.BUSINESS_OWNER)) {
+            // Owner can create adjustment ONLY when at least one finalized assessment exists
+            return hasFinalized;
         }
         return false;
+    }
+
+    private boolean canCreateNewAssessment(String targetCompanyProfileId, UserDetailsImpl user, boolean hasActive) {
+        String ownerId = ownerOrganizationService.getOwnerCompanyProfileId();
+        List<String> targetIds = resolveTargetProfileIds(targetCompanyProfileId);
+        boolean hasFinalized = assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(
+                ownerId, targetCompanyProfileId, List.of(RelationshipAssessmentStatus.FINALIZED));
+        if (!hasFinalized && targetIds.size() > 1) {
+            hasFinalized = assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdInAndStatusIn(
+                ownerId, targetIds, List.of(RelationshipAssessmentStatus.FINALIZED));
+        }
+        return canCreateNewAssessment(targetCompanyProfileId, user, hasActive, hasFinalized);
     }
 
     private int resolveNextVersionNumber(String ownerId, String targetCompanyProfileId, List<String> targetIds, Integer fallbackVersion) {

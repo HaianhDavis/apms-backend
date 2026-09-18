@@ -21,6 +21,13 @@ public class CompanyRelationshipAssessmentController {
 
     private final CompanyRelationshipAssessmentService assessmentService;
 
+    @GetMapping("/api/v1/company-relationship-assessments/recent-summary")
+    @Operation(summary = "Get batch recent closeness assessment summary for all companies in the Owner network")
+    public ResponseEntity<List<CompanyRecentAssessmentSummaryDto>> getRecentAssessmentsSummary(
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(assessmentService.getRecentAssessmentsSummary(currentUser));
+    }
+
     @GetMapping("/api/v1/company-profiles/{companyProfileId}/relationship-assessments/overview")
     @Operation(summary = "Get current active assessment, official score, and live preview evidence")
     public ResponseEntity<Map<String, Object>> getOverview(

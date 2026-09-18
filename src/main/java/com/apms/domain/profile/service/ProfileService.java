@@ -15,6 +15,11 @@ import com.apms.domain.profile.dto.ProfileSourcesResponse;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.profile.dto.UpdateCompanyProfileRequest;
 import com.apms.domain.profile.dto.UpdateOwnerCompanyProfileRequest;
+import com.apms.domain.profile.dto.AdminUpdateEnterpriseBasicInfoRequest;
+import com.apms.domain.profile.dto.AdminUpdateEnterpriseBusinessFieldsRequest;
+import com.apms.domain.profile.dto.AdminUpdateEnterpriseLeadershipRequest;
+import com.apms.domain.profile.dto.AdminEnterpriseLeadershipMemberRequest;
+import com.apms.domain.profile.dto.AdminEnterpriseProductRequest;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.common.enums.AuditAction;
@@ -1102,6 +1107,428 @@ public class ProfileService {
         if (currentUserId != null) {
             auditLogService.log(currentUserId, AuditAction.COMPANY_PROFILE_UPDATED, "CompanyProfile",
                     profile.getCompanyId(), "Owner company profile updated by SYSTEM_ADMIN");
+        }
+
+        return toResponse(profile);
+    }
+
+    /**
+     * SYSTEM_ADMIN updates basic information of the canonical Owner Enterprise.
+     * Only basic fields on Overview (Legal & Identity, Contact & Size, Introduction & Business Model)
+     * are applied. If no fields changed, no version or audit log is created.
+     */
+    @Transactional
+    public ProfileResponse updateAdminEnterpriseBasicInfo(AdminUpdateEnterpriseBasicInfoRequest request, UserDetailsImpl currentUser) {
+        CompanyProfile profile = ownerOrganizationService.getRequiredOwnerCompanyProfile();
+
+        // Optimistic concurrency / Stale write check
+        CompanyProfileVersionHelper.VersionState currentVersion = CompanyProfileVersionHelper.resolveVersion(profile);
+        if (request.getExpectedMajorVersion() != null && request.getExpectedRevision() != null) {
+            if (request.getExpectedMajorVersion() != currentVersion.majorVersion()
+                    || request.getExpectedRevision() != currentVersion.revision()) {
+                throw new com.apms.common.exception.BusinessConflictException("The company profile has changed since you opened it. Refresh before saving.");
+            }
+        }
+
+        java.util.Map<String, Object> beforeSnapshot = versionService.createSnapshotMap(profile);
+        CompanyProfile originalProfile = null;
+        if (objectMapper != null && beforeSnapshot != null) {
+            try {
+                originalProfile = objectMapper.convertValue(beforeSnapshot, CompanyProfile.class);
+            } catch (Exception e) {
+                log.warn("Failed to create pre-edit backup of Owner CompanyProfile {}: {}", profile.getId(), e.getMessage());
+            }
+        }
+
+        // Apply only basic fields
+        if (profile.getIdentity() == null) profile.setIdentity(new CompanyProfile.Identity());
+        if (request.getTradeName() != null) profile.getIdentity().setTradeName(request.getTradeName());
+        if (request.getLegalName() != null) profile.getIdentity().setLegalName(request.getLegalName());
+        if (request.getTaxCode() != null) profile.getIdentity().setTaxCode(request.getTaxCode());
+
+        if (profile.getContact() == null) profile.setContact(new CompanyProfile.Contact());
+        if (request.getWebsite() != null) profile.getContact().setWebsite(request.getWebsite());
+
+        if (request.getEmail() != null) {
+            List<String> emails = new ArrayList<>();
+            if (StringUtils.hasText(request.getEmail())) {
+                emails.add(request.getEmail().trim());
+            }
+            profile.getContact().setEmails(emails);
+        }
+
+        if (request.getPhone() != null) {
+            List<String> phones = new ArrayList<>();
+            if (StringUtils.hasText(request.getPhone())) {
+                phones.add(request.getPhone().trim());
+            }
+            profile.getContact().setPhones(phones);
+        }
+
+        if (request.getHeadOfficeAddress() != null) {
+            List<CompanyProfile.Address> addresses = new ArrayList<>();
+            if (StringUtils.hasText(request.getHeadOfficeAddress())) {
+                addresses.add(CompanyProfile.Address.builder()
+                        .type("HEADQUARTERS")
+                        .fullAddress(request.getHeadOfficeAddress().trim())
+                        .build());
+            }
+            profile.getContact().setAddresses(addresses);
+        }
+
+        if (profile.getCompanySize() == null) profile.setCompanySize(new CompanyProfile.CompanySize());
+        if (request.getEmployeeCount() != null) profile.getCompanySize().setEmployeeCount(request.getEmployeeCount());
+        if (request.getEmployeeTier() != null) profile.getCompanySize().setEmployeeTier(request.getEmployeeTier());
+
+        if (profile.getBusiness() == null) profile.setBusiness(new CompanyProfile.Business());
+        if (request.getBusinessModel() != null) profile.getBusiness().setBusinessModel(request.getBusinessModel());
+
+        java.util.Map<String, Object> afterSnapshot = versionService.createSnapshotMap(profile);
+
+        // Detect actual changes across basic fields
+        List<String> changedFieldPaths = new ArrayList<>();
+        java.util.Map<String, Object> beforeValues = new java.util.HashMap<>();
+        java.util.Map<String, Object> afterValues = new java.util.HashMap<>();
+
+        String[] potentialPaths = new String[]{
+                "identity.legalName", "identity.tradeName", "identity.taxCode",
+                "contact.website", "contact.emails", "contact.phones", "contact.addresses",
+                "companySize.employeeCount", "companySize.employeeTier",
+                "business.businessModel"
+        };
+
+        for (String path : potentialPaths) {
+            Object bVal = extractValueByPath(beforeSnapshot, path);
+            Object aVal = extractValueByPath(afterSnapshot, path);
+            if (!java.util.Objects.equals(bVal, aVal)) {
+                changedFieldPaths.add(path);
+                beforeValues.put(path, bVal);
+                afterValues.put(path, aVal);
+            }
+        }
+
+        // If no changes, return existing response without creating version or audit log
+        if (changedFieldPaths.isEmpty()) {
+            return toResponse(profile);
+        }
+
+        profile.incrementMinorVersion();
+        if (profile.getMetadata() == null) {
+            profile.setMetadata(new CompanyProfile.Metadata());
+        }
+        profile.getMetadata().setUpdatedAt(LocalDateTime.now());
+        profile.getMetadata().setLastModifiedBy(currentUser != null ? String.valueOf(currentUser.getId()) : "SYSTEM");
+
+        profileRepository.save(profile);
+
+        try {
+            versionService.createAndSaveVersion(
+                    profile,
+                    com.apms.domain.profile.enums.CompanyProfileChangeSource.ADMIN_MANUAL_EDIT,
+                    changedFieldPaths,
+                    beforeValues,
+                    afterValues,
+                    "Admin update of enterprise basic information",
+                    "Admin Manual Edit",
+                    null,
+                    null,
+                    null,
+                    null,
+                    currentUser != null ? currentUser.getId() : null
+            );
+        } catch (Exception ex) {
+            log.error("Failed to persist CompanyProfileVersion for owner profile {}: {}", profile.getId(), ex.getMessage(), ex);
+            if (originalProfile != null) {
+                try {
+                    profileRepository.save(originalProfile);
+                    log.info("Successfully rolled back owner profile {} to pre-edit state", profile.getId());
+                } catch (Exception rollbackEx) {
+                    log.error("CRITICAL: Failed to rollback owner profile {} after version creation failure: {}", profile.getId(), rollbackEx.getMessage(), rollbackEx);
+                }
+            }
+            throw ex;
+        }
+
+        if (currentUser != null) {
+            try {
+                auditLogService.log(
+                        currentUser.getId(),
+                        AuditAction.COMPANY_PROFILE_UPDATED,
+                        "CompanyProfile",
+                        profile.getCompanyId(),
+                        "Admin updated enterprise basic information (" + changedFieldPaths.size() + " fields changed)"
+                );
+            } catch (Exception e) {
+                log.warn("Failed to write audit log for admin enterprise basic update: {}", e.getMessage());
+            }
+        }
+
+        return toResponse(profile);
+    }
+
+    /**
+     * SYSTEM_ADMIN edits Business Fields of the canonical Owner Enterprise.
+     * Strictly limited to industries, markets, targetCustomers, products.
+     * Concurrency-safe, versioned as ADMIN_MANUAL_EDIT, and audited.
+     */
+    @Transactional
+    public ProfileResponse updateAdminEnterpriseBusinessFields(AdminUpdateEnterpriseBusinessFieldsRequest request, UserDetailsImpl currentUser) {
+        CompanyProfile profile = ownerOrganizationService.getRequiredOwnerCompanyProfile();
+
+        // Optimistic concurrency / Stale write check
+        CompanyProfileVersionHelper.VersionState currentVersion = CompanyProfileVersionHelper.resolveVersion(profile);
+        if (request.getExpectedMajorVersion() != null && request.getExpectedRevision() != null) {
+            if (request.getExpectedMajorVersion() != currentVersion.majorVersion()
+                    || request.getExpectedRevision() != currentVersion.revision()) {
+                throw new com.apms.common.exception.BusinessConflictException("The company profile has changed since you opened it. Refresh before saving.");
+            }
+        }
+
+        java.util.Map<String, Object> beforeSnapshot = versionService.createSnapshotMap(profile);
+        CompanyProfile originalProfile = null;
+        if (objectMapper != null && beforeSnapshot != null) {
+            try {
+                originalProfile = objectMapper.convertValue(beforeSnapshot, CompanyProfile.class);
+            } catch (Exception e) {
+                log.warn("Failed to create pre-edit backup of Owner CompanyProfile {}: {}", profile.getId(), e.getMessage());
+            }
+        }
+
+        if (profile.getBusiness() == null) profile.setBusiness(new CompanyProfile.Business());
+        if (request.getIndustries() != null) {
+            profile.getBusiness().setIndustries(request.getIndustries().stream()
+                    .map(s -> s != null ? s.trim() : "")
+                    .filter(StringUtils::hasText)
+                    .collect(java.util.stream.Collectors.toList()));
+        }
+        if (request.getMarkets() != null) {
+            profile.getBusiness().setMarkets(request.getMarkets().stream()
+                    .map(s -> s != null ? s.trim() : "")
+                    .filter(StringUtils::hasText)
+                    .collect(java.util.stream.Collectors.toList()));
+        }
+        if (request.getTargetCustomers() != null) {
+            profile.getBusiness().setTargetCustomers(request.getTargetCustomers().stream()
+                    .map(s -> s != null ? s.trim() : "")
+                    .filter(StringUtils::hasText)
+                    .collect(java.util.stream.Collectors.toList()));
+        }
+        if (request.getProducts() != null) {
+            List<CompanyProfile.Product> prods = request.getProducts().stream()
+                    .filter(p -> p != null && StringUtils.hasText(p.getName()))
+                    .map(p -> CompanyProfile.Product.builder()
+                            .name(p.getName().trim())
+                            .category(StringUtils.hasText(p.getCategory()) ? p.getCategory().trim() : null)
+                            .description(StringUtils.hasText(p.getDescription()) ? p.getDescription().trim() : null)
+                            .build())
+                    .collect(java.util.stream.Collectors.toList());
+            profile.getBusiness().setProducts(prods);
+        }
+
+        java.util.Map<String, Object> afterSnapshot = versionService.createSnapshotMap(profile);
+
+        List<String> changedFieldPaths = new ArrayList<>();
+        java.util.Map<String, Object> beforeValues = new java.util.HashMap<>();
+        java.util.Map<String, Object> afterValues = new java.util.HashMap<>();
+
+        String[] potentialPaths = new String[]{
+                "business.industries", "business.markets", "business.targetCustomers", "business.products"
+        };
+
+        for (String path : potentialPaths) {
+            Object bVal = extractValueByPath(beforeSnapshot, path);
+            Object aVal = extractValueByPath(afterSnapshot, path);
+            if (!java.util.Objects.equals(bVal, aVal)) {
+                changedFieldPaths.add(path);
+                beforeValues.put(path, bVal);
+                afterValues.put(path, aVal);
+            }
+        }
+
+        if (changedFieldPaths.isEmpty()) {
+            return toResponse(profile);
+        }
+
+        profile.incrementMinorVersion();
+        if (profile.getMetadata() == null) {
+            profile.setMetadata(new CompanyProfile.Metadata());
+        }
+        profile.getMetadata().setUpdatedAt(LocalDateTime.now());
+        profile.getMetadata().setLastModifiedBy(currentUser != null ? String.valueOf(currentUser.getId()) : "SYSTEM");
+
+        profileRepository.save(profile);
+
+        try {
+            versionService.createAndSaveVersion(
+                    profile,
+                    com.apms.domain.profile.enums.CompanyProfileChangeSource.ADMIN_MANUAL_EDIT,
+                    changedFieldPaths,
+                    beforeValues,
+                    afterValues,
+                    "Admin update of enterprise business fields",
+                    "Admin Manual Edit",
+                    null,
+                    null,
+                    null,
+                    null,
+                    currentUser != null ? currentUser.getId() : null
+            );
+        } catch (Exception ex) {
+            log.error("Failed to persist CompanyProfileVersion for owner profile {}: {}", profile.getId(), ex.getMessage(), ex);
+            if (originalProfile != null) {
+                try {
+                    profileRepository.save(originalProfile);
+                    log.info("Successfully rolled back owner profile {} to pre-edit state", profile.getId());
+                } catch (Exception rollbackEx) {
+                    log.error("CRITICAL: Failed to rollback owner profile {} after version creation failure: {}", profile.getId(), rollbackEx.getMessage(), rollbackEx);
+                }
+            }
+            throw ex;
+        }
+
+        if (currentUser != null) {
+            try {
+                auditLogService.log(
+                        currentUser.getId(),
+                        AuditAction.COMPANY_PROFILE_UPDATED,
+                        "CompanyProfile",
+                        profile.getCompanyId(),
+                        "Admin updated enterprise business fields (" + changedFieldPaths.size() + " fields changed)"
+                );
+            } catch (Exception e) {
+                log.warn("Failed to write audit log for admin enterprise business fields update: {}", e.getMessage());
+            }
+        }
+
+        return toResponse(profile);
+    }
+
+    /**
+     * SYSTEM_ADMIN manages Leadership members of the canonical Owner Enterprise.
+     * Concurrency-safe, server-side metadata protection, versioned as ADMIN_MANUAL_EDIT, and audited.
+     */
+    @Transactional
+    public ProfileResponse updateAdminEnterpriseLeadership(AdminUpdateEnterpriseLeadershipRequest request, UserDetailsImpl currentUser) {
+        CompanyProfile profile = ownerOrganizationService.getRequiredOwnerCompanyProfile();
+
+        // Optimistic concurrency / Stale write check
+        CompanyProfileVersionHelper.VersionState currentVersion = CompanyProfileVersionHelper.resolveVersion(profile);
+        if (request.getExpectedMajorVersion() != null && request.getExpectedRevision() != null) {
+            if (request.getExpectedMajorVersion() != currentVersion.majorVersion()
+                    || request.getExpectedRevision() != currentVersion.revision()) {
+                throw new com.apms.common.exception.BusinessConflictException("The company profile has changed since you opened it. Refresh before saving.");
+            }
+        }
+
+        java.util.Map<String, Object> beforeSnapshot = versionService.createSnapshotMap(profile);
+        CompanyProfile originalProfile = null;
+        if (objectMapper != null && beforeSnapshot != null) {
+            try {
+                originalProfile = objectMapper.convertValue(beforeSnapshot, CompanyProfile.class);
+            } catch (Exception e) {
+                log.warn("Failed to create pre-edit backup of Owner CompanyProfile {}: {}", profile.getId(), e.getMessage());
+            }
+        }
+
+        List<CompanyProfile.CompanyMember> existingMembers = profile.getCompanyMembers() != null ? profile.getCompanyMembers() : new ArrayList<>();
+        java.util.Map<String, CompanyProfile.CompanyMember> existingMap = new java.util.HashMap<>();
+        for (CompanyProfile.CompanyMember m : existingMembers) {
+            if (m.getFullName() != null) {
+                existingMap.put(m.getFullName().trim().toLowerCase(), m);
+            }
+        }
+
+        List<CompanyProfile.CompanyMember> updatedMembers = new ArrayList<>();
+        if (request.getMembers() != null) {
+            for (AdminEnterpriseLeadershipMemberRequest mReq : request.getMembers()) {
+                if (mReq == null || !StringUtils.hasText(mReq.getFullName())) {
+                    continue;
+                }
+                String key = mReq.getFullName().trim().toLowerCase();
+                CompanyProfile.CompanyMember existing = existingMap.get(key);
+
+                CompanyProfile.CompanyMember newMember = CompanyProfile.CompanyMember.builder()
+                        .fullName(mReq.getFullName().trim())
+                        .position(StringUtils.hasText(mReq.getPosition()) ? mReq.getPosition().trim() : "")
+                        .imageUrl(StringUtils.hasText(mReq.getImageUrl()) ? mReq.getImageUrl().trim() : null)
+                        .sourceUrl(StringUtils.hasText(mReq.getSourceUrl()) ? mReq.getSourceUrl().trim() : null)
+                        .notes(StringUtils.hasText(mReq.getNotes()) ? mReq.getNotes().trim() : null)
+                        .researchedAt(existing != null && existing.getResearchedAt() != null ? existing.getResearchedAt() : LocalDateTime.now())
+                        .researchedBy(existing != null && existing.getResearchedBy() != null ? existing.getResearchedBy() : (currentUser != null ? currentUser.getId() : null))
+                        .taskId(existing != null ? existing.getTaskId() : null)
+                        .build();
+                updatedMembers.add(newMember);
+            }
+        }
+        profile.setCompanyMembers(updatedMembers);
+
+        java.util.Map<String, Object> afterSnapshot = versionService.createSnapshotMap(profile);
+
+        List<String> changedFieldPaths = new ArrayList<>();
+        java.util.Map<String, Object> beforeValues = new java.util.HashMap<>();
+        java.util.Map<String, Object> afterValues = new java.util.HashMap<>();
+
+        Object bMembers = extractValueByPath(beforeSnapshot, "companyMembers");
+        Object aMembers = extractValueByPath(afterSnapshot, "companyMembers");
+        if (!java.util.Objects.equals(bMembers, aMembers)) {
+            changedFieldPaths.add("companyMembers");
+            beforeValues.put("companyMembers", bMembers);
+            afterValues.put("companyMembers", aMembers);
+        }
+
+        if (changedFieldPaths.isEmpty()) {
+            return toResponse(profile);
+        }
+
+        profile.incrementMinorVersion();
+        if (profile.getMetadata() == null) {
+            profile.setMetadata(new CompanyProfile.Metadata());
+        }
+        profile.getMetadata().setUpdatedAt(LocalDateTime.now());
+        profile.getMetadata().setLastModifiedBy(currentUser != null ? String.valueOf(currentUser.getId()) : "SYSTEM");
+
+        profileRepository.save(profile);
+
+        try {
+            versionService.createAndSaveVersion(
+                    profile,
+                    com.apms.domain.profile.enums.CompanyProfileChangeSource.ADMIN_MANUAL_EDIT,
+                    changedFieldPaths,
+                    beforeValues,
+                    afterValues,
+                    "Admin update of enterprise leadership",
+                    "Admin Manual Edit",
+                    null,
+                    null,
+                    null,
+                    null,
+                    currentUser != null ? currentUser.getId() : null
+            );
+        } catch (Exception ex) {
+            log.error("Failed to persist CompanyProfileVersion for owner profile {}: {}", profile.getId(), ex.getMessage(), ex);
+            if (originalProfile != null) {
+                try {
+                    profileRepository.save(originalProfile);
+                    log.info("Successfully rolled back owner profile {} to pre-edit state", profile.getId());
+                } catch (Exception rollbackEx) {
+                    log.error("CRITICAL: Failed to rollback owner profile {} after version creation failure: {}", profile.getId(), rollbackEx.getMessage(), rollbackEx);
+                }
+            }
+            throw ex;
+        }
+
+        if (currentUser != null) {
+            try {
+                auditLogService.log(
+                        currentUser.getId(),
+                        AuditAction.COMPANY_PROFILE_UPDATED,
+                        "CompanyProfile",
+                        profile.getCompanyId(),
+                        "Admin updated enterprise leadership (" + updatedMembers.size() + " members)"
+                );
+            } catch (Exception e) {
+                log.warn("Failed to write audit log for admin enterprise leadership update: {}", e.getMessage());
+            }
         }
 
         return toResponse(profile);
