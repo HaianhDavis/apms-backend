@@ -4,7 +4,10 @@ import com.apms.domain.assistant.AiChatMessage;
 import com.apms.domain.assistant.dto.AiChatMessageResponse;
 import com.apms.domain.assistant.dto.AiChatSessionResponse;
 import com.apms.domain.assistant.repository.mongo.AiChatMessageRepository;
+import com.apms.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -12,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AiChatHistoryService {
@@ -50,6 +54,42 @@ public class AiChatHistoryService {
                 .filter(m -> m.getProjectId() == null)
                 .map(this::mapToMessageResponse)
                 .collect(Collectors.toList());
+    }
+
+    public void deleteProjectAssistantSession(Long currentUserId, String sessionId) {
+        List<AiChatMessage> messages = aiChatMessageRepository.findByUserIdAndSessionIdOrderByCreatedAtAsc(currentUserId, sessionId).stream()
+                .filter(m -> m.getProjectId() != null)
+                .collect(Collectors.toList());
+
+        if (messages.isEmpty()) {
+            List<AiChatMessage> anyMessages = aiChatMessageRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+            if (anyMessages.isEmpty()) {
+                throw new ResourceNotFoundException("Chat session not found: " + sessionId);
+            } else {
+                throw new AccessDeniedException("You are not authorized to delete this chat session");
+            }
+        }
+
+        aiChatMessageRepository.deleteAll(messages);
+        log.info("Permanently deleted project AI assistant session: sessionId={}, userId={}, count={}", sessionId, currentUserId, messages.size());
+    }
+
+    public void deleteOwnerAssistantSession(Long currentUserId, String sessionId) {
+        List<AiChatMessage> messages = aiChatMessageRepository.findByUserIdAndSessionIdOrderByCreatedAtAsc(currentUserId, sessionId).stream()
+                .filter(m -> m.getProjectId() == null)
+                .collect(Collectors.toList());
+
+        if (messages.isEmpty()) {
+            List<AiChatMessage> anyMessages = aiChatMessageRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+            if (anyMessages.isEmpty()) {
+                throw new ResourceNotFoundException("Chat session not found: " + sessionId);
+            } else {
+                throw new AccessDeniedException("You are not authorized to delete this chat session");
+            }
+        }
+
+        aiChatMessageRepository.deleteAll(messages);
+        log.info("Permanently deleted owner AI assistant session: sessionId={}, userId={}, count={}", sessionId, currentUserId, messages.size());
     }
 
     private List<AiChatSessionResponse> groupMessagesIntoSessions(List<AiChatMessage> messages) {

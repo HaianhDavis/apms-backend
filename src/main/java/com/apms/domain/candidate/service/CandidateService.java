@@ -952,6 +952,10 @@ public class CandidateService {
             }
         }
 
+        if (candidate.getStatus() == CandidateStatus.APPROVED) {
+            throw new BusinessValidationException("Candidate has already been approved and cannot be modified.");
+        }
+
         if (candidate.getFieldResults() == null) {
             candidate.setFieldResults(new java.util.HashMap<>());
         }
@@ -993,6 +997,22 @@ public class CandidateService {
                         fieldResult.setManagerReviewedAt(LocalDateTime.now());
                         fieldResult.setReviewedRevision(candidate.getRevisionNumber());
                     }
+                    if (update.getManagerReviewStatus() != null) {
+                        fieldResult.setManagerReviewStatus(update.getManagerReviewStatus());
+                    }
+                    if (update.isReviewedValuePresent() || update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED) {
+                        if (update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED && !update.isReviewedValuePresent()) {
+                            throw new BusinessValidationException("EDITED review status requires a reviewedValue.");
+                        }
+                        fieldResult.setStaffReviewedValue(update.getReviewedValue());
+                    }
+                    if (update.getManagerReviewComment() != null) {
+                        fieldResult.setManagerReviewComment(update.getManagerReviewComment());
+                    } else if (update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING) {
+                        fieldResult.setManagerReviewComment(null);
+                    }
+                    fieldResult.setManagerReviewedByUserId(update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING ? null : userId);
+                    fieldResult.setManagerReviewedAt(update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING ? null : LocalDateTime.now());
                 } else {
                     com.apms.domain.project.fieldapproval.FieldApprovalRecord approval = findFieldApproval(candidate, fieldPath);
                     if ((approval != null && approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.APPROVED)
@@ -1546,10 +1566,10 @@ public class CandidateService {
         };
 
         record.setStatus(approvalStatus);
-        record.setComment(comment);
-        record.setReviewedRevision(candidate.getRevisionNumber());
-        record.setReviewedByAccountId(reviewerId);
-        record.setReviewedAt(LocalDateTime.now());
+        record.setComment(approvalStatus == com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW ? null : comment);
+        record.setReviewedRevision(approvalStatus == com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW ? null : candidate.getRevisionNumber());
+        record.setReviewedByAccountId(approvalStatus == com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW ? null : reviewerId);
+        record.setReviewedAt(approvalStatus == com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW ? null : LocalDateTime.now());
         record.setPendingValue(definition.getGetter().apply(candidate));
         if (approvalStatus == com.apms.common.enums.FieldApprovalStatus.APPROVED) {
             Object approvedValue = definition.getGetter().apply(candidate);
@@ -1557,6 +1577,20 @@ public class CandidateService {
                     approvedValue,
                     definition.isCollection() && !definition.isOrderedCollection()
             ));
+        } else {
+            record.setApprovedValueHash(null);
+        }
+
+        AuditAction action = switch (approvalStatus) {
+            case APPROVED -> AuditAction.FIELD_APPROVED;
+            case REJECTED -> AuditAction.FIELD_REJECTED;
+            case REVISION_REQUIRED -> AuditAction.FIELD_REVISION_REQUESTED;
+            case PENDING_REVIEW -> AuditAction.FIELD_REOPENED;
+            default -> null;
+        };
+        if (action != null) {
+            auditLogService.log(reviewerId, action, "CompanyCandidate", candidate.getId(),
+                    "Field " + fieldPath + " set to " + approvalStatus + " by manager");
         }
     }
 

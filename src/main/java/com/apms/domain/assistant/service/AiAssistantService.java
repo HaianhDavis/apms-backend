@@ -1,6 +1,7 @@
 package com.apms.domain.assistant.service;
 
 import com.apms.common.enums.SubmissionStatus;
+import com.apms.common.enums.TaskPriority;
 import com.apms.common.enums.TaskStatus;
 import com.apms.common.exception.BusinessValidationException;
 import com.apms.common.security.ProjectSecurityEvaluator;
@@ -194,6 +195,7 @@ public class AiAssistantService {
     }
 
     private enum ManagerIntent {
+        GREETING, THANK_YOU, CAPABILITIES,
         MY_PROJECTS, PROJECT_PROGRESS, TASK_OVERVIEW, TEAM_WORKLOAD, OVERDUE_TASKS,
         PENDING_REVIEWS, SUBMISSION_REVIEW, CANDIDATE_REVIEW, RETURNED_WORK,
         NEXT_MANAGEMENT_ACTION, COMPANY_SEARCH, COMPANY_PROFILE, COMPANY_COMPARE,
@@ -201,7 +203,10 @@ public class AiAssistantService {
     }
 
     private boolean isDeterministicManagerIntent(ManagerIntent intent) {
-        return intent == ManagerIntent.MY_PROJECTS
+        return intent == ManagerIntent.GREETING
+            || intent == ManagerIntent.THANK_YOU
+            || intent == ManagerIntent.CAPABILITIES
+            || intent == ManagerIntent.MY_PROJECTS
             || intent == ManagerIntent.TASK_OVERVIEW
             || intent == ManagerIntent.OVERDUE_TASKS
             || intent == ManagerIntent.PENDING_REVIEWS
@@ -214,6 +219,17 @@ public class AiAssistantService {
     }
 
     private ManagerIntent detectManagerIntent(String question) {
+        ConversationalIntentDetector.ConversationalIntent conv = ConversationalIntentDetector.detect(question);
+        if (conv == ConversationalIntentDetector.ConversationalIntent.GREETING) {
+            return ManagerIntent.GREETING;
+        }
+        if (conv == ConversationalIntentDetector.ConversationalIntent.THANK_YOU) {
+            return ManagerIntent.THANK_YOU;
+        }
+        if (conv == ConversationalIntentDetector.ConversationalIntent.CAPABILITIES) {
+            return ManagerIntent.CAPABILITIES;
+        }
+
         String lower = question.toLowerCase();
 
         // 1. INTERNAL_NEWS_PROTECTED MUST BE FIRST
@@ -294,6 +310,7 @@ public class AiAssistantService {
     }
 
     private enum StaffIntent {
+        GREETING, THANK_YOU, CAPABILITIES,
         MY_PROJECTS, MY_TASKS, TASK_STATUS, TASK_DETAIL, DEADLINE_PRIORITY,
         SUBMISSION_STATUS, RETURNED_WORK, NEXT_ACTION, OUT_OF_SCOPE
     }
@@ -357,6 +374,17 @@ public class AiAssistantService {
     }
 
     private StaffIntent detectStaffIntent(String question) {
+        ConversationalIntentDetector.ConversationalIntent conv = ConversationalIntentDetector.detect(question);
+        if (conv == ConversationalIntentDetector.ConversationalIntent.GREETING) {
+            return StaffIntent.GREETING;
+        }
+        if (conv == ConversationalIntentDetector.ConversationalIntent.THANK_YOU) {
+            return StaffIntent.THANK_YOU;
+        }
+        if (conv == ConversationalIntentDetector.ConversationalIntent.CAPABILITIES) {
+            return StaffIntent.CAPABILITIES;
+        }
+
         String lower = question.toLowerCase();
 
         if (lower.contains("what should i work on next")
@@ -390,9 +418,10 @@ public class AiAssistantService {
             return StaffIntent.DEADLINE_PRIORITY;
         }
 
-        if (lower.contains("What tasks are status")
+        if (lower.contains("what tasks are status")
                 || lower.contains("task detail")
                 || lower.contains("task details")
+                || lower.contains("details of my task")
                 || lower.contains("task description")
                 || lower.contains("task requirement")
                 || lower.contains("task requirements")
@@ -436,24 +465,72 @@ public class AiAssistantService {
     private AssistantContext buildStaffContext(AiChatRequest request, UserDetailsImpl currentUser) {
         StaffIntent intent = detectStaffIntent(request.getQuestion());
         StringBuilder ctxText = new StringBuilder();
+        boolean isVn = isVietnamese(request.getQuestion());
 
         switch (intent) {
+            case GREETING:
+                ctxText.append(isVn ? "Xin chào! Tôi có thể giúp gì cho bạn hôm nay? Bạn có thể hỏi tôi về các dự án, nhiệm vụ được giao, hạn chót hoặc hành động tiếp theo.\n"
+                        : "Hi! How can I help you today? You can ask me about your projects, assigned tasks, deadlines, or next actions.\n");
+                break;
+
+            case THANK_YOU:
+                ctxText.append(isVn ? "Không có chi! Hãy cho tôi biết nếu bạn cần giúp đỡ về các dự án, nhiệm vụ, hạn chót hoặc hành động tiếp theo nhé.\n"
+                        : "You're welcome! Let me know if you'd like help with your projects, tasks, deadlines, or next actions.\n");
+                break;
+
+            case CAPABILITIES:
+                if (isVn) {
+                    ctxText.append("Tôi có thể giúp bạn về:\n")
+                           .append("- Các nhiệm vụ được giao và chi tiết nhiệm vụ\n")
+                           .append("- Các dự án bạn đang tham gia\n")
+                           .append("- Các hạn chót sắp tới\n")
+                           .append("- Ưu tiên nhiệm vụ và hành động nên làm tiếp theo\n")
+                           .append("- Trạng thái nộp bài và xét duyệt\n")
+                           .append("- Thông tin công ty trong phạm vi không gian làm việc của bạn\n");
+                } else {
+                    ctxText.append("I can help you with:\n")
+                           .append("- your assigned tasks\n")
+                           .append("- projects you participate in\n")
+                           .append("- upcoming deadlines\n")
+                           .append("- task priorities / what to work on next\n")
+                           .append("- submission/review status\n")
+                           .append("- company information available within your workspace\n");
+                }
+                break;
+
             case MY_PROJECTS:
                 Page<Project> projects = projectRepository.findByMemberAccountId(currentUser.getId(), PageRequest.of(0, 50));
                 if (projects.isEmpty()) {
-                    ctxText.append("You are not participating in any active projects.\n");
+                    ctxText.append(isVn ? "Bạn hiện không tham gia vào dự án nào.\n" : "You are not participating in any active projects.\n");
                 } else {
-                    ctxText.append("You are currently participating in ").append(projects.getNumberOfElements()).append(" project(s).\n\n");
-                    int i = 1;
+                    ctxText.append(isVn ? "Hiện tại bạn đang tham gia vào **" : "You are currently participating in **")
+                           .append(projects.getNumberOfElements())
+                           .append(isVn ? " dự án**:\n\n" : " project(s)**:\n\n");
+                    int projNum = 1;
                     for (Project p : projects) {
-                        ctxText.append("Project ").append(i++).append("\n")
-                               .append("Name: ").append(p.getProjectName()).append("\n")
-                               .append("Status: ").append(formatEnum(p.getStatus().name())).append("\n")
-                               .append("Type: ").append(formatEnum(p.getProjectType() != null ? p.getProjectType().name() : null)).append("\n")
-                               .append("Target: ").append(p.getTargetCompanyName() != null ? p.getTargetCompanyName() : "N/A").append("\n")
-                                .append("Description: ").append(p.getDescription()).append("\n")
-                                .append("Start date: ").append(formatDate(p.getCreatedAt() != null ? p.getCreatedAt().toLocalDate() : null)).append("\n")
-                                .append("Due date: ").append(formatDate(p.getPlannedEndDate() != null ? p.getPlannedEndDate().atStartOfDay().toLocalDate() : null)).append("  \n");
+                        List<ProjectTask> pTasks = p.getId() != null ? projectTaskRepository.findByProject_Id(p.getId()) : List.of();
+                        long totalT = pTasks != null ? pTasks.size() : 0;
+                        long completedT = pTasks != null ? pTasks.stream().filter(t -> t.getStatus() == TaskStatus.DONE).count() : 0;
+                        long prog = totalT == 0 ? 0 : (completedT * 100 / totalT);
+
+                        long userOpen = pTasks != null ? pTasks.stream().filter(t -> t.getAssignedToAccount() != null
+                                && currentUser.getId().equals(t.getAssignedToAccount().getId())
+                                && t.getStatus() != TaskStatus.DONE
+                                && t.getStatus() != TaskStatus.CANCELLED).count() : 0;
+
+                        ctxText.append(projNum++).append(". **").append(p.getProjectName()).append("**\n")
+                               .append("   - ").append(isVn ? "Trạng thái: " : "Status: ").append(formatEnum(p.getStatus().name())).append("\n");
+
+                        if (totalT > 0) {
+                            ctxText.append("   - ").append(isVn ? "Tiến độ: " : "Progress: ").append(prog).append("%\n")
+                                   .append("   - ").append(isVn ? "Nhiệm vụ mở của bạn: " : "Your open tasks: ").append(userOpen).append("\n");
+                        } else if (p.getTargetCompanyName() != null && !p.getTargetCompanyName().isEmpty()) {
+                            ctxText.append("   - ").append(isVn ? "Mục tiêu: " : "Target: ").append(p.getTargetCompanyName()).append("\n");
+                        }
+                        if (p.getPlannedEndDate() != null) {
+                            ctxText.append("   - ").append(isVn ? "Hạn: " : "Due: ").append(formatShortDate(p.getPlannedEndDate().atStartOfDay())).append("\n");
+                        }
+                        ctxText.append("\n");
                     }
                 }
                 break;
@@ -463,56 +540,63 @@ public class AiAssistantService {
                         projectTaskRepository.findByAssignedToAccount_Id(currentUser.getId());
 
                 if (tasks.isEmpty()) {
-                    ctxText.append("You have no tasks assigned to you.\n");
+                    ctxText.append(isVn ? "Bạn hiện không có nhiệm vụ nào được giao.\n" : "You have no tasks assigned to you.\n");
                     break;
                 }
 
-                ctxText.append("You currently have ")
-                        .append(tasks.size())
-                        .append(" assigned task(s).\n\n");
+                List<ProjectTask> sortedTasks = tasks.stream()
+                        .sorted(taskPriorityComparator())
+                        .toList();
 
-                int i = 1;
+                boolean showAll = isAllRequested(request.getQuestion());
+                int displayLimit = showAll ? sortedTasks.size() : Math.min(sortedTasks.size(), 6);
 
-                for (ProjectTask task : tasks) {
-                    if (tasks.size() > 1) {
-                        ctxText.append("Task ").append(i++).append("\n");
+                ctxText.append(isVn ? "Hiện tại bạn có **" : "You currently have **")
+                       .append(tasks.size())
+                       .append(isVn ? " nhiệm vụ được giao**" : " assigned task(s)**");
+
+                if (tasks.size() > 3) {
+                    long inProgress = tasks.stream().filter(t -> t.getStatus() == TaskStatus.IN_PROGRESS).count();
+                    long todo = tasks.stream().filter(t -> t.getStatus() == TaskStatus.TODO).count();
+                    long inReview = tasks.stream().filter(t -> t.getStatus() == TaskStatus.IN_REVIEW).count();
+                    long blocked = tasks.stream().filter(t -> t.getStatus() == TaskStatus.BLOCKED).count();
+                    long done = tasks.stream().filter(t -> t.getStatus() == TaskStatus.DONE).count();
+
+                    ctxText.append(":\n\n");
+                    if (inProgress > 0) ctxText.append("- ").append(isVn ? "Đang thực hiện: " : "In Progress: ").append(inProgress).append("\n");
+                    if (todo > 0) ctxText.append("- ").append(isVn ? "Cần làm: " : "To Do: ").append(todo).append("\n");
+                    if (inReview > 0) ctxText.append("- ").append(isVn ? "Đang chờ duyệt: " : "In Review: ").append(inReview).append("\n");
+                    if (blocked > 0) ctxText.append("- ").append(isVn ? "Bị chặn: " : "Blocked: ").append(blocked).append("\n");
+                    if (done > 0) ctxText.append("- ").append(isVn ? "Hoàn thành: " : "Done: ").append(done).append("\n");
+                    ctxText.append("\n");
+                    ctxText.append(isVn ? "### Nhiệm vụ ưu tiên\n\n" : "### Priority tasks\n\n");
+                } else {
+                    ctxText.append(":\n\n");
+                }
+
+                int num = 1;
+                for (int idx = 0; idx < displayLimit; idx++) {
+                    ProjectTask task = sortedTasks.get(idx);
+                    ctxText.append(num++).append(". **").append(task.getTitle()).append("**\n")
+                           .append("   - ").append(isVn ? "Dự án: " : "Project: ").append(task.getProject() != null ? task.getProject().getProjectName() : "N/A").append("\n")
+                           .append("   - ").append(isVn ? "Trạng thái: " : "Status: ").append(formatEnum(task.getStatus().name())).append("\n");
+
+                    if (task.getPriority() != null) {
+                        ctxText.append("   - ").append(isVn ? "Mức ưu tiên: " : "Priority: ").append(formatEnum(task.getPriority().name())).append("\n");
                     }
+                    if (task.getDueDate() != null) {
+                        ctxText.append("   - ").append(isVn ? "Hạn: " : "Due: ").append(formatShortDate(task.getDueDate())).append("\n");
+                    }
+                    ctxText.append("\n");
+                }
 
-                    ctxText.append("Project: ")
-                            .append(task.getProject().getProjectName())
-                            .append("\n")
-
-                            .append("Task: ")
-                            .append(task.getTitle())
-                            .append("\n")
-
-                            .append("Status: ")
-                            .append(formatEnum(task.getStatus().name()))
-                            .append("\n")
-
-                            .append("Priority: ")
-                            .append(formatEnum(
-                                    task.getPriority() != null
-                                            ? task.getPriority().name()
-                                            : null
-                            ))
-                            .append("\n")
-
-                            .append("Type: ")
-                            .append(formatEnum(
-                                    task.getTaskType() != null
-                                            ? task.getTaskType().name()
-                                            : null
-                            ))
-                            .append("\n")
-
-                            .append("Deadline: ")
-                            .append(formatDate(
-                                    task.getDueDate() != null
-                                            ? task.getDueDate().toLocalDate()
-                                            : null
-                            ))
-                            .append(" \n");
+                if (!showAll && sortedTasks.size() > displayLimit) {
+                    int remaining = sortedTasks.size() - displayLimit;
+                    if (isVn) {
+                        ctxText.append("*Còn ").append(remaining).append(" nhiệm vụ nữa chưa hiển thị ở đây. Hãy hỏi \"hiển thị tất cả nhiệm vụ\" nếu bạn muốn xem toàn bộ danh sách.*\n");
+                    } else {
+                        ctxText.append("*").append(remaining).append(" more assigned task(s) are not shown here. Ask me to show all assigned tasks if you want the full list.*\n");
+                    }
                 }
 
                 break;
@@ -522,179 +606,124 @@ public class AiAssistantService {
                         projectTaskRepository.findByAssignedToAccount_Id(currentUser.getId());
 
                 if (tasks.isEmpty()) {
-                    ctxText.append("You have no tasks assigned to you.\n");
+                    ctxText.append(isVn ? "Bạn hiện không có nhiệm vụ nào được giao.\n" : "You have no tasks assigned to you.\n");
                     break;
                 }
 
                 String question = request.getQuestion().toLowerCase();
-
                 TaskStatus requestedStatus = null;
 
-                // Detect the specific status requested by the Staff
-                if (question.contains("in progress")) {
+                if (question.contains("in progress") || question.contains("đang làm") || question.contains("đang thực hiện")) {
                     requestedStatus = TaskStatus.IN_PROGRESS;
-
-                } else if (question.contains("todo")
-                        || question.contains("to do")
-                        || question.contains("not started")) {
+                } else if (question.contains("todo") || question.contains("to do") || question.contains("not started") || question.contains("chưa bắt đầu")) {
                     requestedStatus = TaskStatus.TODO;
-
-                } else if (question.contains("in review")
-                        || question.contains("waiting for review")
-                        || question.contains("waiting for manager review")) {
+                } else if (question.contains("in review") || question.contains("waiting for review") || question.contains("waiting for manager review") || question.contains("chờ duyệt")) {
                     requestedStatus = TaskStatus.IN_REVIEW;
-
-                } else if (question.contains("blocked")) {
+                } else if (question.contains("blocked") || question.contains("bị chặn")) {
                     requestedStatus = TaskStatus.BLOCKED;
-
-                } else if (question.contains("completed")
-                        || question.contains("finished")
-                        || question.contains("done")) {
+                } else if (question.contains("completed") || question.contains("finished") || question.contains("done") || question.contains("hoàn thành")) {
                     requestedStatus = TaskStatus.DONE;
-
-                } else if (question.contains("cancelled")
-                        || question.contains("canceled")) {
+                } else if (question.contains("cancelled") || question.contains("canceled") || question.contains("đã hủy")) {
                     requestedStatus = TaskStatus.CANCELLED;
                 }
 
-                // Specific status requested
                 if (requestedStatus != null) {
-
                     final TaskStatus statusToFind = requestedStatus;
-
                     List<ProjectTask> filteredTasks = tasks.stream()
                             .filter(t -> t.getStatus() == statusToFind)
+                            .sorted(taskPriorityComparator())
                             .toList();
 
                     if (filteredTasks.isEmpty()) {
-                        ctxText.append("You have no tasks with status ")
+                        ctxText.append(isVn ? "Bạn không có nhiệm vụ nào ở trạng thái " : "You have no tasks with status ")
                                 .append(formatEnum(requestedStatus.name()))
                                 .append(".\n");
                         break;
                     }
 
-                    ctxText.append("You currently have ")
+                    boolean showAll = isAllRequested(request.getQuestion());
+                    int displayLimit = showAll ? filteredTasks.size() : Math.min(filteredTasks.size(), 6);
+
+                    ctxText.append(isVn ? "Hiện tại bạn có **" : "You currently have **")
                             .append(filteredTasks.size())
-                            .append(" task(s) with status ")
+                            .append(isVn ? " nhiệm vụ** với trạng thái **" : " task(s)** with status **")
                             .append(formatEnum(requestedStatus.name()))
-                            .append(".\n\n");
+                            .append("**:\n\n");
 
                     int i = 1;
-
-                    for (ProjectTask task : filteredTasks) {
-
-                        if (filteredTasks.size() > 1) {
-                            ctxText.append("Task ").append(i++).append("\n");
+                    for (int idx = 0; idx < displayLimit; idx++) {
+                        ProjectTask task = filteredTasks.get(idx);
+                        ctxText.append(i++).append(". **").append(task.getTitle()).append("**\n")
+                               .append("   - ").append(isVn ? "Dự án: " : "Project: ").append(task.getProject() != null ? task.getProject().getProjectName() : "N/A").append("\n")
+                               .append("   - ").append(isVn ? "Trạng thái: " : "Status: ").append(formatEnum(task.getStatus().name())).append("\n");
+                        if (task.getPriority() != null) {
+                            ctxText.append("   - ").append(isVn ? "Mức ưu tiên: " : "Priority: ").append(formatEnum(task.getPriority().name())).append("\n");
                         }
-
-                        ctxText.append("Task: ")
-                                .append(task.getTitle())
-                                .append("\n")
-
-                                .append("Project: ")
-                                .append(task.getProject().getProjectName())
-                                .append("\n")
-
-                                .append("Status: ")
-                                .append(formatEnum(task.getStatus().name()))
-                                .append("\n")
-
-                                .append("Priority: ")
-                                .append(formatEnum(
-                                        task.getPriority() != null
-                                                ? task.getPriority().name()
-                                                : null
-                                ))
-                                .append("\n")
-
-                                .append("Deadline: ")
-                                .append(formatDate(
-                                        task.getDueDate() != null
-                                                ? task.getDueDate().toLocalDate()
-                                                : null
-                                ))
-                                .append("\n\n");
+                        if (task.getDueDate() != null) {
+                            ctxText.append("   - ").append(isVn ? "Hạn: " : "Due: ").append(formatShortDate(task.getDueDate())).append("\n");
+                        }
+                        ctxText.append("\n");
                     }
 
-                } else if (question.contains("incomplete")
-                        || question.contains("unfinished")) {
+                    if (!showAll && filteredTasks.size() > displayLimit) {
+                        int remaining = filteredTasks.size() - displayLimit;
+                        ctxText.append("*").append(remaining).append(" more task(s) with this status are not shown.*\n");
+                    }
 
+                } else if (question.contains("incomplete") || question.contains("unfinished") || question.contains("chưa xong")) {
                     List<ProjectTask> incompleteTasks = tasks.stream()
-                            .filter(t ->
-                                    t.getStatus() != TaskStatus.DONE
-                                            && t.getStatus() != TaskStatus.CANCELLED)
+                            .filter(t -> t.getStatus() != TaskStatus.DONE && t.getStatus() != TaskStatus.CANCELLED)
+                            .sorted(taskPriorityComparator())
                             .toList();
 
                     if (incompleteTasks.isEmpty()) {
-                        ctxText.append("You have no incomplete tasks.\n");
+                        ctxText.append(isVn ? "Bạn không có nhiệm vụ chưa hoàn thành nào.\n" : "You have no incomplete tasks.\n");
                         break;
                     }
 
-                    ctxText.append("You currently have ")
+                    boolean showAll = isAllRequested(request.getQuestion());
+                    int displayLimit = showAll ? incompleteTasks.size() : Math.min(incompleteTasks.size(), 6);
+
+                    ctxText.append(isVn ? "Hiện tại bạn có **" : "You currently have **")
                             .append(incompleteTasks.size())
-                            .append(" incomplete task(s).\n\n");
+                            .append(isVn ? " nhiệm vụ chưa hoàn thành**:\n\n" : " incomplete task(s)**:\n\n");
 
                     int i = 1;
-
-                    for (ProjectTask task : incompleteTasks) {
-
-                        ctxText.append("Task ")
-                                .append(i++)
-                                .append("\n")
-
-                                .append("Task: ")
-                                .append(task.getTitle())
-                                .append("\n")
-
-                                .append("Project: ")
-                                .append(task.getProject().getProjectName())
-                                .append("\n")
-
-                                .append("Status: ")
-                                .append(formatEnum(task.getStatus().name()))
-                                .append("\n\n");
+                    for (int idx = 0; idx < displayLimit; idx++) {
+                        ProjectTask task = incompleteTasks.get(idx);
+                        ctxText.append(i++).append(". **").append(task.getTitle()).append("**\n")
+                               .append("   - ").append(isVn ? "Dự án: " : "Project: ").append(task.getProject() != null ? task.getProject().getProjectName() : "N/A").append("\n")
+                               .append("   - ").append(isVn ? "Trạng thái: " : "Status: ").append(formatEnum(task.getStatus().name())).append("\n");
+                        if (task.getPriority() != null) {
+                            ctxText.append("   - ").append(isVn ? "Mức ưu tiên: " : "Priority: ").append(formatEnum(task.getPriority().name())).append("\n");
+                        }
+                        if (task.getDueDate() != null) {
+                            ctxText.append("   - ").append(isVn ? "Hạn: " : "Due: ").append(formatShortDate(task.getDueDate())).append("\n");
+                        }
+                        ctxText.append("\n");
                     }
 
-                } else if (question.contains("check how many tasks i have left in each status")
-                    || question.contains("check how many tasks i have in each status")
-                    || question.contains("check the status of my tasks")
-                    || question.contains("what is the status of my tasks")) {
+                    if (!showAll && incompleteTasks.size() > displayLimit) {
+                        int remaining = incompleteTasks.size() - displayLimit;
+                        ctxText.append("*").append(remaining).append(" more incomplete task(s) are not shown.*\n");
+                    }
 
-                    // Generic question:
-                    // "What is the status of my tasks?"
+                } else {
+                    long todoCount = tasks.stream().filter(t -> t.getStatus() == TaskStatus.TODO).count();
+                    long inProgressCount = tasks.stream().filter(t -> t.getStatus() == TaskStatus.IN_PROGRESS).count();
+                    long inReviewCount = tasks.stream().filter(t -> t.getStatus() == TaskStatus.IN_REVIEW).count();
+                    long blockedCount = tasks.stream().filter(t -> t.getStatus() == TaskStatus.BLOCKED).count();
+                    long doneCount = tasks.stream().filter(t -> t.getStatus() == TaskStatus.DONE).count();
+                    long cancelledCount = tasks.stream().filter(t -> t.getStatus() == TaskStatus.CANCELLED).count();
 
-                    long todoCount = tasks.stream()
-                            .filter(t -> t.getStatus() == TaskStatus.TODO)
-                            .count();
-
-                    long inProgressCount = tasks.stream()
-                            .filter(t -> t.getStatus() == TaskStatus.IN_PROGRESS)
-                            .count();
-
-                    long inReviewCount = tasks.stream()
-                            .filter(t -> t.getStatus() == TaskStatus.IN_REVIEW)
-                            .count();
-
-                    long blockedCount = tasks.stream()
-                            .filter(t -> t.getStatus() == TaskStatus.BLOCKED)
-                            .count();
-
-                    long doneCount = tasks.stream()
-                            .filter(t -> t.getStatus() == TaskStatus.DONE)
-                            .count();
-
-                    long cancelledCount = tasks.stream()
-                            .filter(t -> t.getStatus() == TaskStatus.CANCELLED)
-                            .count();
-
-                    ctxText.append("Here is the current status of your tasks:\n\n")
-                            .append("Total Tasks: ").append(tasks.size()).append("\n")
-                            .append("Todo: ").append(todoCount).append("\n")
-                            .append("In Progress: ").append(inProgressCount).append("\n")
-                            .append("In Review: ").append(inReviewCount).append("\n")
-                            .append("Blocked: ").append(blockedCount).append("\n")
-                            .append("Done: ").append(doneCount).append("\n")
-                            .append("Cancelled: ").append(cancelledCount).append("\n");
+                    ctxText.append(isVn ? "Dưới đây là tổng hợp trạng thái các nhiệm vụ của bạn:\n\n" : "Here is the current status summary of your tasks:\n\n")
+                            .append("- ").append(isVn ? "Tổng số nhiệm vụ: " : "Total Tasks: ").append(tasks.size()).append("\n")
+                            .append("- ").append(isVn ? "Đang thực hiện: " : "In Progress: ").append(inProgressCount).append("\n")
+                            .append("- ").append(isVn ? "Cần làm: " : "To Do: ").append(todoCount).append("\n")
+                            .append("- ").append(isVn ? "Đang chờ duyệt: " : "In Review: ").append(inReviewCount).append("\n")
+                            .append("- ").append(isVn ? "Bị chặn: " : "Blocked: ").append(blockedCount).append("\n")
+                            .append("- ").append(isVn ? "Hoàn thành: " : "Done: ").append(doneCount).append("\n")
+                            .append("- ").append(isVn ? "Đã hủy: " : "Cancelled: ").append(cancelledCount).append("\n");
                 }
 
                 break;
@@ -710,72 +739,93 @@ public class AiAssistantService {
                         .min(java.util.Comparator.comparing(ProjectTask::getDueDate))
                         .orElse(null);
                     if (closest != null) {
-                        ctxText.append("Your closest active deadline is:\n\n")
-                               .append("Task: ").append(closest.getTitle()).append("\n")
-                               .append("Project: ").append(closest.getProject().getProjectName()).append("\n")
-                               .append("Deadline: ").append(formatDate(closest.getDueDate() != null ? closest.getDueDate().toLocalDate() : null)).append("\n")
-                               .append("Status: ").append(formatEnum(closest.getStatus().name())).append("\n")
-                               .append("Priority: ").append(formatEnum(closest.getPriority() != null ? closest.getPriority().name() : null)).append("\n\n");
+                        ctxText.append(isVn ? "Nhiệm vụ có thời hạn gần nhất của bạn là:\n\n" : "Your closest active deadline is:\n\n")
+                               .append("### **").append(closest.getTitle()).append("**\n")
+                               .append("- ").append(isVn ? "Dự án: " : "Project: ").append(closest.getProject().getProjectName()).append("\n")
+                               .append("- ").append(isVn ? "Hạn chót: " : "Due: ").append(formatShortDate(closest.getDueDate() != null ? closest.getDueDate().toLocalDate() : null)).append("\n")
+                               .append("- ").append(isVn ? "Trạng thái: " : "Status: ").append(formatEnum(closest.getStatus().name())).append("\n")
+                               .append("- ").append(isVn ? "Độ ưu tiên: " : "Priority: ").append(formatEnum(closest.getPriority() != null ? closest.getPriority().name() : null)).append("\n\n");
                     } else {
-                        ctxText.append("You have no active tasks with deadlines.\n");
+                        ctxText.append(isVn ? "Bạn không có nhiệm vụ nào đang thực hiện có thời hạn.\n" : "You have no active tasks with deadlines.\n");
                     }
                 } else if (intent == StaffIntent.NEXT_ACTION) {
-                    ProjectTask nextTask = tasks.stream()
-                            .filter(t -> t.getStatus() == TaskStatus.TODO
-                                    || t.getStatus() == TaskStatus.IN_PROGRESS)
-                            .min(
-                                    java.util.Comparator
-                                            .comparingInt((ProjectTask t) -> {
-                                                if (t.getPriority() == null) return 3;
+                    List<ProjectTask> activeTasks = tasks.stream()
+                            .filter(t -> t.getStatus() == TaskStatus.TODO || t.getStatus() == TaskStatus.IN_PROGRESS)
+                            .sorted(taskPriorityComparator())
+                            .collect(Collectors.toList());
 
-                                                return switch (t.getPriority()) {
-                                                    case HIGH -> 0;
-                                                    case MEDIUM -> 1;
-                                                    case LOW -> 2;
-                                                };
-                                            })
-                                            .thenComparing(
-                                                    ProjectTask::getDueDate,
-                                                    java.util.Comparator.nullsLast(
-                                                            java.util.Comparator.naturalOrder()
-                                                    )
-                                            )
-                                            .thenComparingInt(t ->
-                                                    t.getStatus() == TaskStatus.IN_PROGRESS
-                                                            ? 0
-                                                            : 1
-                                            )
-                            )
-                            .orElse(null);
+                    if (!activeTasks.isEmpty()) {
+                        ProjectTask nextTask = activeTasks.get(0);
+                        ctxText.append(isVn ? "Bạn nên tập trung vào nhiệm vụ này tiếp theo:\n\n" : "You should work on this task next.\n\n")
+                               .append("### **").append(nextTask.getTitle()).append("**\n")
+                               .append("- ").append(isVn ? "Dự án: " : "Project: ").append(nextTask.getProject().getProjectName()).append("\n")
+                               .append("- ").append(isVn ? "Độ ưu tiên: " : "Priority: ").append(formatEnum(nextTask.getPriority() != null ? nextTask.getPriority().name() : null)).append("\n")
+                               .append("- ").append(isVn ? "Hạn chót: " : "Due: ").append(formatShortDate(nextTask.getDueDate() != null ? nextTask.getDueDate().toLocalDate() : null)).append("\n")
+                               .append("- ").append(isVn ? "Trạng thái: " : "Status: ").append(formatEnum(nextTask.getStatus().name())).append("\n\n");
 
-                    if (nextTask != null) {
-                        ctxText.append("You should work on this task next.\n\n")
-                               .append("Task: ").append(nextTask.getTitle()).append("\n")
-                               .append("Project: ").append(nextTask.getProject().getProjectName()).append("\n")
-                               .append("Status: ").append(formatEnum(nextTask.getStatus().name())).append("\n")
-                               .append("Priority: ").append(formatEnum(nextTask.getPriority() != null ? nextTask.getPriority().name() : null)).append("\n")
-                               .append("Deadline: ").append(formatDate(nextTask.getDueDate() != null ? nextTask.getDueDate().toLocalDate() : null)).append("\n")
-                               .append("Reason: This is your highest-priority executable task with the nearest deadline.\n");
+                        String whyReason;
+                        LocalDateTime now = LocalDateTime.now();
+                        if (nextTask.getDueDate() != null && nextTask.getDueDate().isBefore(now)) {
+                            whyReason = isVn ? "Nhiệm vụ này đã quá hạn và cần được xử lý ngay lập tức." : "This task is overdue and requires immediate attention.";
+                        } else if (nextTask.getPriority() == TaskPriority.HIGH) {
+                            whyReason = isVn ? "Đây là nhiệm vụ có mức độ ưu tiên cao nhất với thời hạn gần nhất." : "This is your highest-priority executable task with the nearest deadline.";
+                        } else if (nextTask.getDueDate() != null) {
+                            whyReason = isVn ? "Nhiệm vụ này có thời hạn gần nhất trong số các nhiệm vụ đang xử lý." : "It has the nearest deadline among your active tasks.";
+                        } else {
+                            whyReason = isVn ? "Đây là nhiệm vụ khả thi tiếp theo trong danh sách của bạn." : "This is your highest-priority executable task.";
+                        }
+
+                        ctxText.append("**").append(isVn ? "Lý do:" : "Why:").append("**\n")
+                               .append(whyReason).append("\n\n");
+
+                        if (activeTasks.size() > 1) {
+                            ctxText.append("**").append(isVn ? "Các nhiệm vụ tiếp theo sau đó:" : "Next after that:").append("**\n");
+                            int limit = Math.min(activeTasks.size(), 3);
+                            for (int i = 1; i < limit; i++) {
+                                ProjectTask t = activeTasks.get(i);
+                                ctxText.append(i).append(". **").append(t.getTitle()).append("** (")
+                                       .append(t.getProject().getProjectName())
+                                       .append(t.getDueDate() != null ? " • " + (isVn ? "Hạn: " : "Due: ") + formatShortDate(t.getDueDate().toLocalDate()) : "")
+                                       .append(")\n");
+                            }
+                            ctxText.append("\n");
+                        }
                     } else {
-                        ctxText.append("You have no executable tasks found.\n");
+                        ctxText.append(isVn ? "Bạn không có nhiệm vụ nào cần thực hiện lúc này.\n" : "You have no executable tasks found.\n");
                     }
                 } else {
                     if (tasks.isEmpty()) {
-                        ctxText.append("You have no tasks assigned to you.\n");
+                        ctxText.append(isVn ? "Bạn hiện không có nhiệm vụ nào được giao.\n" : "You have no tasks assigned to you.\n");
                     } else {
-                        ctxText.append("You currently have ").append(tasks.size()).append(" assigned task(s).\n\n");
-                        int i = 1;
-                        for (ProjectTask t : tasks) {
-                            if (tasks.size() > 1) ctxText.append("Task ").append(i++).append("\n");
-                            ctxText.append("Task: ").append(t.getTitle()).append("\n")
-                                   .append("Project: ").append(t.getProject().getProjectName()).append("\n")
-                                   .append("Status: ").append(formatEnum(t.getStatus().name())).append("\n")
-                                   .append("Priority: ").append(formatEnum(t.getPriority() != null ? t.getPriority().name() : null)).append("\n")
-                                   .append("Type: ").append(formatEnum(t.getTaskType() != null ? t.getTaskType().name() : null)).append("\n")
-                                   .append("Deadline: ").append(formatDate(t.getDueDate() != null ? t.getDueDate().toLocalDate() : null)).append(intent == StaffIntent.TASK_DETAIL ? "\n" : "  \n");
-                            if (intent == StaffIntent.TASK_DETAIL && t.getDescription() != null) {
-                                ctxText.append("Description: ").append(t.getDescription()).append("  \n");
+                        boolean showAll = isAllRequested(request.getQuestion());
+                        List<ProjectTask> sorted = tasks.stream()
+                                .sorted(taskPriorityComparator())
+                                .collect(Collectors.toList());
+
+                        int maxToShow = showAll ? sorted.size() : Math.min(6, sorted.size());
+
+                        ctxText.append(isVn ? "Chi tiết nhiệm vụ được giao cho bạn (" : "Detailed task information (")
+                               .append(tasks.size()).append(isVn ? " nhiệm vụ):\n\n" : " task(s)):\n\n");
+
+                        for (int i = 0; i < maxToShow; i++) {
+                            ProjectTask t = sorted.get(i);
+                            ctxText.append(i + 1).append(". **").append(t.getTitle()).append("**\n")
+                                   .append("   - ").append(isVn ? "Dự án: " : "Project: ").append(t.getProject().getProjectName()).append("\n")
+                                   .append("   - ").append(isVn ? "Trạng thái: " : "Status: ").append(formatEnum(t.getStatus().name())).append("\n")
+                                   .append("   - ").append(isVn ? "Độ ưu tiên: " : "Priority: ").append(formatEnum(t.getPriority() != null ? t.getPriority().name() : null)).append("\n")
+                                   .append("   - ").append(isVn ? "Hạn chót: " : "Due: ").append(formatShortDate(t.getDueDate() != null ? t.getDueDate().toLocalDate() : null)).append("\n");
+                            if (t.getDescription() != null && !t.getDescription().isBlank()) {
+                                ctxText.append("   - ").append(isVn ? "Mô tả: " : "Description: ").append(t.getDescription().trim()).append("\n");
                             }
+                            ctxText.append("\n");
+                        }
+
+                        if (!showAll && sorted.size() > maxToShow) {
+                            int remaining = sorted.size() - maxToShow;
+                            ctxText.append(isVn ? "Còn " : "")
+                                   .append(remaining)
+                                   .append(isVn ? " nhiệm vụ nữa chưa được hiển thị. Hãy nhắn 'xem tất cả nhiệm vụ' nếu bạn muốn xem đầy đủ danh sách.\n"
+                                           : " more assigned task(s) are not shown here. Ask me to show all assigned tasks if you want the full list.\n");
                         }
                     }
                 }
@@ -787,7 +837,7 @@ public class AiAssistantService {
                 List<Long> taskIds = userTasks.stream().map(ProjectTask::getId).collect(Collectors.toList());
 
                 if (taskIds.isEmpty()) {
-                    ctxText.append("You have no tasks, so no submissions.\n");
+                    ctxText.append(isVn ? "Bạn không có nhiệm vụ nào, nên không có bài nộp nào.\n" : "You have no tasks, so no submissions.\n");
                 } else {
                     List<ProjectTaskSubmission> submissions = projectTaskSubmissionRepository.findByProjectTask_IdIn(taskIds);
 
@@ -796,25 +846,29 @@ public class AiAssistantService {
                             .filter(s -> s.getStatus() == SubmissionStatus.REVISION_REQUESTED)
                             .collect(Collectors.toList());
                         if (returned.isEmpty()) {
-                            ctxText.append("You have no tasks that require revision.\n");
+                            ctxText.append(isVn ? "Bạn không có nhiệm vụ nào cần chỉnh sửa lại.\n" : "You have no tasks that require revision.\n");
                         } else {
-                            ctxText.append("You have ").append(returned.size()).append(" task(s) that require revision.\n\n");
+                            ctxText.append(isVn ? "Bạn có **" : "You have **")
+                                   .append(returned.size())
+                                   .append(isVn ? " nhiệm vụ** cần chỉnh sửa lại:\n\n" : " task(s)** that require revision:\n\n");
+                            int idx = 1;
                             for (ProjectTaskSubmission s : returned) {
-                                ctxText.append("Task: ").append(s.getProjectTask().getTitle()).append("  \n")
-                                       .append("Project: ").append(s.getProjectTask().getProject().getProjectName()).append("  \n")
-                                       .append("Status: Returned for Revision\n\n");
+                                ctxText.append(idx++).append(". **").append(s.getProjectTask().getTitle()).append("**\n")
+                                       .append("   - ").append(isVn ? "Dự án: " : "Project: ").append(s.getProjectTask().getProject().getProjectName()).append("\n")
+                                       .append("   - ").append(isVn ? "Trạng thái: " : "Status: ").append("Returned for Revision\n\n");
                             }
                         }
                     } else {
                         if (submissions.isEmpty()) {
-                            ctxText.append("You have no submissions.\n");
+                            ctxText.append(isVn ? "Bạn chưa có bài nộp nào.\n" : "You have no submissions.\n");
                         } else {
-                            ctxText.append("Your submission status is:\n\n");
+                            ctxText.append(isVn ? "Tình trạng bài nộp của bạn:\n\n" : "Your submission status is:\n\n");
+                            int idx = 1;
                             for (ProjectTaskSubmission s : submissions) {
-                                ctxText.append("Task: ").append(s.getProjectTask().getTitle()).append("  \n")
-                                       .append("Status: Submitted  \n")
-                                       .append("Review Status: ").append(formatEnum(s.getStatus().name())).append("  \n")
-                                       .append("Submitted At: ").append(formatDate(s.getSubmittedAt() != null ? s.getSubmittedAt().toLocalDate() : null)).append("\n\n");
+                                ctxText.append(idx++).append(". **Task: ").append(s.getProjectTask().getTitle()).append("**\n")
+                                       .append("   - Status: Submitted\n")
+                                       .append("   - ").append(isVn ? "Đánh giá: " : "Review Status: ").append(formatEnum(s.getStatus().name())).append("\n")
+                                       .append("   - ").append(isVn ? "Ngày nộp: " : "Submitted At: ").append(formatShortDate(s.getSubmittedAt() != null ? s.getSubmittedAt().toLocalDate() : null)).append("\n\n");
                             }
                         }
                     }
@@ -823,7 +877,8 @@ public class AiAssistantService {
 
             case OUT_OF_SCOPE:
             default:
-                ctxText.append("I can help you with your APMS projects, assigned tasks, deadlines, submissions, and next actions. The requested information is outside your available Staff workspace scope.\n");
+                ctxText.append(isVn ? "Tôi có thể hỗ trợ bạn về các dự án APMS, nhiệm vụ được giao, thời hạn, bài nộp và công việc cần làm tiếp theo. Thông tin yêu cầu nằm ngoài phạm vi không gian làm việc Nhân viên của bạn.\n"
+                        : "I can help you with your APMS projects, assigned tasks, deadlines, submissions, and next actions. The requested information is outside your available Staff workspace scope.\n");
                 break;
         }
 
@@ -864,6 +919,88 @@ public class AiAssistantService {
     private String formatDate(java.time.LocalDate date) {
         if (date == null) return "None";
         return date.format(java.time.format.DateTimeFormatter.ofPattern("MMMM d, yyyy", java.util.Locale.ENGLISH));
+    }
+
+    private String formatShortDate(java.time.LocalDateTime dateTime) {
+        if (dateTime == null) return "No deadline";
+        return dateTime.toLocalDate().format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy", java.util.Locale.ENGLISH));
+    }
+
+    private String formatShortDate(java.time.LocalDate date) {
+        if (date == null) return "No deadline";
+        return date.format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy", java.util.Locale.ENGLISH));
+    }
+
+    private boolean isAllRequested(String question) {
+        if (question == null) return false;
+        String lower = question.toLowerCase(java.util.Locale.ROOT);
+        return lower.contains("all") || lower.contains("tất cả") || lower.contains("toàn bộ") || lower.contains("everything");
+    }
+
+    private boolean isVietnamese(String question) {
+        if (question == null) return false;
+        String lower = question.toLowerCase(java.util.Locale.ROOT);
+        return lower.matches(".*[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ].*")
+                || lower.contains("của tôi") || lower.contains("cong viec") || lower.contains("nhiem vu")
+                || lower.contains("du an") || lower.contains("xin chao") || lower.contains("chao ban");
+    }
+
+    private java.util.Comparator<ProjectTask> taskPriorityComparator() {
+        return (t1, t2) -> {
+            java.time.LocalDate now = java.time.LocalDate.now();
+            boolean t1Overdue = t1.getDueDate() != null && t1.getDueDate().toLocalDate().isBefore(now)
+                    && t1.getStatus() != TaskStatus.DONE && t1.getStatus() != TaskStatus.CANCELLED;
+            boolean t2Overdue = t2.getDueDate() != null && t2.getDueDate().toLocalDate().isBefore(now)
+                    && t2.getStatus() != TaskStatus.DONE && t2.getStatus() != TaskStatus.CANCELLED;
+            if (t1Overdue != t2Overdue) return t1Overdue ? -1 : 1;
+
+            boolean t1Active = t1.getStatus() != TaskStatus.DONE && t1.getStatus() != TaskStatus.CANCELLED;
+            boolean t2Active = t2.getStatus() != TaskStatus.DONE && t2.getStatus() != TaskStatus.CANCELLED;
+            if (t1Active != t2Active) return t1Active ? -1 : 1;
+
+            if (t1.getDueDate() != null && t2.getDueDate() != null) {
+                int dueCmp = t1.getDueDate().compareTo(t2.getDueDate());
+                if (dueCmp != 0) return dueCmp;
+            } else if (t1.getDueDate() != null) {
+                return -1;
+            } else if (t2.getDueDate() != null) {
+                return 1;
+            }
+
+            int p1 = priorityRank(t1.getPriority());
+            int p2 = priorityRank(t2.getPriority());
+            if (p1 != p2) return Integer.compare(p1, p2);
+
+            int s1 = statusRank(t1.getStatus());
+            int s2 = statusRank(t2.getStatus());
+            if (s1 != s2) return Integer.compare(s1, s2);
+
+            return Long.compare(t1.getId() != null ? t1.getId() : 0, t2.getId() != null ? t2.getId() : 0);
+        };
+    }
+
+    private int priorityRank(com.apms.common.enums.TaskPriority priority) {
+        if (priority == null) return 3;
+        return switch (priority) {
+            case HIGH -> 0;
+            case MEDIUM -> 1;
+            case LOW -> 2;
+            default -> 3;
+        };
+    }
+
+    private int statusRank(TaskStatus status) {
+        if (status == null) return 7;
+        return switch (status) {
+            case IN_PROGRESS -> 0;
+            case TODO -> 1;
+            case AVAILABLE -> 2;
+            case IN_REVIEW -> 3;
+            case BLOCKED -> 4;
+            case DONE -> 5;
+            case CANCELLED -> 6;
+            default -> 7;
+        };
     }
 
     private UserDetailsImpl currentUser() {
@@ -907,6 +1044,24 @@ public class AiAssistantService {
         }
 
         switch (intent) {
+            case GREETING:
+                ctxText.append("Hi! How can I help you today? You can ask me about your managed projects, team workload, pending reviews, deadlines, or company profiles.\n");
+                break;
+
+            case THANK_YOU:
+                ctxText.append("You're welcome! Let me know if you'd like help with your managed projects, team workload, reviews, or company profiles.\n");
+                break;
+
+            case CAPABILITIES:
+                ctxText.append("I can help you with:\n")
+                       .append("- your managed projects and team workload\n")
+                       .append("- project progress and task overviews\n")
+                       .append("- pending reviews and candidate evaluations\n")
+                       .append("- upcoming deadlines and overdue tasks\n")
+                       .append("- next management actions and priorities\n")
+                       .append("- approved company profiles, relationships, and public news\n");
+                break;
+
             case INTERNAL_NEWS_PROTECTED:
                 ctxText.append("Internal News is protected data and is not accessible through the AI Assistant.\nPlease view it directly through the authorized Internal News section.\n");
                 break;
@@ -917,14 +1072,13 @@ public class AiAssistantService {
                 if (projects.isEmpty()) {
                     ctxText.append("You are not managing any active projects.\n");
                 } else {
-                    ctxText.append("You are currently managing ").append(projects.size()).append(" project(s).\n\n");
+                    ctxText.append("You are currently managing **").append(projects.size()).append(" project(s)**.\n\n");
                     int i = 1;
                     for (Project p : projects) {
-                        ctxText.append("Project ").append(i++).append("\n")
-                               .append("Name: ").append(p.getProjectName()).append("\n")
-                               .append("Status: ").append(formatEnum(p.getStatus().name())).append("\n")
-                               .append("Type: ").append(formatEnum(p.getProjectType() != null ? p.getProjectType().name() : null)).append("\n")
-                               .append("Target: ").append(p.getTargetCompanyName() != null ? p.getTargetCompanyName() : "N/A").append("\n\n");
+                        ctxText.append(i++).append(". **").append(p.getProjectName()).append("**\n")
+                               .append("   - Status: ").append(formatEnum(p.getStatus().name())).append("\n")
+                               .append("   - Type: ").append(formatEnum(p.getProjectType() != null ? p.getProjectType().name() : null)).append("\n")
+                               .append("   - Target: ").append(p.getTargetCompanyName() != null ? p.getTargetCompanyName() : "N/A").append("\n\n");
                     }
                 }
                 break;
@@ -938,7 +1092,7 @@ public class AiAssistantService {
                 if (ppProjects.isEmpty()) {
                     ctxText.append("DIRECT_ANSWER: You are not currently managing any projects.\n");
                 } else {
-                    ctxText.append("DIRECT_ANSWER: You are currently managing ").append(ppProjects.size()).append(" project(s).\n\n");
+                    ctxText.append("DIRECT_ANSWER: You are currently managing **").append(ppProjects.size()).append(" project(s)**.\n\n");
                     int projIndex = 1;
                     for (Project p : ppProjects) {
                         List<ProjectTask> pTasks = projectTaskRepository.findByProject_Id(p.getId());
@@ -946,10 +1100,9 @@ public class AiAssistantService {
                         long completedT = pTasks.stream().filter(t -> t.getStatus() == TaskStatus.DONE).count();
                         long prog = totalT == 0 ? 0 : (completedT * 100 / totalT);
 
-                        ctxText.append("Project ").append(projIndex++).append("\n")
-                               .append("Name: ").append(p.getProjectName()).append("\n")
-                               .append("Completed Tasks: ").append(completedT).append("/").append(totalT).append("\n")
-                               .append("Progress: ").append(prog).append("%\n\n");
+                        ctxText.append(projIndex++).append(". **").append(p.getProjectName()).append("**\n")
+                               .append("   - Progress: ").append(prog).append("%\n")
+                               .append("   - Completed Tasks: ").append(completedT).append("/").append(totalT).append("\n\n");
                     }
                 }
                 break;
@@ -971,11 +1124,25 @@ public class AiAssistantService {
                 if (managerTasks.isEmpty()) {
                     ctxText.append("No tasks found in your managed projects.\n");
                 } else {
-                    ctxText.append("Task Overview:\n\n");
-                    for (ProjectTask t : managerTasks) {
-                        ctxText.append("Task: ").append(t.getTitle()).append("\n")
-                               .append("Project: ").append(t.getProject().getProjectName()).append("\n")
-                               .append("Status: ").append(formatEnum(t.getStatus().name())).append("\n\n");
+                    boolean showAll = isAllRequested(request.getQuestion());
+                    List<ProjectTask> sortedMTasks = managerTasks.stream()
+                            .sorted(taskPriorityComparator())
+                            .collect(Collectors.toList());
+                    int maxToShow = showAll ? sortedMTasks.size() : Math.min(6, sortedMTasks.size());
+
+                    ctxText.append("Task Overview (").append(managerTasks.size()).append(" task(s)):\n\n");
+                    for (int idx = 0; idx < maxToShow; idx++) {
+                        ProjectTask t = sortedMTasks.get(idx);
+                        ctxText.append(idx + 1).append(". **").append(t.getTitle()).append("**\n")
+                               .append("   - Project: ").append(t.getProject().getProjectName()).append("\n")
+                               .append("   - Status: ").append(formatEnum(t.getStatus().name())).append("\n")
+                               .append("   - Priority: ").append(formatEnum(t.getPriority() != null ? t.getPriority().name() : null)).append("\n")
+                               .append("   - Due: ").append(formatShortDate(t.getDueDate() != null ? t.getDueDate().toLocalDate() : null)).append("\n\n");
+                    }
+
+                    if (!showAll && sortedMTasks.size() > maxToShow) {
+                        int remaining = sortedMTasks.size() - maxToShow;
+                        ctxText.append(remaining).append(" more task(s) are not shown here. Ask me to show all tasks if you want the full list.\n");
                     }
                 }
                 break;
@@ -991,7 +1158,7 @@ public class AiAssistantService {
                             .filter(t -> t.getAssignedToAccount() != null && t.getStatus() != TaskStatus.DONE && t.getStatus() != TaskStatus.CANCELLED)
                             .collect(Collectors.groupingBy(t -> t.getAssignedToAccount().getEmail(), Collectors.counting()));
                     ctxText.append("Team Workload Facts:\n\n");
-                    workload.forEach((name, count) -> ctxText.append(name).append(": ").append(count).append(" active task(s)\n"));
+                    workload.forEach((name, count) -> ctxText.append("- **").append(name).append("**: ").append(count).append(" active task(s)\n"));
                 }
                 break;
 
@@ -1005,16 +1172,26 @@ public class AiAssistantService {
                     LocalDateTime now = LocalDateTime.now();
                     List<ProjectTask> overdue = odTasks.stream()
                             .filter(t -> t.getDueDate() != null && t.getDueDate().isBefore(now) && t.getStatus() != TaskStatus.DONE && t.getStatus() != TaskStatus.CANCELLED  && t.getStatus() != TaskStatus.BLOCKED)
+                            .sorted(taskPriorityComparator())
                             .collect(Collectors.toList());
                     if (overdue.isEmpty()) {
                         ctxText.append("You have no overdue tasks in your projects.\n");
                     } else {
-                        ctxText.append("Overdue Tasks:\n\n");
-                        for (ProjectTask t : overdue) {
-                            ctxText.append("Task: ").append(t.getTitle()).append("\n")
-                                   .append("Project: ").append(t.getProject().getProjectName()).append("\n")
-                                   .append("Assigned To: ").append(t.getAssignedToAccount() != null ? t.getAssignedToAccount().getEmail() : "Unassigned").append("\n")
-                                   .append("Deadline: ").append(formatDate(t.getDueDate().toLocalDate())).append("  \n");
+                        boolean showAll = isAllRequested(request.getQuestion());
+                        int maxToShow = showAll ? overdue.size() : Math.min(6, overdue.size());
+
+                        ctxText.append("Overdue Tasks (").append(overdue.size()).append(" task(s)):\n\n");
+                        for (int idx = 0; idx < maxToShow; idx++) {
+                            ProjectTask t = overdue.get(idx);
+                            ctxText.append(idx + 1).append(". **").append(t.getTitle()).append("**\n")
+                                   .append("   - Project: ").append(t.getProject().getProjectName()).append("\n")
+                                   .append("   - Assigned To: ").append(t.getAssignedToAccount() != null ? t.getAssignedToAccount().getEmail() : "Unassigned").append("\n")
+                                   .append("   - Deadline: ").append(formatShortDate(t.getDueDate().toLocalDate())).append("\n\n");
+                        }
+
+                        if (!showAll && overdue.size() > maxToShow) {
+                            int remaining = overdue.size() - maxToShow;
+                            ctxText.append(remaining).append(" more overdue task(s) are not shown here. Ask me to show all overdue tasks if you want the full list.\n");
                         }
                     }
                 }
@@ -1031,12 +1208,13 @@ public class AiAssistantService {
                     if (pendingSubs.isEmpty()) {
                         ctxText.append("You have no submissions waiting for review.\n");
                     } else {
-                        ctxText.append("Pending Submissions for Review:\n\n");
+                        ctxText.append("Pending Submissions for Review (**").append(pendingSubs.size()).append("**):\n\n");
+                        int idx = 1;
                         for (ProjectTaskSubmission s : pendingSubs) {
-                            ctxText.append("Task: ").append(s.getProjectTask().getTitle()).append("\n")
-                                   .append("Project: ").append(s.getProject().getProjectName()).append("\n")
-                                   .append("Submitted By: ").append(s.getSubmittedByAccount() != null ? s.getSubmittedByAccount().getEmail() : "Unknown").append("\n")
-                                   .append("Date: ").append(formatDate(s.getSubmittedAt().toLocalDate())).append("\n\n");
+                            ctxText.append(idx++).append(". **").append(s.getProjectTask().getTitle()).append("**\n")
+                                   .append("   - Project: ").append(s.getProject().getProjectName()).append("\n")
+                                   .append("   - Submitted By: ").append(s.getSubmittedByAccount() != null ? s.getSubmittedByAccount().getEmail() : "Unknown").append("\n")
+                                   .append("   - Date: ").append(formatShortDate(s.getSubmittedAt() != null ? s.getSubmittedAt().toLocalDate() : null)).append("\n\n");
                         }
                     }
                 }
@@ -1054,10 +1232,11 @@ public class AiAssistantService {
                     if (candidates.isEmpty()) {
                         ctxText.append("You have no candidates waiting for review.\n");
                     } else {
-                        ctxText.append("Pending Candidates for Review:\n\n");
+                        ctxText.append("Pending Candidates for Review (**").append(candidates.size()).append("**):\n\n");
+                        int idx = 1;
                         for (CompanyCandidate c : candidates) {
-                            ctxText.append("Candidate: ").append(c.getIdentity() != null ? c.getIdentity().getLegalName() : "Unknown").append("\n")
-                                   .append("Status: Pending Review\n\n");
+                            ctxText.append(idx++).append(". **").append(c.getIdentity() != null ? c.getIdentity().getLegalName() : "Unknown").append("**\n")
+                                   .append("   - Status: Pending Review\n\n");
                         }
                     }
                 }
@@ -1073,11 +1252,12 @@ public class AiAssistantService {
                     if (returnedSubs.isEmpty()) {
                         ctxText.append("No work is currently returned for revision.\n");
                     } else {
-                        ctxText.append("Revision Requested Work:\n\n");
+                        ctxText.append("Revision Requested Work (**").append(returnedSubs.size()).append("**):\n\n");
+                        int idx = 1;
                         for (ProjectTaskSubmission s : returnedSubs) {
-                            ctxText.append("Task: ").append(s.getProjectTask().getTitle()).append("\n")
-                                   .append("Project: ").append(s.getProject().getProjectName()).append("\n")
-                                   .append("Assigned To: ").append(s.getProjectTask().getAssignedToAccount() != null ? s.getProjectTask().getAssignedToAccount().getEmail() : "Unassigned").append("\n\n");
+                            ctxText.append(idx++).append(". **").append(s.getProjectTask().getTitle()).append("**\n")
+                                   .append("   - Project: ").append(s.getProject().getProjectName()).append("\n")
+                                   .append("   - Assigned To: ").append(s.getProjectTask().getAssignedToAccount() != null ? s.getProjectTask().getAssignedToAccount().getEmail() : "Unassigned").append("\n\n");
                         }
                     }
                 }

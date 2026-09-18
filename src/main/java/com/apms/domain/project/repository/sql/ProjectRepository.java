@@ -53,6 +53,8 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
 
     boolean existsByTargetCompanyProfileIdAndCreatedByAccountId(String targetCompanyProfileId, Long createdByAccountId);
 
+    List<Project> findByTargetCompanyProfileIdIn(java.util.Collection<String> targetCompanyProfileIds);
+
     boolean existsByIdAndCreatedByAccountId(Long id, Long createdByAccountId);
 
     @Query("""
@@ -84,4 +86,22 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
             ORDER BY p.id DESC
             """)
     List<Project> findActiveProjectsByTargetCompanyTaxCode(@Param("taxCode") String taxCode);
+
+    @Query("""
+            SELECT p FROM Project p
+            WHERE (p.targetCompanyProfileId IN :profileIds
+                   OR (:taxCode IS NOT NULL AND p.targetCompanyTaxCode = :taxCode))
+              AND p.status NOT IN (com.apms.common.enums.ProjectStatus.COMPLETED, com.apms.common.enums.ProjectStatus.CLOSED)
+              AND (:excludeProjectId IS NULL OR p.id <> :excludeProjectId)
+            ORDER BY p.id DESC
+            """)
+    List<Project> findOpenProjectsForCompany(
+            @Param("profileIds") java.util.Collection<String> profileIds,
+            @Param("taxCode") String taxCode,
+            @Param("excludeProjectId") Long excludeProjectId);
+
+    @Query("SELECT CASE WHEN COUNT(p) > 0 THEN true ELSE false END FROM Project p WHERE p.targetCompanyProfileId IN :profileIds AND p.id <> :excludeProjectId")
+    boolean existsByTargetCompanyProfileIdInAndIdNot(
+            @Param("profileIds") java.util.Collection<String> profileIds,
+            @Param("excludeProjectId") Long excludeProjectId);
 }

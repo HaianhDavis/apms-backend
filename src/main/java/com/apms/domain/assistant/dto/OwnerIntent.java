@@ -27,5 +27,7 @@ public enum OwnerIntent {
     RELATIONSHIP_STRENGTHEN,
     RECENT_CHANGES,
     OUT_OF_SCOPE,
-    GREETING
+    GREETING,
+    THANK_YOU,
+    CAPABILITIES
 }

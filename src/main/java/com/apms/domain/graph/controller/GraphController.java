@@ -9,6 +9,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -19,6 +20,21 @@ import java.util.List;
 public class GraphController {
 
     private final GraphService graphService;
+    private final com.apms.domain.graph.service.GraphRelationshipRepairService graphRelationshipRepairService;
+
+    @PostMapping("/repair-completed-projects")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Integer>> repairCompletedProjects() {
+        int count = graphRelationshipRepairService.repairAllCompletedProjectRelationships();
+        return ResponseEntity.ok(ApiResponse.success(count, "Successfully repaired completed project relationships"));
+    }
+
+    @PostMapping("/repair-company/{companyId}")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Boolean>> repairCompany(@PathVariable String companyId) {
+        boolean success = graphRelationshipRepairService.repairRelationshipForCompany(companyId);
+        return ResponseEntity.ok(ApiResponse.success(success, "Relationship repair result for " + companyId));
+    }
 
     @GetMapping("/companies/{companyId}")
     @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")

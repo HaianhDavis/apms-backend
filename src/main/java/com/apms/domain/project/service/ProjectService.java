@@ -73,6 +73,18 @@ public class ProjectService {
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private com.apms.domain.contract.repository.mongo.ContractResearchRepository contractResearchRepository;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apms.domain.graph.service.GraphService graphService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apms.domain.profile.service.CompanyProfileVersionService companyProfileVersionService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository companyProfileVersionRepository;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.apms.domain.monitoring.repository.CompanyMonitoringAssignmentRepository companyMonitoringAssignmentRepository;
+
     // ─────────────────────────────────────────────
     // CREATE
     // ─────────────────────────────────────────────
@@ -82,36 +94,49 @@ public class ProjectService {
         com.apms.common.enums.RelationshipType resolvedRelationshipType = request.getTargetRelationshipType();
 
         if (request.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY && resolvedRelationshipType == null) {
-            String cypher = """
-                MATCH (c1:Company {companyId: $ownerId})-[r]->(c2:Company {companyId: $targetId})
-                RETURN type(r) AS relType
-                LIMIT 1
-                """;
-            java.util.Collection<String> relTypes = neo4jClient.query(cypher)
-                    .bindAll(Map.of(
-                            "ownerId", ownerOrganizationService.getOwnerCompanyId(),
-                            "targetId", request.getTargetCompanyProfileId()
-                    ))
-                    .fetchAs(String.class)
-                    .mappedBy((ts, record) -> record.get("relType").asString())
-                    .all();
-
-            if (relTypes != null && !relTypes.isEmpty()) {
-                String relString = relTypes.iterator().next();
-                try {
-                    resolvedRelationshipType = com.apms.common.enums.RelationshipType.valueOf(relString);
-                } catch (IllegalArgumentException e) {
-                    log.warn("Unknown relationship type in Neo4j: {}", relString);
-                }
-            }
-
+            resolvedRelationshipType = resolveCanonicalRelationship(request.getTargetCompanyProfileId());
             if (resolvedRelationshipType == null) {
                 throw new BusinessValidationException("No existing relationship found for this company. Please provide targetRelationshipType.");
             }
         }
 
+        if (request.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY) {
+            com.apms.domain.project.dto.OpenProjectCheckResponse openCheck = checkOpenProjectForCompany(
+                    request.getTargetCompanyProfileId(),
+                    request.getTargetCompanyTaxCode(),
+                    null
+            );
+            if (openCheck.isHasOpenProject()) {
+                java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
+                if (openCheck.getProjectId() != null) details.put("conflictingProjectId", openCheck.getProjectId());
+                if (openCheck.getProjectName() != null) details.put("conflictingProjectName", openCheck.getProjectName());
+                if (openCheck.getStatus() != null) details.put("conflictingProjectStatus", openCheck.getStatus());
+                throw new BusinessValidationException(
+                        "COMPANY_HAS_OPEN_PROJECT",
+                        "An unfinished project already exists for this company. Complete or close the existing project before creating another one.",
+                        details
+                );
+            }
+        }
+
         if (request.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY) {
             if (org.springframework.util.StringUtils.hasText(request.getTargetCompanyTaxCode())) {
+                com.apms.domain.project.dto.OpenProjectCheckResponse openCheck = checkOpenProjectForCompany(
+                        null,
+                        request.getTargetCompanyTaxCode(),
+                        null
+                );
+                if (openCheck.isHasOpenProject()) {
+                    java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
+                    if (openCheck.getProjectId() != null) details.put("conflictingProjectId", openCheck.getProjectId());
+                    if (openCheck.getProjectName() != null) details.put("conflictingProjectName", openCheck.getProjectName());
+                    if (openCheck.getStatus() != null) details.put("conflictingProjectStatus", openCheck.getStatus());
+                    throw new BusinessValidationException(
+                            "COMPANY_HAS_OPEN_PROJECT",
+                            "An unfinished project already exists for this company. Complete or close the existing project before creating another one.",
+                            details
+                    );
+                }
                 com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse duplicateCheck = checkDuplicateTaxCode(request.getTargetCompanyTaxCode());
                 if (duplicateCheck.isExists()) {
                     throw new BusinessValidationException("Duplicate tax code found: " + duplicateCheck.getMatchType());
@@ -128,26 +153,7 @@ public class ProjectService {
             throw new com.apms.common.exception.BusinessValidationException("Planned end date cannot be before today");
         }
 
-        if (request.getKeyResults() != null && !request.getKeyResults().isEmpty()) {
-            int totalWeight = request.getKeyResults().stream().mapToInt(com.apms.domain.project.dto.CreateProjectKeyResultRequest::getWeight).sum();
-            if (totalWeight != 100) {
-                throw new com.apms.common.exception.BusinessValidationException("KR_WEIGHT_TOTAL_MUST_EQUAL_100", "Total weight of Key Results must be exactly 100.");
-            }
-            if (request.getKeyResults().stream().anyMatch(kr -> kr.getWeight() <= 0)) {
-                throw new com.apms.common.exception.BusinessValidationException("KR_WEIGHT_MUST_BE_POSITIVE", "Key Result weight must be greater than 0.");
-            }
-            long uniqueTypesCount = request.getKeyResults().stream().map(com.apms.domain.project.dto.CreateProjectKeyResultRequest::getType).distinct().count();
-            if (uniqueTypesCount != request.getKeyResults().size()) {
-                throw new com.apms.common.exception.BusinessValidationException("KR_DUPLICATE_TYPE", "Duplicate Key Result type found.");
-            }
-            if (request.getKeyResults().stream().anyMatch(kr -> kr.getType() == com.apms.common.enums.ProjectKeyResultType.CONTRACT_INFORMATION)) {
-                if (resolvedRelationshipType != com.apms.common.enums.RelationshipType.PARTNER_WITH &&
-                    resolvedRelationshipType != com.apms.common.enums.RelationshipType.CUSTOMER_OF &&
-                    resolvedRelationshipType != com.apms.common.enums.RelationshipType.SUPPLIER_OF) {
-                    throw new com.apms.common.exception.BusinessValidationException("KR_CONTRACT_INFORMATION_UNSUPPORTED_RELATIONSHIP", "CONTRACT_INFORMATION key result is only supported for PARTNER, CUSTOMER, or SUPPLIER relationships.");
-                }
-            }
-        }
+        validateKeyResults(request.getKeyResults(), request.getProjectType(), request.getTargetCompanyProfileId(), resolvedRelationshipType);
 
         String targetTaxCode = request.getTargetCompanyTaxCode();
         final String createTargetProfileId = request.getTargetCompanyProfileId();
@@ -162,6 +168,11 @@ public class ProjectService {
             }
         }
 
+        com.apms.common.enums.RelationshipType originalRel = null;
+        if (request.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY && org.springframework.util.StringUtils.hasText(createTargetProfileId)) {
+            originalRel = resolveCanonicalRelationship(createTargetProfileId);
+        }
+
         Project project = Project.builder()
                 .projectName(request.getProjectName())
                 .projectType(request.getProjectType())
@@ -169,6 +180,7 @@ public class ProjectService {
                 .targetCompanyName(request.getTargetCompanyName())
                 .targetCompanyTaxCode(targetTaxCode)
                 .targetRelationshipType(resolvedRelationshipType)
+                .originalRelationshipType(originalRel)
                 .description(request.getDescription())
                 .objective(request.getObjective())
                 .plannedEndDate(request.getPlannedEndDate())
@@ -317,13 +329,45 @@ public class ProjectService {
             if (request.getTargetCompanyName() != null) {
                 project.setTargetCompanyName(request.getTargetCompanyName());
             }
-            if (request.getTargetCompanyProfileId() != null) {
+            if (request.getTargetCompanyProfileId() != null && !request.getTargetCompanyProfileId().equals(project.getTargetCompanyProfileId())) {
+                com.apms.domain.project.dto.OpenProjectCheckResponse openCheck = checkOpenProjectForCompany(
+                        request.getTargetCompanyProfileId(),
+                        request.getTargetCompanyTaxCode() != null ? request.getTargetCompanyTaxCode() : project.getTargetCompanyTaxCode(),
+                        project.getId()
+                );
+                if (openCheck.isHasOpenProject()) {
+                    java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
+                    if (openCheck.getProjectId() != null) details.put("conflictingProjectId", openCheck.getProjectId());
+                    if (openCheck.getProjectName() != null) details.put("conflictingProjectName", openCheck.getProjectName());
+                    if (openCheck.getStatus() != null) details.put("conflictingProjectStatus", openCheck.getStatus());
+                    throw new BusinessValidationException(
+                            "COMPANY_HAS_OPEN_PROJECT",
+                            "An unfinished project already exists for this company. Complete or close the existing project before creating another one.",
+                            details
+                    );
+                }
                 project.setTargetCompanyProfileId(request.getTargetCompanyProfileId());
             }
             if (request.getTargetCompanyTaxCode() != null) {
                 if (org.springframework.util.StringUtils.hasText(request.getTargetCompanyTaxCode()) && 
                     !request.getTargetCompanyTaxCode().equals(project.getTargetCompanyTaxCode())) {
                     if (project.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY) {
+                        com.apms.domain.project.dto.OpenProjectCheckResponse openCheck = checkOpenProjectForCompany(
+                                null,
+                                request.getTargetCompanyTaxCode(),
+                                project.getId()
+                        );
+                        if (openCheck.isHasOpenProject()) {
+                            java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
+                            if (openCheck.getProjectId() != null) details.put("conflictingProjectId", openCheck.getProjectId());
+                            if (openCheck.getProjectName() != null) details.put("conflictingProjectName", openCheck.getProjectName());
+                            if (openCheck.getStatus() != null) details.put("conflictingProjectStatus", openCheck.getStatus());
+                            throw new BusinessValidationException(
+                                    "COMPANY_HAS_OPEN_PROJECT",
+                                    "An unfinished project already exists for this company. Complete or close the existing project before creating another one.",
+                                    details
+                            );
+                        }
                         com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse duplicateCheck = checkDuplicateTaxCode(request.getTargetCompanyTaxCode());
                         if (duplicateCheck.isExists()) {
                             throw new BusinessValidationException("Duplicate tax code found: " + duplicateCheck.getMatchType());
@@ -345,25 +389,7 @@ public class ProjectService {
             }
 
             if (request.getKeyResults() != null && !request.getKeyResults().isEmpty()) {
-                int totalWeight = request.getKeyResults().stream().mapToInt(com.apms.domain.project.dto.CreateProjectKeyResultRequest::getWeight).sum();
-                if (totalWeight != 100) {
-                    throw new com.apms.common.exception.BusinessValidationException("KR_WEIGHT_TOTAL_MUST_EQUAL_100", "Total weight of Key Results must be exactly 100.");
-                }
-                if (request.getKeyResults().stream().anyMatch(kr -> kr.getWeight() <= 0)) {
-                    throw new com.apms.common.exception.BusinessValidationException("KR_WEIGHT_MUST_BE_POSITIVE", "Key Result weight must be greater than 0.");
-                }
-                long uniqueTypesCount = request.getKeyResults().stream().map(com.apms.domain.project.dto.CreateProjectKeyResultRequest::getType).distinct().count();
-                if (uniqueTypesCount != request.getKeyResults().size()) {
-                    throw new com.apms.common.exception.BusinessValidationException("KR_DUPLICATE_TYPE", "Duplicate Key Result type found.");
-                }
-                if (request.getKeyResults().stream().anyMatch(kr -> kr.getType() == com.apms.common.enums.ProjectKeyResultType.CONTRACT_INFORMATION)) {
-                    com.apms.common.enums.RelationshipType rel = project.getTargetRelationshipType();
-                    if (rel != com.apms.common.enums.RelationshipType.PARTNER_WITH &&
-                        rel != com.apms.common.enums.RelationshipType.CUSTOMER_OF &&
-                        rel != com.apms.common.enums.RelationshipType.SUPPLIER_OF) {
-                        throw new com.apms.common.exception.BusinessValidationException("KR_CONTRACT_INFORMATION_UNSUPPORTED_RELATIONSHIP", "CONTRACT_INFORMATION key result is only supported for PARTNER, CUSTOMER, or SUPPLIER relationships.");
-                    }
-                }
+                validateKeyResults(request.getKeyResults(), project.getProjectType(), project.getTargetCompanyProfileId(), project.getTargetRelationshipType());
 
                 // Delete existing KRs and Tasks
                 projectTaskRepository.deleteByProjectId(id);
@@ -450,6 +476,10 @@ public class ProjectService {
         project.setClosedByAccount(accountRepository.findById(actorId).orElse(null));
         project = projectRepository.save(project);
 
+        if (newStatus == ProjectStatus.COMPLETED) {
+            applyTargetRelationshipOnCompletion(project, actorId);
+        }
+
         String detail = String.format("Project %s. Reason: %s", newStatus, request.getReason() != null ? request.getReason() : "None");
         auditLogService.log(actorId, action, "Project", String.valueOf(project.getId()), detail);
 
@@ -487,6 +517,10 @@ public class ProjectService {
 
         project.setStatus(newStatus);
         project = projectRepository.save(project);
+
+        if (newStatus == ProjectStatus.COMPLETED) {
+            applyTargetRelationshipOnCompletion(project, actorId);
+        }
 
         AuditAction action = AuditAction.PROJECT_STATUS_CHANGED;
         if (newStatus == ProjectStatus.COMPLETED) action = AuditAction.PROJECT_COMPLETED;
@@ -529,18 +563,130 @@ public class ProjectService {
     public void deleteProject(Long id, Long actorId) {
         Project project = findProjectOrThrow(id);
 
-        if (project.getStatus() != ProjectStatus.DRAFT && project.getStatus() != ProjectStatus.COMPLETED) {
+        if (project.getStatus() != ProjectStatus.DRAFT) {
             throw new BusinessValidationException(
-                    "Only draft or done projects can be deleted. In progress projects cannot be deleted.");
+                    "PROJECT_NOT_DRAFT",
+                    "Only draft projects can be deleted.");
         }
 
         String projectName = project.getProjectName();
         ProjectStatus status = project.getStatus();
+        ProjectType projectType = project.getProjectType();
 
+        // 1. Resolve linked CompanyProfile for NEW_COMPANY_RESEARCH
+        com.apms.domain.profile.CompanyProfile linkedProfile = null;
+        if (projectType == ProjectType.RESEARCH_NEW_COMPANY) {
+            if (org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId())) {
+                String profileId = project.getTargetCompanyProfileId().trim();
+                linkedProfile = companyProfileRepository.findByCompanyId(profileId)
+                        .or(() -> companyProfileRepository.findById(profileId))
+                        .orElse(null);
+            }
+            if (linkedProfile == null && project.getId() != null) {
+                java.util.List<com.apms.domain.profile.CompanyProfile> byProj = companyProfileRepository.findByProjectId(String.valueOf(project.getId()));
+                if (!byProj.isEmpty()) {
+                    linkedProfile = byProj.get(0);
+                }
+            }
+            if (linkedProfile == null && org.springframework.util.StringUtils.hasText(project.getTargetCompanyTaxCode())) {
+                String normTax = project.getTargetCompanyTaxCode().replaceAll("[\\s\\-]", "").trim();
+                linkedProfile = companyProfileRepository.findByIdentityTaxCode(normTax).orElse(null);
+            }
+        }
+
+        // 2. Clean up project-owned dependencies
         projectTaskSubmissionRepository.deleteByProject_Id(id);
         projectTaskRepository.deleteByProjectId(id);
+        projectKeyResultRepository.deleteByProjectId(id);
         importJobRepository.deleteByProject_Id(id);
         projectMemberRepository.deleteByProject_Id(id);
+
+        // 3. Handle linked CompanyProfile shell cleanup if applicable
+        if (linkedProfile != null && projectType == ProjectType.RESEARCH_NEW_COMPANY) {
+            String projectIdStr = String.valueOf(project.getId());
+            if (linkedProfile.getSourceRefs() != null && linkedProfile.getSourceRefs().getProjectIds() != null) {
+                linkedProfile.getSourceRefs().getProjectIds().remove(projectIdStr);
+            }
+
+            boolean isUnverified = linkedProfile.getReviewStatus() == null ||
+                    "UNVERIFIED".equalsIgnoreCase(linkedProfile.getReviewStatus());
+
+            boolean hasRemainingSourceProjectIds = linkedProfile.getSourceRefs() != null &&
+                    linkedProfile.getSourceRefs().getProjectIds() != null &&
+                    !linkedProfile.getSourceRefs().getProjectIds().isEmpty();
+
+            boolean hasSourceCandidates = linkedProfile.getSourceRefs() != null &&
+                    linkedProfile.getSourceRefs().getCandidateIds() != null &&
+                    !linkedProfile.getSourceRefs().getCandidateIds().isEmpty();
+
+            boolean hasSourceImportJobs = linkedProfile.getSourceRefs() != null &&
+                    linkedProfile.getSourceRefs().getImportJobIds() != null &&
+                    !linkedProfile.getSourceRefs().getImportJobIds().isEmpty();
+
+            boolean hasSourceDocs = linkedProfile.getSourceRefs() != null &&
+                    linkedProfile.getSourceRefs().getRawDocumentIds() != null &&
+                    !linkedProfile.getSourceRefs().getRawDocumentIds().isEmpty();
+
+            java.util.List<String> profileIdsToCheck = new java.util.ArrayList<>();
+            if (org.springframework.util.StringUtils.hasText(linkedProfile.getCompanyId())) {
+                profileIdsToCheck.add(linkedProfile.getCompanyId());
+            }
+            if (org.springframework.util.StringUtils.hasText(linkedProfile.getId()) && !profileIdsToCheck.contains(linkedProfile.getId())) {
+                profileIdsToCheck.add(linkedProfile.getId());
+            }
+
+            boolean hasOtherProjectInDb = false;
+            if (!profileIdsToCheck.isEmpty()) {
+                hasOtherProjectInDb = projectRepository.existsByTargetCompanyProfileIdInAndIdNot(profileIdsToCheck, project.getId());
+            }
+
+            boolean hasMonitoring = false;
+            if (companyMonitoringAssignmentRepository != null) {
+                if (org.springframework.util.StringUtils.hasText(linkedProfile.getCompanyId()) &&
+                        companyMonitoringAssignmentRepository.findByCompanyProfileId(linkedProfile.getCompanyId()).isPresent()) {
+                    hasMonitoring = true;
+                } else if (org.springframework.util.StringUtils.hasText(linkedProfile.getId()) &&
+                        companyMonitoringAssignmentRepository.findByCompanyProfileId(linkedProfile.getId()).isPresent()) {
+                    hasMonitoring = true;
+                }
+            }
+
+            boolean hasVersionHistory = false;
+            if (companyProfileVersionRepository != null) {
+                if (org.springframework.util.StringUtils.hasText(linkedProfile.getId()) &&
+                        companyProfileVersionRepository.existsByCompanyProfileId(linkedProfile.getId())) {
+                    hasVersionHistory = true;
+                } else if (org.springframework.util.StringUtils.hasText(linkedProfile.getCompanyId()) &&
+                        companyProfileVersionRepository.existsByCompanyProfileId(linkedProfile.getCompanyId())) {
+                    hasVersionHistory = true;
+                }
+            }
+
+            boolean isOrphanShell = isUnverified
+                    && !hasRemainingSourceProjectIds
+                    && !hasSourceCandidates
+                    && !hasSourceImportJobs
+                    && !hasSourceDocs
+                    && !hasOtherProjectInDb
+                    && !hasMonitoring
+                    && !hasVersionHistory
+                    && (linkedProfile.getFinancial() == null)
+                    && (linkedProfile.getMarket() == null)
+                    && (linkedProfile.getCompanyMembers() == null || linkedProfile.getCompanyMembers().isEmpty());
+
+            if (isOrphanShell) {
+                companyProfileRepository.delete(linkedProfile);
+                log.info("Deleted orphan company profile shell: id={}, companyId={}, taxCode={}",
+                        linkedProfile.getId(), linkedProfile.getCompanyId(),
+                        linkedProfile.getIdentity() != null ? linkedProfile.getIdentity().getTaxCode() : "N/A");
+            } else {
+                companyProfileRepository.save(linkedProfile);
+                log.info("Preserved company profile, removed project reference {}: id={}, companyId={}",
+                        project.getId(), linkedProfile.getId(), linkedProfile.getCompanyId());
+            }
+        }
+
+        // 4. Delete project entity
         projectRepository.delete(project);
 
         auditLogService.log(actorId, AuditAction.PROJECT_ARCHIVED, "Project", String.valueOf(id),
@@ -760,6 +906,59 @@ public class ProjectService {
      *   - targetCompanyProfileId MUST be null or blank
      *   - targetCompanyName MUST be provided (not blank — used as research scope)
      */
+    private com.apms.common.enums.RelationshipType resolveCanonicalRelationship(String targetCompanyProfileId) {
+        if (!org.springframework.util.StringUtils.hasText(targetCompanyProfileId)) {
+            return null;
+        }
+
+        List<String> targetIds = new ArrayList<>();
+        targetIds.add(targetCompanyProfileId.trim());
+
+        java.util.Optional<com.apms.domain.profile.CompanyProfile> profileOpt = companyProfileRepository.findByCompanyId(targetCompanyProfileId)
+                .or(() -> companyProfileRepository.findById(targetCompanyProfileId));
+        if (profileOpt.isPresent()) {
+            com.apms.domain.profile.CompanyProfile p = profileOpt.get();
+            if (org.springframework.util.StringUtils.hasText(p.getCompanyId()) && !targetIds.contains(p.getCompanyId().trim())) {
+                targetIds.add(p.getCompanyId().trim());
+            }
+            if (org.springframework.util.StringUtils.hasText(p.getId()) && !targetIds.contains(p.getId().trim())) {
+                targetIds.add(p.getId().trim());
+            }
+        }
+
+        try {
+            String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+            if (targetIds.contains(ownerCompanyId)) return null;
+
+            String cypher = """
+                MATCH (:Company {companyId: $ownerCompanyId})-[r:PARTNER_WITH|COMPETITOR_OF|POTENTIAL_PARTNER_OF|SUPPLIER_OF|CUSTOMER_OF]-(c:Company)
+                WHERE c.companyId IN $targetIds
+                RETURN type(r) AS relType
+                ORDER BY coalesce(r.confirmedAt, datetime('1970-01-01T00:00:00Z')) DESC
+                LIMIT 1
+                """;
+
+            java.util.List<String> types = new java.util.ArrayList<>(neo4jClient.query(cypher)
+                    .bind(ownerCompanyId).to("ownerCompanyId")
+                    .bind(targetIds).to("targetIds")
+                    .fetchAs(String.class)
+                    .mappedBy((typeSystem, record) -> record.get("relType").asString())
+                    .all());
+
+            if (!types.isEmpty()) {
+                String relString = types.get(0);
+                try {
+                    return com.apms.common.enums.RelationshipType.valueOf(relString);
+                } catch (IllegalArgumentException e) {
+                    log.warn("Unknown relationship type in Neo4j: {}", relString);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to resolve Neo4j relationship for company {}: {}", targetCompanyProfileId, e.getMessage());
+        }
+        return null;
+    }
+
     private void validateProjectTypeInvariants(ProjectType type,
                                                String targetCompanyProfileId,
                                                String targetCompanyName,
@@ -784,6 +983,64 @@ public class ProjectService {
                     throw new BusinessValidationException(
                             "targetCompanyProfileId must be null for projectType " + type + ".");
                 }
+            }
+        }
+    }
+
+    private void validateKeyResults(List<com.apms.domain.project.dto.CreateProjectKeyResultRequest> keyResults,
+                                    ProjectType projectType,
+                                    String targetCompanyProfileId,
+                                    com.apms.common.enums.RelationshipType targetRelationshipType) {
+        if (keyResults == null || keyResults.isEmpty()) {
+            return;
+        }
+        int totalWeight = keyResults.stream().mapToInt(com.apms.domain.project.dto.CreateProjectKeyResultRequest::getWeight).sum();
+        if (totalWeight != 100) {
+            throw new com.apms.common.exception.BusinessValidationException("KR_WEIGHT_TOTAL_MUST_EQUAL_100", "Total weight of Key Results must be exactly 100.");
+        }
+        if (keyResults.stream().anyMatch(kr -> kr.getWeight() <= 0)) {
+            throw new com.apms.common.exception.BusinessValidationException("KR_WEIGHT_MUST_BE_POSITIVE", "Key Result weight must be greater than 0.");
+        }
+        long uniqueTypesCount = keyResults.stream().map(com.apms.domain.project.dto.CreateProjectKeyResultRequest::getType).distinct().count();
+        if (uniqueTypesCount != keyResults.size()) {
+            throw new com.apms.common.exception.BusinessValidationException("KR_DUPLICATE_TYPE", "Duplicate Key Result type found.");
+        }
+
+        if (projectType == ProjectType.RESEARCH_NEW_COMPANY) {
+            boolean hasBasic = keyResults.stream().anyMatch(kr -> kr.getType() == com.apms.common.enums.ProjectKeyResultType.BASIC_COMPANY_INFORMATION);
+            if (!hasBasic) {
+                throw new com.apms.common.exception.BusinessValidationException("BASIC_COMPANY_INFORMATION_REQUIRED",
+                        "Basic Company Information is required for New Company Research projects.");
+            }
+        } else if (projectType == ProjectType.UPDATE_EXISTING_COMPANY) {
+            if (keyResults.stream().anyMatch(kr ->
+                    kr.getType() != com.apms.common.enums.ProjectKeyResultType.FINANCIAL_INFORMATION &&
+                    kr.getType() != com.apms.common.enums.ProjectKeyResultType.CONTRACT_INFORMATION)) {
+                throw new com.apms.common.exception.BusinessValidationException("INVALID_DELIVERABLE_FOR_EXISTING_COMPANY",
+                        "Existing company update projects only support FINANCIAL_INFORMATION and CONTRACT_INFORMATION.");
+            }
+            if (org.springframework.util.StringUtils.hasText(targetCompanyProfileId)) {
+                com.apms.common.enums.RelationshipType canonicalRel = resolveCanonicalRelationship(targetCompanyProfileId);
+                if (canonicalRel != null && targetRelationshipType != null && canonicalRel != targetRelationshipType) {
+                    if (targetRelationshipType == com.apms.common.enums.RelationshipType.PARTNER_WITH ||
+                        targetRelationshipType == com.apms.common.enums.RelationshipType.CUSTOMER_OF ||
+                        targetRelationshipType == com.apms.common.enums.RelationshipType.SUPPLIER_OF) {
+                        boolean hasContract = keyResults.stream().anyMatch(kr -> kr.getType() == com.apms.common.enums.ProjectKeyResultType.CONTRACT_INFORMATION);
+                        if (!hasContract) {
+                            throw new com.apms.common.exception.BusinessValidationException("CONTRACT_INFORMATION_REQUIRED",
+                                    "Contract Information is required for relationship change from " + canonicalRel + " to " + targetRelationshipType);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (keyResults.stream().anyMatch(kr -> kr.getType() == com.apms.common.enums.ProjectKeyResultType.CONTRACT_INFORMATION)) {
+            if (targetRelationshipType != com.apms.common.enums.RelationshipType.PARTNER_WITH &&
+                targetRelationshipType != com.apms.common.enums.RelationshipType.CUSTOMER_OF &&
+                targetRelationshipType != com.apms.common.enums.RelationshipType.SUPPLIER_OF) {
+                throw new com.apms.common.exception.BusinessValidationException("KR_CONTRACT_INFORMATION_UNSUPPORTED_RELATIONSHIP",
+                        "CONTRACT_INFORMATION key result is only supported for PARTNER, CUSTOMER, or SUPPLIER relationships.");
             }
         }
     }
@@ -937,6 +1194,41 @@ public class ProjectService {
             }
         }
 
+        com.apms.common.enums.RelationshipType currentRel = null;
+        if (project.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY) {
+            if (project.getOriginalRelationshipType() != null) {
+                currentRel = project.getOriginalRelationshipType();
+            } else if (project.getStatus() == ProjectStatus.COMPLETED && companyProfileVersionRepository != null && org.springframework.util.StringUtils.hasText(profileLookupId)) {
+                try {
+                    List<com.apms.domain.profile.CompanyProfileVersion> versions = companyProfileVersionRepository
+                            .findByCompanyProfileIdOrCompanyIdOrderByCreatedAtDesc(profileLookupId, profileLookupId);
+                    if (versions != null) {
+                        for (com.apms.domain.profile.CompanyProfileVersion v : versions) {
+                            if (project.getId().equals(v.getCreatedFromProjectId()) && v.getBeforeValues() != null) {
+                                Object beforeRel = v.getBeforeValues().get("relationship");
+                                if (beforeRel != null && org.springframework.util.StringUtils.hasText(beforeRel.toString())) {
+                                    try {
+                                        currentRel = com.apms.common.enums.RelationshipType.valueOf(beforeRel.toString());
+                                        break;
+                                    } catch (Exception ignored) {}
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+            if (currentRel == null && org.springframework.util.StringUtils.hasText(profileLookupId)) {
+                currentRel = resolveCanonicalRelationship(profileLookupId);
+                // Backfill historical originalRelationshipType on project entity if missing (e.g. legacy test13 created before fix)
+                if (currentRel != null && project.getOriginalRelationshipType() == null) {
+                    project.setOriginalRelationshipType(currentRel);
+                    try {
+                        projectRepository.save(project);
+                    } catch (Exception ignored) {}
+                }
+            }
+        }
+
         return ProjectResponse.builder()
                 .id(project.getId())
                 .projectName(project.getProjectName())
@@ -945,6 +1237,8 @@ public class ProjectService {
                 .targetCompanyName(project.getTargetCompanyName())
                 .targetCompanyTaxCode(targetTaxCode)
                 .targetRelationshipType(project.getTargetRelationshipType())
+                .currentRelationshipType(currentRel)
+                .originalRelationshipType(project.getOriginalRelationshipType())
                 .description(project.getDescription())
                 .objective(project.getObjective())
                 .keyResults(krResponses)
@@ -1013,6 +1307,68 @@ public class ProjectService {
                 .build();
     }
 
+    public com.apms.domain.project.dto.OpenProjectCheckResponse checkOpenProjectForCompany(
+            String companyProfileId,
+            String taxCode,
+            Long excludeProjectId) {
+        java.util.Set<String> profileIds = new java.util.HashSet<>();
+        String normalizedTaxCode = org.springframework.util.StringUtils.hasText(taxCode)
+                ? taxCode.replaceAll("[\\s\\-]", "").trim()
+                : null;
+
+        if (org.springframework.util.StringUtils.hasText(companyProfileId)) {
+            profileIds.add(companyProfileId);
+            Optional<com.apms.domain.profile.CompanyProfile> profileOpt = companyProfileRepository.findByCompanyId(companyProfileId)
+                    .or(() -> companyProfileRepository.findById(companyProfileId));
+            if (profileOpt.isPresent()) {
+                com.apms.domain.profile.CompanyProfile profile = profileOpt.get();
+                if (org.springframework.util.StringUtils.hasText(profile.getId())) {
+                    profileIds.add(profile.getId());
+                }
+                if (org.springframework.util.StringUtils.hasText(profile.getCompanyId())) {
+                    profileIds.add(profile.getCompanyId());
+                }
+                if (normalizedTaxCode == null && profile.getIdentity() != null && org.springframework.util.StringUtils.hasText(profile.getIdentity().getTaxCode())) {
+                    normalizedTaxCode = profile.getIdentity().getTaxCode().replaceAll("[\\s\\-]", "").trim();
+                }
+            }
+        } else if (normalizedTaxCode != null) {
+            Optional<com.apms.domain.profile.CompanyProfile> profileOpt = companyProfileRepository.findByIdentityTaxCode(normalizedTaxCode);
+            if (profileOpt.isPresent()) {
+                com.apms.domain.profile.CompanyProfile profile = profileOpt.get();
+                if (org.springframework.util.StringUtils.hasText(profile.getId())) {
+                    profileIds.add(profile.getId());
+                }
+                if (org.springframework.util.StringUtils.hasText(profile.getCompanyId())) {
+                    profileIds.add(profile.getCompanyId());
+                }
+            }
+        }
+
+        if (profileIds.isEmpty() && normalizedTaxCode == null) {
+            return com.apms.domain.project.dto.OpenProjectCheckResponse.builder().hasOpenProject(false).build();
+        }
+
+        List<Project> openProjects = projectRepository.findOpenProjectsForCompany(
+                profileIds.isEmpty() ? java.util.Collections.singletonList("__NO_MATCH_ID__") : profileIds,
+                normalizedTaxCode,
+                excludeProjectId
+        );
+
+        if (!openProjects.isEmpty()) {
+            Project openProj = openProjects.get(0);
+            return com.apms.domain.project.dto.OpenProjectCheckResponse.builder()
+                    .hasOpenProject(true)
+                    .projectId(openProj.getId())
+                    .projectName(openProj.getProjectName())
+                    .status(openProj.getStatus())
+                    .companyName(openProj.getTargetCompanyName())
+                    .build();
+        }
+
+        return com.apms.domain.project.dto.OpenProjectCheckResponse.builder().hasOpenProject(false).build();
+    }
+
     public com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse checkDuplicateTaxCode(String taxCode) {
         if (!org.springframework.util.StringUtils.hasText(taxCode)) {
             return com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse.builder()
@@ -1025,12 +1381,21 @@ public class ProjectService {
         Optional<com.apms.domain.profile.CompanyProfile> profileOpt = companyProfileRepository.findByIdentityTaxCode(normalizedTaxCode);
         if (profileOpt.isPresent()) {
             com.apms.domain.profile.CompanyProfile profile = profileOpt.get();
+            com.apms.domain.project.dto.OpenProjectCheckResponse openCheck = checkOpenProjectForCompany(
+                    profile.getCompanyId() != null ? profile.getCompanyId() : profile.getId(),
+                    normalizedTaxCode,
+                    null
+            );
             return com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse.builder()
                     .exists(true)
                     .matchType("COMPANY_PROFILE")
                     .companyProfileId(profile.getCompanyId())
                     .companyName(profile.getIdentity() != null ? profile.getIdentity().getLegalName() : null)
                     .taxCode(profile.getIdentity() != null ? profile.getIdentity().getTaxCode() : null)
+                    .hasOpenProject(openCheck.isHasOpenProject())
+                    .openProjectId(openCheck.getProjectId())
+                    .openProjectName(openCheck.getProjectName())
+                    .openProjectStatus(openCheck.getStatus())
                     .build();
         }
 
@@ -1038,12 +1403,17 @@ public class ProjectService {
         List<Project> activeProjects = projectRepository.findActiveProjectsByTargetCompanyTaxCode(normalizedTaxCode);
         if (!activeProjects.isEmpty()) {
             Project project = activeProjects.get(0);
+            boolean isOpen = project.getStatus() != ProjectStatus.COMPLETED && project.getStatus() != ProjectStatus.CLOSED;
             return com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse.builder()
                     .exists(true)
                     .matchType("ACTIVE_PROJECT")
                     .projectId(project.getId())
                     .companyName(project.getTargetCompanyName())
                     .taxCode(project.getTargetCompanyTaxCode())
+                    .hasOpenProject(isOpen)
+                    .openProjectId(isOpen ? project.getId() : null)
+                    .openProjectName(isOpen ? project.getProjectName() : null)
+                    .openProjectStatus(isOpen ? project.getStatus() : null)
                     .build();
         }
 
@@ -1329,5 +1699,121 @@ public class ProjectService {
         });
 
         return items;
+    }
+
+    private void applyTargetRelationshipOnCompletion(Project project, Long actorId) {
+        if (project == null || project.getProjectType() != ProjectType.UPDATE_EXISTING_COMPANY) {
+            return;
+        }
+        com.apms.common.enums.RelationshipType targetRel = project.getTargetRelationshipType();
+        if (targetRel == null) {
+            return;
+        }
+
+        String profileLookupId = project.getTargetCompanyProfileId();
+        if (!org.springframework.util.StringUtils.hasText(profileLookupId)) {
+            return;
+        }
+
+        com.apms.domain.profile.CompanyProfile profile = companyProfileRepository.findByCompanyId(profileLookupId)
+                .or(() -> companyProfileRepository.findById(profileLookupId))
+                .orElse(null);
+
+        if (profile == null) {
+            log.warn("Target CompanyProfile not found for project {} with lookup ID {}", project.getId(), profileLookupId);
+            return;
+        }
+
+        String targetCompanyId = profile.getCompanyId();
+        if (!org.springframework.util.StringUtils.hasText(targetCompanyId)) {
+            targetCompanyId = profile.getId();
+        }
+
+        com.apms.common.enums.RelationshipType canonicalRel = resolveCanonicalRelationship(targetCompanyId);
+        if (canonicalRel == null) {
+            canonicalRel = resolveCanonicalRelationship(profile.getId());
+        }
+
+        // Store originalRelationshipType historically if not already set on the project
+        if (project.getOriginalRelationshipType() == null && canonicalRel != null) {
+            project.setOriginalRelationshipType(canonicalRel);
+            projectRepository.save(project);
+        }
+
+        // Idempotency: if canonical relationship already matches target, do nothing
+        if (canonicalRel == targetRel) {
+            log.info("Project {} relationship apply skipped: canonical relationship is already {}", project.getId(), targetRel);
+            return;
+        }
+
+        String actorName = "SYSTEM";
+        if (actorId != null) {
+            actorName = userProfileRepository.findByAccountId(actorId)
+                    .map(u -> (u.getFirstName() + " " + u.getLastName()).trim())
+                    .filter(name -> !name.isBlank())
+                    .orElse("User #" + actorId);
+        }
+
+        // 1. Update Neo4j graph relationship
+        if (graphService != null) {
+            try {
+                String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+                graphService.replaceRelationship(ownerCompanyId, targetCompanyId, targetRel.name(), actorName);
+                log.info("Project {} replaced Neo4j relationship between {} and {} with {}",
+                        project.getId(), ownerCompanyId, targetCompanyId, targetRel.name());
+            } catch (Exception e) {
+                log.error("Failed to update Neo4j relationship for project {}: {}", project.getId(), e.getMessage(), e);
+            }
+        }
+
+        // 2. Link project to profile sourceRefs and update profile version
+        try {
+            if (profile.getSourceRefs() == null) {
+                profile.setSourceRefs(new com.apms.domain.profile.CompanyProfile.SourceRefs());
+            }
+            if (profile.getSourceRefs().getProjectIds() == null) {
+                profile.getSourceRefs().setProjectIds(new java.util.HashSet<>());
+            }
+            String projectIdStr = String.valueOf(project.getId());
+            profile.getSourceRefs().getProjectIds().add(projectIdStr);
+
+            profile.incrementMajorVersion();
+            if (profile.getMetadata() == null) {
+                profile.setMetadata(new com.apms.domain.profile.CompanyProfile.Metadata());
+            }
+            profile.getMetadata().setLastModifiedBy(actorId != null ? String.valueOf(actorId) : "SYSTEM");
+            profile.getMetadata().setUpdatedAt(LocalDateTime.now());
+            profile = companyProfileRepository.save(profile);
+
+            // 3. Create version snapshot
+            if (companyProfileVersionService != null) {
+                companyProfileVersionService.createAndSaveVersion(
+                        profile,
+                        com.apms.domain.profile.enums.CompanyProfileChangeSource.PROJECT_PROFILE_UPDATE,
+                        java.util.List.of("relationship"),
+                        java.util.Map.of("relationship", canonicalRel != null ? canonicalRel.name() : ""),
+                        java.util.Map.of("relationship", targetRel.name()),
+                        "Relationship updated from " + (canonicalRel != null ? canonicalRel : "None") + " to " + targetRel + " upon project completion",
+                        "Relationship updated to " + targetRel + " via project completion",
+                        null,
+                        project.getId(),
+                        null,
+                        null,
+                        actorId
+                );
+            }
+
+            // 4. Log audit action
+            auditLogService.log(
+                    actorId,
+                    AuditAction.CREATE_RELATIONSHIP,
+                    "CompanyProfile",
+                    targetCompanyId,
+                    String.format("Relationship updated from %s to %s on project completion (Project ID: %d)",
+                            canonicalRel != null ? canonicalRel : "None", targetRel, project.getId())
+            );
+        } catch (Exception e) {
+            log.error("Failed to update CompanyProfile version/snapshot for project {}: {}", project.getId(), e.getMessage(), e);
+        }
     }
 }

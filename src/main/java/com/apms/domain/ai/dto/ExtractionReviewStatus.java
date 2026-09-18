@@ -15,6 +15,12 @@ public enum ExtractionReviewStatus {
         if ("CHANGES_REQUESTED".equalsIgnoreCase(value) || "REVISION_REQUIRED".equalsIgnoreCase(value)) {
             return NEEDS_REVIEW;
         }
+        if ("APPROVED".equalsIgnoreCase(value)) {
+            return ACCEPTED;
+        }
+        if ("PENDING_REVIEW".equalsIgnoreCase(value) || "RESET".equalsIgnoreCase(value) || "UNDO".equalsIgnoreCase(value)) {
+            return PENDING;
+        }
         return ExtractionReviewStatus.valueOf(value.trim().toUpperCase());
     }
 }

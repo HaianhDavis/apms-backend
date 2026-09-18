@@ -1,5 +1,6 @@
 package com.apms.domain.profile.service;
 
+import com.apms.common.enums.ProjectStatus;
 import com.apms.common.enums.ProjectType;
 import com.apms.common.event.CandidateApprovedEvent;
 import com.apms.common.exception.BusinessValidationException;
@@ -47,6 +48,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Optional;
+import java.util.Comparator;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -571,11 +575,25 @@ public class ProfileService {
             }
 
             // 2. Query Neo4j for relationships with the owner company
-            String cypher = String.format("MATCH (:Company {companyId: '%s'})-[:%s]->(c:Company) RETURN DISTINCT c.companyId AS companyId", ownerCompanyId, relationshipType);
-            neo4jCompanyIds = new java.util.ArrayList<>(neo4jClient.query(cypher)
+            String cypher = String.format("""
+                MATCH (:Company {companyId: $ownerCompanyId})-[:%s]-(c:Company)
+                WHERE c.companyId <> $ownerCompanyId
+                RETURN DISTINCT c.companyId AS companyId
+                """, relationshipType);
+            List<String> rawCompanyIds = new java.util.ArrayList<>(neo4jClient.query(cypher)
+                    .bind(ownerCompanyId).to("ownerCompanyId")
                     .fetchAs(String.class)
                     .mappedBy((typeSystem, record) -> record.get("companyId").asString())
                     .all());
+
+            // 3. Enforce canonical consistency: filter must match the exact canonical relationship returned for display
+            neo4jCompanyIds = new java.util.ArrayList<>();
+            for (String cid : rawCompanyIds) {
+                String canonical = resolveRelationshipType(cid);
+                if (relationshipType.equalsIgnoreCase(canonical)) {
+                    neo4jCompanyIds.add(cid);
+                }
+            }
 
             if (neo4jCompanyIds.isEmpty()) {
                 return Page.empty(pageable);
@@ -962,39 +980,278 @@ public class ProfileService {
         return toResponse(profile);
     }
 
-    public void validateMinimumPublishability(CompanyProfile profile) {
-        if (Boolean.TRUE.equals(profile.getIsDeleted())) {
-            throw new com.apms.common.exception.BusinessValidationException("Deleted profiles cannot be published.");
-        }
-        if (profile.getIdentity() == null || !StringUtils.hasText(profile.getIdentity().getLegalName())) {
-            throw new com.apms.common.exception.BusinessValidationException("Profile requires a non-blank Legal Name before it can be published.");
-        }
-        if (profile.getIdentity() == null || !StringUtils.hasText(profile.getIdentity().getTaxCode())) {
-            throw new com.apms.common.exception.BusinessValidationException("Profile requires a non-blank Tax Code before it can be published.");
+    public Optional<Project> findOriginatingResearchNewCompanyProject(CompanyProfile profile) {
+        if (profile == null) {
+            return Optional.empty();
         }
 
-        String relType = resolveRelationshipType(profile.getCompanyId());
-        String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
-        boolean isOwner = ownerCompanyId != null && profile.getCompanyId() != null && profile.getCompanyId().equals(ownerCompanyId);
-        if (!isOwner && !isSupportedRelationship(relType)) {
-            throw new com.apms.common.exception.BusinessValidationException("Profile requires a valid supported Relationship before it can be published.");
+        // Priority 1: Direct linkage from CompanyProfile.sourceRefs.projectIds
+        if (profile.getSourceRefs() != null && profile.getSourceRefs().getProjectIds() != null && !profile.getSourceRefs().getProjectIds().isEmpty()) {
+            Set<Long> sourceProjectIds = new LinkedHashSet<>();
+            for (String pidStr : profile.getSourceRefs().getProjectIds()) {
+                if (StringUtils.hasText(pidStr)) {
+                    try {
+                        sourceProjectIds.add(Long.parseLong(pidStr.trim()));
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+            if (!sourceProjectIds.isEmpty()) {
+                List<Project> sourceProjects = projectRepository.findAllById(sourceProjectIds);
+                if (sourceProjects != null) {
+                    List<Project> researchProjects = sourceProjects.stream()
+                            .filter(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)
+                            .toList();
+                    if (!researchProjects.isEmpty()) {
+                        if (researchProjects.size() == 1) {
+                            return Optional.of(researchProjects.get(0));
+                        }
+                        // If multiple research projects linked in sourceRefs, prefer the one explicitly targeting this profile
+                        String canonicalCompanyId = profile.getCompanyId();
+                        Optional<Project> matchingTarget = researchProjects.stream()
+                                .filter(p -> StringUtils.hasText(canonicalCompanyId) && canonicalCompanyId.equals(p.getTargetCompanyProfileId()))
+                                .findFirst();
+                        if (matchingTarget.isPresent()) {
+                            return matchingTarget;
+                        }
+                        // Fallback tie-breaker among directly linked: earliest created / ID
+                        return researchProjects.stream().min(Comparator.comparing(Project::getId));
+                    }
+                }
+            }
+        }
+
+        // Priority 2: Direct linkage from Project.targetCompanyProfileId matching the exact CompanyProfile
+        List<String> targetIds = new ArrayList<>();
+        if (StringUtils.hasText(profile.getCompanyId())) {
+            targetIds.add(profile.getCompanyId().trim());
+        }
+        if (StringUtils.hasText(profile.getId()) && !targetIds.contains(profile.getId().trim())) {
+            targetIds.add(profile.getId().trim());
+        }
+        if (!targetIds.isEmpty()) {
+            List<Project> byTarget = projectRepository.findByTargetCompanyProfileIdIn(targetIds);
+            if (byTarget != null) {
+                List<Project> targetResearchProjects = byTarget.stream()
+                        .filter(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)
+                        .toList();
+                if (!targetResearchProjects.isEmpty()) {
+                    if (targetResearchProjects.size() == 1) {
+                        return Optional.of(targetResearchProjects.get(0));
+                    }
+                    return targetResearchProjects.stream().min(Comparator.comparing(Project::getId));
+                }
+            }
+        }
+
+        // Priority 3: Legacy fallback only when direct persisted linkage is unavailable
+        if (profile.getIdentity() != null && StringUtils.hasText(profile.getIdentity().getTaxCode())) {
+            String normTax = profile.getIdentity().getTaxCode().replaceAll("[\\s\\-]", "").trim();
+            List<Project> byTax = projectRepository.findActiveProjectsByTargetCompanyTaxCode(normTax);
+            if (byTax != null) {
+                List<Project> taxResearchProjects = byTax.stream()
+                        .filter(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)
+                        .toList();
+                if (!taxResearchProjects.isEmpty()) {
+                    return taxResearchProjects.stream().min(Comparator.comparing(Project::getId));
+                }
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    public boolean appearsResearchCreated(CompanyProfile profile) {
+        if (profile == null) return false;
+
+        // Check if sourceRefs has research-originated markers
+        if (profile.getSourceRefs() != null) {
+            boolean hasProjectIds = profile.getSourceRefs().getProjectIds() != null && !profile.getSourceRefs().getProjectIds().isEmpty();
+            boolean hasCandidateIds = profile.getSourceRefs().getCandidateIds() != null && !profile.getSourceRefs().getCandidateIds().isEmpty();
+            boolean hasImportJobIds = profile.getSourceRefs().getImportJobIds() != null && !profile.getSourceRefs().getImportJobIds().isEmpty();
+            boolean hasRawDocIds = profile.getSourceRefs().getRawDocumentIds() != null && !profile.getSourceRefs().getRawDocumentIds().isEmpty();
+            if (hasProjectIds || hasCandidateIds || hasImportJobIds || hasRawDocIds) {
+                return true;
+            }
+        }
+
+        // Check unverified initial shell status
+        if ("UNVERIFIED".equalsIgnoreCase(profile.getReviewStatus())) {
+            return true;
+        }
+
+        // Check if any research project directly targets this profile
+        List<String> targetIds = new ArrayList<>();
+        if (StringUtils.hasText(profile.getCompanyId())) targetIds.add(profile.getCompanyId().trim());
+        if (StringUtils.hasText(profile.getId()) && !targetIds.contains(profile.getId().trim())) targetIds.add(profile.getId().trim());
+        if (!targetIds.isEmpty()) {
+            List<Project> byTarget = projectRepository.findByTargetCompanyProfileIdIn(targetIds);
+            if (byTarget != null && byTarget.stream().anyMatch(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public List<Project> findLinkedResearchNewCompanyProjects(CompanyProfile profile) {
+        return findOriginatingResearchNewCompanyProject(profile)
+                .map(List::of)
+                .orElseGet(List::of);
+    }
+
+    public void validateMinimumPublishability(CompanyProfile profile) {
+        String blockReason = resolvePublishBlockReason(profile, true);
+        if (blockReason != null) {
+            if (blockReason.contains("Legal Name and Tax Code")) {
+                throw new com.apms.common.exception.BusinessValidationException("MISSING_LEGAL_NAME_OR_TAX_CODE", blockReason);
+            } else if (blockReason.contains("New Company Research project is completed")) {
+                throw new com.apms.common.exception.BusinessValidationException(
+                        "NEW_COMPANY_PROJECT_NOT_COMPLETED",
+                        "The company profile can only be published after the New Company Research project is completed."
+                );
+            } else {
+                throw new com.apms.common.exception.BusinessValidationException("PUBLISH_BLOCKED", blockReason);
+            }
         }
     }
 
     public boolean isPublishable(CompanyProfile p, String relType, boolean canManageVisibility) {
-        if (p == null || Boolean.TRUE.equals(p.getIsDeleted())) return false;
-        if (!canManageVisibility) return false;
-        if (p.getIdentity() == null) return false;
-        if (!StringUtils.hasText(p.getIdentity().getLegalName())) return false;
-        if (!StringUtils.hasText(p.getIdentity().getTaxCode())) return false;
+        return resolvePublishBlockReason(p, canManageVisibility) == null;
+    }
+
+    public String resolvePublishBlockReason(CompanyProfile profile, boolean canManageVisibility) {
+        if (profile == null || Boolean.TRUE.equals(profile.getIsDeleted())) {
+            return "Company profile not found or deleted.";
+        }
+        if (!canManageVisibility) {
+            return "You do not have permission to manage visibility for this company profile.";
+        }
+
+        boolean hasLegalName = profile.getIdentity() != null && StringUtils.hasText(profile.getIdentity().getLegalName());
+        boolean hasTaxCode = profile.getIdentity() != null && StringUtils.hasText(profile.getIdentity().getTaxCode());
+
+        if (!hasLegalName || !hasTaxCode) {
+            return "Profile requires Legal Name and Tax Code before it can be published.";
+        }
+
+        // Evaluate originating New Company Research project gate
+        if (appearsResearchCreated(profile)) {
+            Optional<Project> originatingProjectOpt = findOriginatingResearchNewCompanyProject(profile);
+            if (originatingProjectOpt.isPresent()) {
+                Project originatingProject = originatingProjectOpt.get();
+                // Case A: Clearly linked to RESEARCH_NEW_COMPANY -> require status == COMPLETED
+                if (originatingProject.getStatus() != ProjectStatus.COMPLETED) {
+                    return "Available after the New Company Research project is completed.";
+                }
+            } else {
+                // Case C: Appears research-created but originating project linkage cannot be verified
+                return "Unable to verify completion of the originating New Company Research project.";
+            }
+        }
+        // Case B: Pre-existing / canonical profile that did not originate from New Company Research shell -> gate passed
+
+        return null;
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ProfileResponse> getVisibilityManagementProfiles(
+            String keyword,
+            com.apms.common.enums.ProfileVisibility visibility,
+            String eligibility,
+            Long managerId,
+            boolean isAdmin,
+            Pageable pageable) {
 
         String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
-        boolean isOwner = ownerCompanyId != null && p.getCompanyId() != null && p.getCompanyId().equals(ownerCompanyId);
-        if (!isOwner && !isSupportedRelationship(relType)) {
-            return false;
+        List<CompanyProfile> manageable = profileRepository.findAll().stream()
+                .filter(p -> !Boolean.TRUE.equals(p.getIsDeleted()))
+                .filter(p -> !ownerCompanyId.equals(p.getCompanyId()))
+                .filter(p -> {
+                    if (isAdmin) return true;
+                    return managerId != null && managerId.equals(p.getResponsibleManagerId());
+                })
+                .toList();
+
+        if (StringUtils.hasText(keyword)) {
+            String lowerKw = keyword.trim().toLowerCase();
+            manageable = manageable.stream()
+                    .filter(p -> {
+                        String legal = p.getIdentity() != null && p.getIdentity().getLegalName() != null ? p.getIdentity().getLegalName().toLowerCase() : "";
+                        String trade = p.getIdentity() != null && p.getIdentity().getTradeName() != null ? p.getIdentity().getTradeName().toLowerCase() : "";
+                        return legal.contains(lowerKw) || trade.contains(lowerKw);
+                    })
+                    .toList();
         }
-        return true;
+
+        if (visibility != null) {
+            if (visibility == com.apms.common.enums.ProfileVisibility.HIDDEN) {
+                manageable = manageable.stream().filter(p -> Boolean.TRUE.equals(p.getIsHidden())).toList();
+            } else {
+                manageable = manageable.stream().filter(p -> !Boolean.TRUE.equals(p.getIsHidden())).toList();
+            }
+        }
+
+        List<ProfileResponse> mapped = manageable.stream()
+                .map(this::toResponse)
+                .toList();
+
+        if (StringUtils.hasText(eligibility) && !"ALL".equalsIgnoreCase(eligibility)) {
+            if ("ELIGIBLE".equalsIgnoreCase(eligibility)) {
+                mapped = mapped.stream().filter(pr -> Boolean.TRUE.equals(pr.getCanPublish())).toList();
+            } else if ("BLOCKED".equalsIgnoreCase(eligibility)) {
+                mapped = mapped.stream().filter(pr -> !Boolean.TRUE.equals(pr.getCanPublish())).toList();
+            }
+        }
+
+        mapped = new ArrayList<>(mapped);
+        mapped.sort((a, b) -> {
+            LocalDateTime ta = a.getMetadata() != null && a.getMetadata().getUpdatedAt() != null ? a.getMetadata().getUpdatedAt() : (a.getMetadata() != null ? a.getMetadata().getCreatedAt() : null);
+            LocalDateTime tb = b.getMetadata() != null && b.getMetadata().getUpdatedAt() != null ? b.getMetadata().getUpdatedAt() : (b.getMetadata() != null ? b.getMetadata().getCreatedAt() : null);
+            if (ta == null && tb == null) return 0;
+            if (ta == null) return 1;
+            if (tb == null) return -1;
+            return tb.compareTo(ta);
+        });
+
+        int total = mapped.size();
+        int fromIndex = (int) pageable.getOffset();
+        if (fromIndex >= total) {
+            return new org.springframework.data.domain.PageImpl<>(List.of(), pageable, total);
+        }
+        int toIndex = Math.min(fromIndex + pageable.getPageSize(), total);
+        List<ProfileResponse> pageContent = mapped.subList(fromIndex, toIndex);
+
+        return new org.springframework.data.domain.PageImpl<>(pageContent, pageable, total);
     }
+
+    @Transactional(readOnly = true)
+    public com.apms.domain.profile.dto.ProfileVisibilitySummaryDto getVisibilitySummary(Long managerId, boolean isAdmin) {
+        String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+        List<CompanyProfile> manageable = profileRepository.findAll().stream()
+                .filter(p -> !Boolean.TRUE.equals(p.getIsDeleted()))
+                .filter(p -> !ownerCompanyId.equals(p.getCompanyId()))
+                .filter(p -> {
+                    if (isAdmin) return true;
+                    return managerId != null && managerId.equals(p.getResponsibleManagerId());
+                })
+                .toList();
+
+        long total = manageable.size();
+        long published = manageable.stream().filter(p -> !Boolean.TRUE.equals(p.getIsHidden())).count();
+        long hidden = manageable.stream().filter(p -> Boolean.TRUE.equals(p.getIsHidden())).count();
+        long blocked = manageable.stream()
+                .filter(p -> Boolean.TRUE.equals(p.getIsHidden()))
+                .filter(p -> !isPublishable(p, null, true))
+                .count();
+
+        return com.apms.domain.profile.dto.ProfileVisibilitySummaryDto.builder()
+                .totalProfiles(total)
+                .published(published)
+                .hidden(hidden)
+                .blockedFromPublishing(blocked)
+                .build();
+    }
+
 
     public static boolean isSupportedRelationship(String rel) {
         if (!StringUtils.hasText(rel)) return false;
@@ -1713,6 +1970,37 @@ public class ProfileService {
         String versionLabel = versionState.versionLabel();
         String legacyVersion = p.getVersion() != null ? p.getVersion() : versionState.legacyVersion();
 
+        if (profileVersionRepository != null && p != null) {
+            try {
+                String profileId = p.getId();
+                String compId = p.getCompanyId();
+                java.util.List<com.apms.domain.profile.CompanyProfileVersion> versions = compId != null && !compId.isBlank()
+                        ? profileVersionRepository.findByCompanyProfileIdOrCompanyIdOrderByCreatedAtDesc(profileId, compId)
+                        : profileVersionRepository.findByCompanyProfileIdOrderByCreatedAtDesc(profileId);
+                if (versions != null && !versions.isEmpty()) {
+                    com.apms.domain.profile.CompanyProfileVersion latestVer = versions.get(0);
+                    int latestMajor = latestVer.getMajorVersion() != null
+                            ? latestVer.getMajorVersion()
+                            : CompanyProfileVersionHelper.parseLegacyVersion(latestVer.getVersion())[0];
+                    int latestRev = latestVer.getRevision() != null
+                            ? latestVer.getRevision()
+                            : CompanyProfileVersionHelper.parseLegacyVersion(latestVer.getVersion())[1];
+
+                    if (latestMajor > major || (latestMajor == major && latestRev > rev)) {
+                        major = latestMajor;
+                        rev = latestRev;
+                        versionLabel = CompanyProfileVersionHelper.formatVersionLabel(major, rev);
+                        legacyVersion = CompanyProfileVersionHelper.formatLegacyVersion(major, rev);
+
+                        p.setMajorVersion(major);
+                        p.setRevision(rev);
+                        p.setVersion(legacyVersion);
+                        profileRepository.save(p);
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+
         boolean canEdit = false;
         boolean canManageVisibility = false;
         boolean canAccessRelationship = false;
@@ -1736,6 +2024,7 @@ public class ProfileService {
 
         String relType = resolveRelationshipType(p.getCompanyId());
         boolean canPublish = isPublishable(p, relType, canManageVisibility);
+        String publishBlockReason = resolvePublishBlockReason(p, canManageVisibility);
 
         return ProfileResponse.builder()
                 .id(p.getId())
@@ -1765,6 +2054,7 @@ public class ProfileService {
                 .canEditProfile(canEdit)
                 .canManageVisibility(canManageVisibility)
                 .canPublish(canPublish)
+                .publishBlockReason(publishBlockReason)
                 .canAccessRelationshipCloseness(canAccessRelationship)
                 .build();
     }
@@ -1809,8 +2099,68 @@ public class ProfileService {
                 .orElseThrow(() -> new ResourceNotFoundException("Company profile not found: " + companyId));
     }
 
-    public String resolveRelationshipType(String companyId) {
-        return relationshipClosenessAccessEvaluator.resolveRelationshipType(companyId);
+    private String resolveRelationshipType(String companyId) {
+        if (!StringUtils.hasText(companyId)) return null;
+
+        List<String> targetIds = new ArrayList<>();
+        targetIds.add(companyId.trim());
+
+        java.util.Optional<CompanyProfile> profileOpt = profileRepository.findByCompanyId(companyId)
+                .or(() -> profileRepository.findById(companyId));
+        if (profileOpt.isPresent()) {
+            CompanyProfile p = profileOpt.get();
+            if (StringUtils.hasText(p.getCompanyId()) && !targetIds.contains(p.getCompanyId().trim())) {
+                targetIds.add(p.getCompanyId().trim());
+            }
+            if (StringUtils.hasText(p.getId()) && !targetIds.contains(p.getId().trim())) {
+                targetIds.add(p.getId().trim());
+            }
+        }
+
+        try {
+            String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+            if (targetIds.contains(ownerCompanyId)) return null; // It's the owner
+
+            // Query canonical current Neo4j relationship between owner and target company
+            String cypher = """
+                MATCH (:Company {companyId: $ownerCompanyId})-[r:PARTNER_WITH|COMPETITOR_OF|POTENTIAL_PARTNER_OF|SUPPLIER_OF|CUSTOMER_OF]-(c:Company)
+                WHERE c.companyId IN $targetIds
+                RETURN type(r) AS relType
+                ORDER BY coalesce(r.confirmedAt, datetime('1970-01-01T00:00:00Z')) DESC
+                LIMIT 1
+                """;
+
+            java.util.List<String> types = new java.util.ArrayList<>(neo4jClient.query(cypher)
+                    .bind(ownerCompanyId).to("ownerCompanyId")
+                    .bind(targetIds).to("targetIds")
+                    .fetchAs(String.class)
+                    .mappedBy((typeSystem, record) -> record.get("relType").asString())
+                    .all());
+
+            if (types != null && !types.isEmpty() && StringUtils.hasText(types.get(0))) {
+                return types.get(0);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to resolve Neo4j relationship for companyId {}: {}", companyId, e.getMessage());
+        }
+
+        // Fallback: check linked projects for targetRelationshipType ONLY if project is COMPLETED
+        // and genuinely no graph relationship exists. Never override current Neo4j relationship.
+        try {
+            if (profileOpt.isPresent() && profileOpt.get().getSourceRefs() != null && profileOpt.get().getSourceRefs().getProjectIds() != null) {
+                for (String pid : profileOpt.get().getSourceRefs().getProjectIds()) {
+                    try {
+                        Long pId = Long.parseLong(pid);
+                        java.util.Optional<Project> projOpt = projectRepository.findById(pId);
+                        if (projOpt.isPresent() && projOpt.get().getStatus() == com.apms.common.enums.ProjectStatus.COMPLETED && projOpt.get().getTargetRelationshipType() != null) {
+                            return projOpt.get().getTargetRelationshipType().name();
+                        }
+                    } catch (Exception ignored) {}
+                }
+            }
+        } catch (Exception ignored) {}
+
+        return null;
     }
 
     private CompanyProfile.Identity mapIdentity(CompanyCandidate.Identity i) {

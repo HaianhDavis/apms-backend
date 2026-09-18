@@ -61,6 +61,10 @@ public class Project {
     @Column(name = "target_relationship_type", nullable = true, length = 50)
     private com.apms.common.enums.RelationshipType targetRelationshipType;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "original_relationship_type", nullable = true, length = 50)
+    private com.apms.common.enums.RelationshipType originalRelationshipType;
+
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String description;
 
