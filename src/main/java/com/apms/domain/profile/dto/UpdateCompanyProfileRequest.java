@@ -24,6 +24,8 @@ public class UpdateCompanyProfileRequest {
     private List<String> emails;
     private List<String> phones;
     private String headOfficeAddress;
+    private String address;
+    private List<String> addresses;
 
     // Company Size
     private String employeeTier;
@@ -37,6 +39,8 @@ public class UpdateCompanyProfileRequest {
     private List<String> productsServices;
     private List<CompanyProfile.Product> products;
     private String description;
+    private String companyDescription;
+    private Integer foundedYear;
     private String businessModel;
 
     // Leadership

@@ -83,6 +83,7 @@ public class ProfileService {
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final com.apms.domain.profile.assessment.service.RelationshipClosenessAccessEvaluator relationshipClosenessAccessEvaluator;
     private final NotificationService notificationService;
+    private final com.apms.domain.reference.service.IndustryCatalogService industryCatalogService;
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER
@@ -108,6 +109,16 @@ public class ProfileService {
                 ? updateExistingProfile(project, candidate)
                 : createNewProfile(project, candidate);
         projectTargetProfileResolver.backfillPartnerContractTasks(project, approvedProfile.getCompanyId());
+
+        if (candidate.getBusiness() != null && candidate.getBusiness().getIndustries() != null) {
+            industryCatalogService.upsertApprovedIndustries(
+                    candidate.getBusiness().getIndustries(),
+                    candidate.getId(),
+                    approvedProfile.getCompanyId(),
+                    candidate.getReview() != null && candidate.getReview().getReviewedBy() != null
+                            ? Long.valueOf(candidate.getReview().getReviewedBy()) : null
+            );
+        }
 
         // Add to TrackedCompany if not exists
         if (candidate.getIdentity() != null) {
@@ -492,6 +503,10 @@ public class ProfileService {
      */
     @Transactional(readOnly = true)
     public java.util.List<String> getDistinctIndustries() {
+        java.util.List<String> catalogIndustries = industryCatalogService.getDistinctActiveIndustryNames();
+        if (catalogIndustries != null && !catalogIndustries.isEmpty()) {
+            return catalogIndustries;
+        }
         return mongoTemplate.findDistinct("business.industries", CompanyProfile.class, String.class);
     }
 
@@ -795,7 +810,13 @@ public class ProfileService {
         if (request.getWebsite() != null) profile.getContact().setWebsite(request.getWebsite());
         if (request.getEmails() != null) profile.getContact().setEmails(request.getEmails());
         if (request.getPhones() != null) profile.getContact().setPhones(request.getPhones());
-        if (request.getHeadOfficeAddress() != null) {
+        if (request.getAddresses() != null) {
+            profile.getContact().setAddresses(CompanyProfile.Contact.toAddressObjects(request.getAddresses()));
+        } else if (request.getAddress() != null) {
+            profile.getContact().setAddresses(StringUtils.hasText(request.getAddress())
+                    ? CompanyProfile.Contact.toAddressObjects(java.util.List.of(request.getAddress().trim()))
+                    : java.util.Collections.emptyList());
+        } else if (request.getHeadOfficeAddress() != null) {
             CompanyProfile.Address addr = CompanyProfile.Address.builder()
                     .type("HEADQUARTERS")
                     .fullAddress(request.getHeadOfficeAddress())
@@ -823,6 +844,11 @@ public class ProfileService {
             profile.getBusiness().setProducts(prods);
         }
         if (request.getBusinessModel() != null) profile.getBusiness().setBusinessModel(request.getBusinessModel());
+        if (request.getFoundedYear() != null) {
+            com.apms.domain.candidate.service.CandidateService.validateFoundedYear(request.getFoundedYear());
+            profile.getBusiness().setFoundedYear(request.getFoundedYear());
+        }
+        if (request.getCompanyDescription() != null) profile.getBusiness().setCompanyDescription(request.getCompanyDescription());
 
         // Apply Leadership
         if (request.getCompanyMembers() != null) {
@@ -844,7 +870,7 @@ public class ProfileService {
                 "contact.website", "contact.emails", "contact.phones", "contact.addresses",
                 "companySize.employeeTier", "companySize.employeeCount", "companySize.revenueTier",
                 "business.industries", "business.markets", "business.targetCustomers", "business.products",
-                "business.businessModel",
+                "business.businessModel", "business.foundedYear", "business.companyDescription",
                 "companyMembers", "tags"
         };
 
@@ -1295,6 +1321,13 @@ public class ProfileService {
                             .build())
                     .toList());
         }
+        if (request.getFoundedYear() != null) {
+            com.apms.domain.candidate.service.CandidateService.validateFoundedYear(request.getFoundedYear());
+            profile.getBusiness().setFoundedYear(request.getFoundedYear());
+        }
+        if (StringUtils.hasText(request.getCompanyDescription())) {
+            profile.getBusiness().setCompanyDescription(request.getCompanyDescription());
+        }
 
         if (request.getInsights() != null) {
             UpdateOwnerCompanyProfileRequest.SwotRequest swot = request.getInsights();
@@ -1333,14 +1366,18 @@ public class ProfileService {
         if (StringUtils.hasText(request.getPhone())) phones.add(request.getPhone().trim());
         profile.getContact().setPhones(phones);
 
-        List<CompanyProfile.Address> addresses = new java.util.ArrayList<>();
-        if (StringUtils.hasText(request.getAddress())) {
-            addresses.add(CompanyProfile.Address.builder()
-                    .type("HEADQUARTERS")
-                    .fullAddress(request.getAddress().trim())
-                    .build());
+        if (request.getAddresses() != null) {
+            profile.getContact().setAddresses(CompanyProfile.Contact.toAddressObjects(request.getAddresses()));
+        } else if (request.getAddress() != null) {
+            List<CompanyProfile.Address> addresses = new java.util.ArrayList<>();
+            if (StringUtils.hasText(request.getAddress())) {
+                addresses.add(CompanyProfile.Address.builder()
+                        .type("HEADQUARTERS")
+                        .fullAddress(request.getAddress().trim())
+                        .build());
+            }
+            profile.getContact().setAddresses(addresses);
         }
-        profile.getContact().setAddresses(addresses);
 
         if (request.getTags() != null) profile.setTags(request.getTags());
 
@@ -2178,6 +2215,8 @@ public class ProfileService {
         return CompanyProfile.Business.builder()
                 .industries(b.getIndustries())
                 .businessModel(b.getBusinessModel())
+                .foundedYear(b.getFoundedYear())
+                .companyDescription(b.getCompanyDescription())
                 .products(b.getProducts() != null ? b.getProducts().stream()
                         .map(p -> CompanyProfile.Product.builder()
                                 .name(p.getName())
@@ -2193,26 +2232,34 @@ public class ProfileService {
     private CompanyProfile.CompanySize mapCompanySize(CompanyCandidate.CompanySize s) {
         if (s == null) return null;
         return CompanyProfile.CompanySize.builder()
-                .employeeTier(s.getEmployeeTier())
                 .employeeCount(s.getEmployeeCount())
-                .revenueTier(s.getRevenueTier())
                 .build();
     }
 
     private CompanyProfile.Contact mapContact(CompanyCandidate.Contact c) {
         if (c == null) return null;
+        java.util.List<CompanyProfile.Address> profileAddresses = null;
+        if (c.getAddresses() != null && !c.getAddresses().isEmpty()) {
+            profileAddresses = c.getAddresses().stream()
+                    .map(a -> CompanyProfile.Address.builder()
+                            .type(a.getType())
+                            .fullAddress(a.getFullAddress())
+                            .city(a.getCity())
+                            .country(a.getCountry())
+                            .build())
+                    .toList();
+        } else if (c.getAddress() != null && !c.getAddress().trim().isEmpty()) {
+            profileAddresses = java.util.List.of(
+                    CompanyProfile.Address.builder()
+                            .fullAddress(c.getAddress().trim())
+                            .build()
+            );
+        }
         return CompanyProfile.Contact.builder()
                 .website(c.getWebsite())
                 .emails(c.getEmails())
                 .phones(c.getPhones())
-                .addresses(c.getAddresses() != null ? c.getAddresses().stream()
-                        .map(a -> CompanyProfile.Address.builder()
-                                .type(a.getType())
-                                .fullAddress(a.getFullAddress())
-                                .city(a.getCity())
-                                .country(a.getCountry())
-                                .build())
-                        .toList() : null)
+                .addresses(profileAddresses)
                 .build();
     }
 

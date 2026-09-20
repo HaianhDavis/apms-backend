@@ -695,11 +695,17 @@ public class TaskExtractionOrchestrator {
 
     private CompanyCandidate.Contact mapContact(com.apms.domain.ai.dto.ExtractedCompanyData d) {
         if (d == null) return null;
+        List<CompanyCandidate.Address> addresses = null;
+        if (d.getAddresses() != null && !d.getAddresses().isEmpty()) {
+            addresses = CompanyCandidate.Contact.toAddressObjects(d.getAddresses());
+        } else if (d.getAddress() != null && !d.getAddress().trim().isEmpty()) {
+            addresses = CompanyCandidate.Contact.toAddressObjects(List.of(d.getAddress().trim()));
+        }
         return CompanyCandidate.Contact.builder()
                 .website(d.getWebsite())
                 .emails(d.getEmail())
                 .phones(d.getPhone())
-                .addresses(d.getAddress() != null ? List.of(CompanyCandidate.Address.builder().fullAddress(d.getAddress()).build()) : null)
+                .addresses(addresses)
                 .build();
     }
 

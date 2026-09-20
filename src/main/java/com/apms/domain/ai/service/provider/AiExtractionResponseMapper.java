@@ -118,6 +118,22 @@ public class AiExtractionResponseMapper {
                 || "targetCustomerSegments".equals(fieldName)) {
             return "targetCustomers";
         }
+        if ("companyDescription".equals(fieldName)
+                || "companyOverview".equals(fieldName)
+                || "companyProfileDescription".equals(fieldName)) {
+            return "companyDescription";
+        }
+        if ("foundedYear".equals(fieldName)
+                || "foundingYear".equals(fieldName)
+                || "yearFounded".equals(fieldName)) {
+            return "foundedYear";
+        }
+        if ("address".equals(fieldName)
+                || "headquarters".equals(fieldName)
+                || "officeAddress".equals(fieldName)
+                || "registeredAddress".equals(fieldName)) {
+            return "addresses";
+        }
         if ("weakness".equals(fieldName)
                 || "weakneses".equals(fieldName)
                 || "weekness".equals(fieldName)
@@ -151,11 +167,28 @@ public class AiExtractionResponseMapper {
             return normalizeInteger(value);
         }
 
+        if ("foundedYear".equals(fieldName)) {
+            return normalizeFoundedYear(value);
+        }
+
         if ("products".equals(fieldName)) {
             return normalizeProducts(value);
         }
 
         return value;
+    }
+
+    private Integer normalizeFoundedYear(Object value) {
+        Integer year = normalizeInteger(value);
+        if (year == null) {
+            return null;
+        }
+        int currentYear = java.time.Year.now().getValue();
+        if (year < 1800 || year > currentYear) {
+            log.warn("Extracted foundedYear {} out of valid range [1800, {}]; normalizing to null", year, currentYear);
+            return null;
+        }
+        return year;
     }
 
     private String normalizeString(Object value) {
@@ -405,10 +438,8 @@ public class AiExtractionResponseMapper {
             "tradeName",
             "taxCode",
             "businessModel",
-            "employeeTier",
-            "revenueTier",
+            "companyDescription",
             "website",
-            "address",
             "companySize",
             "notes"
     );
@@ -418,7 +449,8 @@ public class AiExtractionResponseMapper {
             "markets",
             "targetCustomers",
             "email",
-            "phone"
+            "phone",
+            "addresses"
     );
 
     private static final Set<String> ALLOWED_FIELDS = Set.of(
@@ -430,13 +462,13 @@ public class AiExtractionResponseMapper {
             "products",
             "markets",
             "targetCustomers",
-            "employeeTier",
             "employeeCount",
-            "revenueTier",
+            "foundedYear",
+            "companyDescription",
             "website",
             "email",
             "phone",
-            "address",
+            "addresses",
             "companySize"
     );
 

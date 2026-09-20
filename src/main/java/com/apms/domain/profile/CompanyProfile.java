@@ -156,6 +156,8 @@ public class CompanyProfile {
     public static class Business {
         private java.util.List<String> industries;
         private String businessModel;
+        private Integer foundedYear;
+        private String companyDescription;
         private java.util.List<Product> products;
         private java.util.List<String> markets;
         private java.util.List<String> targetCustomers;
@@ -190,6 +192,36 @@ public class CompanyProfile {
         private java.util.List<String> emails;
         private java.util.List<String> phones;
         private java.util.List<Address> addresses;
+        private String address; // legacy compatibility only
+
+        public java.util.List<String> getEffectiveAddressStrings() {
+            if (addresses != null && !addresses.isEmpty()) {
+                java.util.List<String> list = addresses.stream()
+                        .map(Address::getFullAddress)
+                        .filter(a -> a != null && !a.trim().isEmpty())
+                        .map(String::trim)
+                        .toList();
+                if (!list.isEmpty()) {
+                    return list;
+                }
+            }
+            if (address != null && !address.trim().isEmpty()) {
+                return java.util.List.of(address.trim());
+            }
+            return java.util.Collections.emptyList();
+        }
+
+        public static java.util.List<Address> toAddressObjects(java.util.List<String> values) {
+            if (values == null || values.isEmpty()) {
+                return java.util.Collections.emptyList();
+            }
+            return values.stream()
+                    .filter(s -> s != null && !s.trim().isEmpty())
+                    .map(s -> Address.builder()
+                            .fullAddress(s.trim())
+                            .build())
+                    .collect(java.util.stream.Collectors.toList());
+        }
     }
 
     @Data

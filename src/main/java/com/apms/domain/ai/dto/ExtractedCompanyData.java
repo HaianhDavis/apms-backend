@@ -36,10 +36,14 @@ public class ExtractedCompanyData {
     private List<String> markets;
     private List<String> targetCustomers;
     private String employeeTier;
+    private Integer employeeCount;
+    private Integer foundedYear;
+    private String companyDescription;
     private String website;
     private List<String> email; // Adding missing fields based on prompt
     private List<String> phone;
     private String address;
+    private List<String> addresses;
     private String headquarters;
     private String description;
     private String companySize;

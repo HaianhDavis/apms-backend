@@ -23,6 +23,8 @@ public class ProfileProposalFieldAccessor {
         // business
         register("business.industries", false, true, false, "proposedBusiness", "industries");
         register("business.businessModel", false, false, false, "proposedBusiness", "businessModel");
+        register("business.foundedYear", false, false, false, "proposedBusiness", "foundedYear");
+        register("business.companyDescription", false, false, false, "proposedBusiness", "companyDescription");
         register("business.products", false, true, true, "proposedBusiness", "products");
         register("business.markets", false, true, false, "proposedBusiness", "markets");
         register("business.targetCustomers", false, true, false, "proposedBusiness", "targetCustomers");

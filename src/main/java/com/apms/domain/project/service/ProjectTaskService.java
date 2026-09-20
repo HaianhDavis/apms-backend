@@ -518,6 +518,7 @@ public class ProjectTaskService {
                         .candidateName(candidateDisplayName(c))
                         .draftName(candidateDisplayName(c))
                         .draftSequence(c.getDraftSequence())
+                        .draftNumber(c.getDraftSequence())
                         .candidateIndustry(candidateIndustry(c))
                         .status(c.getStatus())
                         .taskId(c.getTaskId())

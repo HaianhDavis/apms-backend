@@ -147,19 +147,19 @@ class CandidateFieldUndoReviewTest {
         when(candidateRepository.save(any(CompanyCandidate.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         // 1. Reject Address
-        CandidateReviewRequest rejectReq = buildManagerDecisionRequest("contact.address", ExtractionReviewStatus.REJECTED, "Invalid street format");
+        CandidateReviewRequest rejectReq = buildManagerDecisionRequest("contact.addresses", ExtractionReviewStatus.REJECTED, "Invalid street format");
         CandidateResponse resp1 = candidateService.reviewCandidate("10", "cand-2", rejectReq, 99L);
 
-        ExtractionFieldResult addressResult1 = resp1.getFieldResults().get("contact.address");
+        ExtractionFieldResult addressResult1 = resp1.getFieldResults().get("contact.addresses");
         assertThat(addressResult1.getManagerReviewStatus()).isEqualTo(ExtractionReviewStatus.REJECTED);
         assertThat(addressResult1.getManagerReviewComment()).isEqualTo("Invalid street format");
         assertThat(candidate.getFieldApprovals().get(0).getStatus()).isEqualTo(FieldApprovalStatus.REJECTED);
 
         // 2. Undo Rejection
-        CandidateReviewRequest undoReq = buildManagerDecisionRequest("contact.address", ExtractionReviewStatus.PENDING, null);
+        CandidateReviewRequest undoReq = buildManagerDecisionRequest("contact.addresses", ExtractionReviewStatus.PENDING, null);
         CandidateResponse resp2 = candidateService.reviewCandidate("10", "cand-2", undoReq, 99L);
 
-        ExtractionFieldResult addressResult2 = resp2.getFieldResults().get("contact.address");
+        ExtractionFieldResult addressResult2 = resp2.getFieldResults().get("contact.addresses");
         assertThat(addressResult2.getManagerReviewStatus()).isEqualTo(ExtractionReviewStatus.PENDING);
         assertThat(addressResult2.getManagerReviewComment()).isNull();
         assertThat(candidate.getFieldApprovals().get(0).getStatus()).isEqualTo(FieldApprovalStatus.PENDING_REVIEW);

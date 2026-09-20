@@ -35,6 +35,11 @@ public class UpdateOwnerCompanyProfileRequest {
     @Length(max = 500, message = "Mô hình kinh doanh tối đa 500 ký tự")
     private String businessModel;
 
+    private Integer foundedYear;
+
+    @Length(max = 2000, message = "Mô tả công ty tối đa 2000 ký tự")
+    private String companyDescription;
+
     private List<@Length(max = 255, message = "Thị trường tối đa 255 ký tự") String> markets;
 
     private List<@Length(max = 255, message = "Khách hàng mục tiêu tối đa 255 ký tự") String> targetCustomers;
@@ -76,6 +81,8 @@ public class UpdateOwnerCompanyProfileRequest {
 
     @Length(max = 500, message = "Địa chỉ tối đa 500 ký tự")
     private String address;
+
+    private List<@Length(max = 500, message = "Địa chỉ tối đa 500 ký tự") String> addresses;
 
     private List<@Length(max = 100, message = "Thẻ phân loại tối đa 100 ký tự") String> tags;
 

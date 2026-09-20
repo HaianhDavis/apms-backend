@@ -24,6 +24,8 @@ Return exactly these fields:
 - taxCode
 - industries
 - businessModel
+- foundedYear
+- companyDescription
 - products
 - markets
 - targetCustomers
@@ -31,9 +33,6 @@ Return exactly these fields:
 - email
 - phone
 - address
-- companySize
-- revenueTier
-- employeeTier
 - employeeCount
 
 Field rules:
@@ -44,16 +43,24 @@ Field rules:
     - STRICT DOCUMENT GROUNDING: Extract only business sectors, industries, or operational divisions that appear verbatim or near-verbatim in the documents (e.g., "Semiconductor Components", "Memory Business", "Foundry Business", "System LSI Business", "Network Systems", "Medical Equipment").
     - FORBID UNQUOTED TAXONOMY INFERENCE: Do NOT invent, synthesize, or infer broader category labels (e.g., do NOT extract "Consumer Electronics", "Digital Appliances", "ICT", or "High Tech") UNLESS the document explicitly contains that exact phrase and you cite it in evidenceText. If a sector name is not in a cited quote, it must NOT appear in the array.
     - 1-TO-1 EVIDENCE BINDING: Every single industry in the extracted array MUST be backed by an exact quote and page citation in evidenceText. If industries originate from multiple pages, include quotes from all of those pages.
-- businessModel: concise but comprehensive description of how the company operates and generates value.
+- businessModel: concise but comprehensive description of HOW the company operates, delivers value, and generates revenue.
     - WHAT TO EXTRACT:
         1. Primary operational divisions and their core focus (e.g., DX Division producing finished consumer/commercial products; DS Division operating memory, foundry, and system LSI semiconductor businesses).
         2. Business delivery models (e.g., finished goods sales, B2B component manufacturing/supply, contract semiconductor fabrication/foundry).
         3. Target commercial channels (B2C direct/retail, B2B enterprise/commercial clients).
     - STRICT 1-TO-1 EVIDENCE BINDING:
-        - EVERY division, product line (e.g., DRAM, NAND Flash, mobile APs, HBM, server SSDs), technology, and customer channel mentioned in the businessModel narrative MUST be explicitly quoted in evidenceText with its [fileName | docId | Page X] citation.
-        - If your businessModel narrative mentions facts found on different pages (e.g., Page 4 for advanced AI semiconductors/HBM, Page 5 for DX & DS divisions and finished products, Page 7 for B2C & B2B customers), your evidenceText MUST contain quotes from ALL those pages:
-          "[fileName | docId | Page 4] ... [fileName | docId | Page 5] ... [fileName | docId | Page 7] ...".
-        - FORBIDDEN: Do NOT mention any operational division, technology, or product line in businessModel if the supporting quote is missing from evidenceText. Everything asserted in businessModel must be verifiable in the cited quotes.
+        - EVERY division, product line, technology, and customer channel mentioned in the businessModel narrative MUST be explicitly quoted in evidenceText with its [fileName | docId | Page X] citation.
+        - FORBIDDEN: Do NOT mention any operational division, technology, or product line in businessModel if the supporting quote is missing from evidenceText.
+        - Distinct from companyDescription: businessModel explains HOW value is created/delivered, while companyDescription explains WHAT the company is/does.
+- foundedYear: integer year the company was officially founded, established, or incorporated.
+    - Extract only the official founding/establishment year as an integer number (e.g. "Founded in 1988" -> 1988).
+    - If the source does not explicitly or reliably state the founding year, return null for value.
+    - FORBIDDEN: Do NOT infer the founding year from website copyright year, financial reporting year, document creation year, stock listing year, or project start year.
+- companyDescription: concise factual overview of WHAT the company is and does.
+    - Summarize major business activities, primary operating scope, and key services/products where explicitly stated in the source.
+    - Keep it concise.
+    - FORBIDDEN: Do NOT invent claims, add unsupported marketing language, add subjective praise, or infer strategy not stated in the source.
+    - If insufficient information is available: return null for value.
 - products: array of objects with "name", "category", and "description".
     - EXHAUSTIVE EXTRACTION: When documents enumerate products (e.g. "finished products such as smartphones, network systems, computers, TVs, refrigerators, washing machines, air conditioners, and medical equipment"), extract EVERY SINGLE product mentioned. Do NOT skip items such as "network systems", "computers", or "medical equipment".
     - EXTRACT BOTH LINES AND NOTABLE MODELS: Extract both overarching product lines/divisions and specific key models or technologies mentioned in the text (e.g. HBM4, Exynos 2600, Galaxy series, server SSDs).
@@ -66,14 +73,20 @@ Field rules:
         - Keep labels concise and faithful to the source text. Do NOT add decorative or bloated wording (e.g., if the text says "Customers (B2C & B2B)", extract "B2C Customers" and "B2B Customers").
     - STRICT 1-TO-1 EVIDENCE BINDING:
         - Every customer segment in the array MUST have an exact supporting quote and page number in evidenceText.
-        - Do NOT convert general mentions of external entities, partners, or ESG subjects (e.g., a statement about renewable energy procurement) into a target customer unless the text clearly identifies them as buyers/clients of the company's products or services.
+        - Do NOT convert general mentions of external entities, partners, or ESG subjects into a target customer unless the text clearly identifies them as buyers/clients of the company's products or services.
 - email: array of company contact emails. Prioritize general company contact emails such as info@, contact@, support@. Ignore investor relations, shareholder, or personal employee emails unless they are the only emails available.
 - phone: array of official company phone numbers.
-- address: registered/head office address.
-- companySize: textual company size if stated or clearly derivable.
-- employeeTier: normalized tier, e.g. "1-10", "11-50", "51-200", "201-500", "501-1,000", "1,001-5,000", "5,001-10,000", "10,000+" or "100,000+".
-- employeeCount: integer only. Use the most specific employee count available.
-- revenueTier: normalized revenue tier if derivable; otherwise null.
+- addresses: array of explicit company office/business addresses found in the source.
+    - Extract all explicit company office/business addresses found in the source.
+    - Return an array of unique address strings.
+    - Examples: ["Tòa nhà FPT, 10 Phạm Văn Bạch, Cầu Giấy, Hà Nội", "FPT Complex, Ngũ Hành Sơn, Đà Nẵng"]
+    - Extract only addresses clearly associated with the company.
+    - Preserve meaningful address detail without fabricating missing info.
+    - Do not infer addresses from unrelated parties in contracts/documents.
+    - Remove duplicate addresses.
+    - If no reliable company address is present, return an empty array [] or null for value.
+    - Do not concatenate multiple addresses into one string.
+- employeeCount: integer employee count only if explicitly stated in the document; otherwise null.
 
 Extraction rules:
 - Extract all explicitly supported details, especially for industries, products, markets, and targetCustomers.
@@ -109,7 +122,7 @@ Output format:
 - A field value is valid only when the exact value, or an exact textual statement supporting that value, appears in the provided documents.
 - evidenceText must be an exact quote from the document. Do NOT write paraphrased evidence.
 - Do NOT create generic evidence such as "Business registration details for..." unless that exact sentence appears in the document.
-- For identity and contact fields including legalName, tradeName, taxCode, website, email, phone, and address, the extracted value itself must appear verbatim in the evidenceText.
+- For identity and contact fields including legalName, tradeName, taxCode, website, email, phone, and addresses, the extracted value itself must appear verbatim in the evidenceText.
 - For list and array fields including markets, industries, products, and targetCustomers, as well as the textual businessModel:
     - 1-TO-1 BIDIRECTIONAL FIDELITY:
         1. FORWARD CHECK (Value -> Evidence): Every item, category, division, or claim in "value" MUST be present in the quotes inside "evidenceText". If an item in "value" is not in "evidenceText", either add the exact quote with [fileName | sourceDocumentId | Page X] or delete the item from "value".

@@ -19,6 +19,7 @@ public class CandidateResponse {
     private Integer currentReviewRound;
     private String draftName;
     private Integer draftSequence;
+    private Integer draftNumber;
     private CandidateStatus status;
     private com.apms.domain.financial.DocumentCompanyValidationStatus companyMatchStatus;
     private Boolean companyMatchConfirmed;

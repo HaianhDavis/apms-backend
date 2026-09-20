@@ -15,9 +15,10 @@ public class CandidateFieldAccessor {
 
     public static final java.util.Set<String> REVIEWABLE_FIELD_PATHS = java.util.Set.of(
         "identity.tradeName",
-        "contact.address", "contact.website", "contact.emails", "contact.phones",
-        "business.businessModel", "business.industries", "business.markets", "business.targetCustomers", "business.products",
-        "companySize.employeeTier", "companySize.employeeCount", "companySize.revenueTier"
+        "contact.addresses", "contact.website", "contact.emails", "contact.phones",
+        "business.businessModel", "business.industries", "business.foundedYear", "business.companyDescription",
+        "business.markets", "business.targetCustomers", "business.products",
+        "companySize.employeeCount"
     );
 
     private static final Map<String, FieldDefinition<CompanyCandidate>> REGISTRY = new HashMap<>();
@@ -34,6 +35,12 @@ public class CandidateFieldAccessor {
         register("business.businessModel", false, false, false,
                 c -> c.getBusiness() != null ? c.getBusiness().getBusinessModel() : null,
                 (c, v) -> ensureBusiness(c).setBusinessModel((String) v));
+        register("business.foundedYear", false, false, false,
+                c -> c.getBusiness() != null ? c.getBusiness().getFoundedYear() : null,
+                (c, v) -> ensureBusiness(c).setFoundedYear(v instanceof Number ? ((Number) v).intValue() : null));
+        register("business.companyDescription", false, false, false,
+                c -> c.getBusiness() != null ? c.getBusiness().getCompanyDescription() : null,
+                (c, v) -> ensureBusiness(c).setCompanyDescription((String) v));
         register("business.products", false, true, true,
                 c -> c.getBusiness() != null ? c.getBusiness().getProducts() : null,
                 (c, v) -> ensureBusiness(c).setProducts((List<CompanyCandidate.Product>) v));
@@ -65,20 +72,31 @@ public class CandidateFieldAccessor {
         register("contact.phones", false, true, false,
                 c -> c.getContact() != null ? c.getContact().getPhones() : null,
                 (c, v) -> ensureContact(c).setPhones((List<String>) v));
-        register("contact.address", false, false, false,
+        register("contact.addresses", false, true, false,
                 c -> {
-                    if (c.getContact() == null || c.getContact().getAddresses() == null || c.getContact().getAddresses().isEmpty()) {
+                    if (c.getContact() == null) {
                         return null;
                     }
-                    return c.getContact().getAddresses().get(0).getFullAddress();
+                    List<String> list = c.getContact().getEffectiveAddressStrings();
+                    return list.isEmpty() ? null : list;
                 },
                 (c, v) -> {
                     CompanyCandidate.Contact contact = ensureContact(c);
-                    CompanyCandidate.Address address = CompanyCandidate.Address.builder()
-                            .type("HEADQUARTERS")
-                            .fullAddress((String) v)
-                            .build();
-                    contact.setAddresses(StringUtils.hasText((String) v) ? java.util.List.of(address) : Collections.emptyList());
+                    List<String> normalized = normalizeAddressList(v);
+                    contact.setAddresses(CompanyCandidate.Contact.toAddressObjects(normalized));
+                });
+        register("contact.address", false, false, false,
+                c -> {
+                    if (c.getContact() == null) {
+                        return null;
+                    }
+                    List<String> list = c.getContact().getEffectiveAddressStrings();
+                    return list.isEmpty() ? null : list.get(0);
+                },
+                (c, v) -> {
+                    CompanyCandidate.Contact contact = ensureContact(c);
+                    List<String> normalized = normalizeAddressList(v);
+                    contact.setAddresses(CompanyCandidate.Contact.toAddressObjects(normalized));
                 });
 
         // insights
@@ -163,5 +181,51 @@ public class CandidateFieldAccessor {
     private static CompanyCandidate.Insights ensureInsights(CompanyCandidate c) {
         if (c.getInsights() == null) c.setInsights(new CompanyCandidate.Insights());
         return c.getInsights();
+    }
+
+    public static List<String> normalizeAddressList(Object value) {
+        if (value == null) {
+            return Collections.emptyList();
+        }
+        List<String> rawList = new ArrayList<>();
+        if (value instanceof java.util.Collection<?> col) {
+            for (Object item : col) {
+                if (item != null) {
+                    if (item instanceof CompanyCandidate.Address addr) {
+                        if (StringUtils.hasText(addr.getFullAddress())) {
+                            rawList.add(addr.getFullAddress());
+                        }
+                    } else {
+                        rawList.add(String.valueOf(item));
+                    }
+                }
+            }
+        } else if (value instanceof CompanyCandidate.Address addr) {
+            if (StringUtils.hasText(addr.getFullAddress())) {
+                rawList.add(addr.getFullAddress());
+            }
+        } else if (value instanceof String s) {
+            rawList.add(s);
+        }
+
+        List<String> normalized = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String raw : rawList) {
+            if (!StringUtils.hasText(raw)) {
+                continue;
+            }
+            String cleaned = raw.trim().replaceAll("\\s+", " ");
+            if (cleaned.isEmpty() || "N/A".equalsIgnoreCase(cleaned) || "NA".equalsIgnoreCase(cleaned)) {
+                continue;
+            }
+            if (cleaned.length() > 500) {
+                cleaned = cleaned.substring(0, 500).trim();
+            }
+            String lower = cleaned.toLowerCase(java.util.Locale.ROOT);
+            if (seen.add(lower)) {
+                normalized.add(cleaned);
+            }
+        }
+        return normalized;
     }
 }

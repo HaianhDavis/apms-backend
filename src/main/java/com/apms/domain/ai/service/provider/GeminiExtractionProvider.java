@@ -151,10 +151,10 @@ public class GeminiExtractionProvider implements ExtractionProvider {
         Map<String, Object> stringFieldSchema = Map.of(
                 "type", "OBJECT",
                 "properties", Map.of(
-                        "value", Map.of("type", "STRING"),
+                        "value", Map.of("type", "STRING", "nullable", true),
                         "confidence", Map.of("type", "NUMBER"),
                         "evidenceText", Map.of("type", "STRING"),
-                        "pageNumber", Map.of("type", "INTEGER"),
+                        "pageNumber", Map.of("type", "INTEGER", "nullable", true),
                         "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
                 ),
                 "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
@@ -163,10 +163,10 @@ public class GeminiExtractionProvider implements ExtractionProvider {
         Map<String, Object> stringListFieldSchema = Map.of(
                 "type", "OBJECT",
                 "properties", Map.of(
-                        "value", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")),
+                        "value", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"), "nullable", true),
                         "confidence", Map.of("type", "NUMBER"),
                         "evidenceText", Map.of("type", "STRING"),
-                        "pageNumber", Map.of("type", "INTEGER"),
+                        "pageNumber", Map.of("type", "INTEGER", "nullable", true),
                         "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
                 ),
                 "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
@@ -181,14 +181,15 @@ public class GeminiExtractionProvider implements ExtractionProvider {
                                         "type", "OBJECT",
                                         "properties", Map.of(
                                                 "name", Map.of("type", "STRING"),
-                                                "category", Map.of("type", "STRING"),
-                                                "description", Map.of("type", "STRING")
+                                                "category", Map.of("type", "STRING", "nullable", true),
+                                                "description", Map.of("type", "STRING", "nullable", true)
                                         )
-                                )
+                                ),
+                                "nullable", true
                         ),
                         "confidence", Map.of("type", "NUMBER"),
                         "evidenceText", Map.of("type", "STRING"),
-                        "pageNumber", Map.of("type", "INTEGER"),
+                        "pageNumber", Map.of("type", "INTEGER", "nullable", true),
                         "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
                 ),
                 "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
@@ -197,10 +198,10 @@ public class GeminiExtractionProvider implements ExtractionProvider {
         Map<String, Object> integerFieldSchema = Map.of(
                 "type", "OBJECT",
                 "properties", Map.of(
-                        "value", Map.of("type", "INTEGER"),
+                        "value", Map.of("type", "INTEGER", "nullable", true),
                         "confidence", Map.of("type", "NUMBER"),
                         "evidenceText", Map.of("type", "STRING"),
-                        "pageNumber", Map.of("type", "INTEGER"),
+                        "pageNumber", Map.of("type", "INTEGER", "nullable", true),
                         "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
                 ),
                 "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
@@ -331,15 +332,15 @@ public class GeminiExtractionProvider implements ExtractionProvider {
         Map<String, Object> properties = new java.util.HashMap<>();
         
         List<String> stringFields = List.of(
-                "legalName", "tradeName", "taxCode", "businessModel", "employeeTier", 
-                "revenueTier", "website", "address", "companySize"
+                "legalName", "tradeName", "taxCode", "businessModel", "companyDescription",
+                "website"
         );
         for (String field : stringFields) {
             properties.put(field, stringFieldSchema);
         }
 
         List<String> stringListFields = List.of(
-                "industries", "markets", "targetCustomers", "email", "phone"
+                "industries", "markets", "targetCustomers", "email", "phone", "addresses"
         );
         for (String field : stringListFields) {
             properties.put(field, stringListFieldSchema);
@@ -347,12 +348,14 @@ public class GeminiExtractionProvider implements ExtractionProvider {
 
         properties.put("products", productSchema);
         properties.put("employeeCount", integerFieldSchema);
+        properties.put("foundedYear", integerFieldSchema);
 
         List<String> allRequiredFields = new java.util.ArrayList<>();
         allRequiredFields.addAll(stringFields);
         allRequiredFields.addAll(stringListFields);
         allRequiredFields.add("products");
         allRequiredFields.add("employeeCount");
+        allRequiredFields.add("foundedYear");
 
         return Map.of(
                 "type", "OBJECT",

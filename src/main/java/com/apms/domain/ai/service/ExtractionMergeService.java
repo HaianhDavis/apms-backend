@@ -274,9 +274,10 @@ public class ExtractionMergeService {
 
     private static final Set<String> STAFF_REVIEWABLE_FIELDS = Set.of(
             "identity.legalName", "identity.tradeName", "identity.taxCode",
-            "contact.address", "contact.website", "contact.emails", "contact.phones",
-            "business.businessModel", "business.industries", "business.markets", "business.targetCustomers", "business.products",
-            "companySize.employeeTier", "companySize.employeeCount", "companySize.revenueTier"
+            "contact.addresses", "contact.website", "contact.emails", "contact.phones",
+            "business.businessModel", "business.industries", "business.foundedYear", "business.companyDescription",
+            "business.markets", "business.targetCustomers", "business.products",
+            "companySize.employeeCount"
     );
 
     private Map<String, ExtractionFieldResult> initializeCandidateFieldResults(CompanyCandidate candidate) {
@@ -327,17 +328,27 @@ public class ExtractionMergeService {
             case "identity.legalName" -> candidate.getIdentity() != null ? candidate.getIdentity().getLegalName() : null;
             case "identity.tradeName" -> candidate.getIdentity() != null ? candidate.getIdentity().getTradeName() : null;
             case "identity.taxCode" -> candidate.getIdentity() != null ? candidate.getIdentity().getTaxCode() : null;
-            case "contact.address" -> {
-                if (candidate.getContact() == null || candidate.getContact().getAddresses() == null || candidate.getContact().getAddresses().isEmpty()) {
+            case "contact.addresses" -> {
+                if (candidate.getContact() == null) {
                     yield null;
                 }
-                yield candidate.getContact().getAddresses().get(0).getFullAddress();
+                List<String> list = candidate.getContact().getEffectiveAddressStrings();
+                yield list.isEmpty() ? null : list;
+            }
+            case "contact.address" -> {
+                if (candidate.getContact() == null) {
+                    yield null;
+                }
+                List<String> list = candidate.getContact().getEffectiveAddressStrings();
+                yield list.isEmpty() ? null : list.get(0);
             }
             case "contact.website" -> candidate.getContact() != null ? candidate.getContact().getWebsite() : null;
             case "contact.emails" -> candidate.getContact() != null ? candidate.getContact().getEmails() : null;
             case "contact.phones" -> candidate.getContact() != null ? candidate.getContact().getPhones() : null;
             case "business.businessModel" -> candidate.getBusiness() != null ? candidate.getBusiness().getBusinessModel() : null;
             case "business.industries" -> candidate.getBusiness() != null ? candidate.getBusiness().getIndustries() : null;
+            case "business.foundedYear" -> candidate.getBusiness() != null ? candidate.getBusiness().getFoundedYear() : null;
+            case "business.companyDescription" -> candidate.getBusiness() != null ? candidate.getBusiness().getCompanyDescription() : null;
             case "business.markets" -> candidate.getBusiness() != null ? candidate.getBusiness().getMarkets() : null;
             case "business.targetCustomers" -> candidate.getBusiness() != null ? candidate.getBusiness().getTargetCustomers() : null;
             case "business.products" -> candidate.getBusiness() != null ? candidate.getBusiness().getProducts() : null;
@@ -413,7 +424,7 @@ public class ExtractionMergeService {
         String mergedWebsite = null;
         List<String> mergedEmails = new ArrayList<>();
         List<String> mergedPhones = new ArrayList<>();
-        String mergedAddress = null;
+        List<String> mergedAddresses = new ArrayList<>();
         String mergedCompanySize = null;
         List<String> mergedKeyPeople = new ArrayList<>();
 
@@ -422,6 +433,9 @@ public class ExtractionMergeService {
         List<String> mergedOpportunities = new ArrayList<>();
         List<String> mergedThreats = new ArrayList<>();
 
+        Integer mergedFoundedYear = null;
+        String mergedCompanyDescription = null;
+        Integer mergedEmployeeCount = null;
         String mergedEmployeeTier = null;
         FinancialInfo mergedFinancial = null;
         MarketInfo mergedMarket = null;
@@ -475,10 +489,40 @@ public class ExtractionMergeService {
                 mergedBusinessModel = bestDisplayValue(mergedBusinessModel, exBusinessModel);
             }
 
+            // foundedYear
+            Object exFoundedYearObj = getFieldValue(ex, "foundedYear", data.getFoundedYear());
+            Integer exFoundedYear = exFoundedYearObj instanceof Number ? ((Number) exFoundedYearObj).intValue() : null;
+            if (exFoundedYear != null) {
+                if (mergedFoundedYear == null) {
+                    mergedFoundedYear = exFoundedYear;
+                } else if (!mergedFoundedYear.equals(exFoundedYear)) {
+                    evidence.add(conflictEvidence("business.foundedYear", String.valueOf(mergedFoundedYear), String.valueOf(exFoundedYear), docId, jobId, exId,
+                            "Conflicting founded years detected"));
+                }
+            }
+
+            // companyDescription
+            String exCompanyDescription = (String) getFieldValue(ex, "companyDescription", data.getCompanyDescription());
+            if (!isUnknown(exCompanyDescription)) {
+                mergedCompanyDescription = bestDisplayValue(mergedCompanyDescription, exCompanyDescription);
+            }
+
             // markets
             mergeStringList(mergedMarkets, getListFieldValue(ex, "markets", data.getMarkets()));
             mergeStringList(mergedTargetCustomers, getListFieldValue(ex, "targetCustomers", data.getTargetCustomers()));
             mergeProducts(mergedProducts, getFieldValue(ex, "products", data.getProducts()));
+
+            // employeeCount
+            Object exEmpCountObj = getFieldValue(ex, "employeeCount", data.getEmployeeCount());
+            Integer exEmpCount = exEmpCountObj instanceof Number ? ((Number) exEmpCountObj).intValue() : null;
+            if (exEmpCount != null) {
+                if (mergedEmployeeCount == null) {
+                    mergedEmployeeCount = exEmpCount;
+                } else if (!mergedEmployeeCount.equals(exEmpCount)) {
+                    evidence.add(conflictEvidence("companySize.employeeCount", String.valueOf(mergedEmployeeCount), String.valueOf(exEmpCount), docId, jobId, exId,
+                            "Conflicting employee counts detected"));
+                }
+            }
 
             // website
             String exWebsite = (String) getFieldValue(ex, "website", data.getWebsite());
@@ -503,9 +547,14 @@ public class ExtractionMergeService {
             mergeStringList(mergedEmails, getListFieldValue(ex, "email", data.getEmail()));
             mergeStringList(mergedPhones, getListFieldValue(ex, "phone", data.getPhone()));
 
-            String exAddress = (String) getFieldValue(ex, "address", data.getAddress());
-            if (!isUnknown(exAddress)) {
-                mergedAddress = bestDisplayValue(mergedAddress, exAddress);
+            List<String> exAddresses = getListFieldValue(ex, "addresses", data.getAddresses());
+            if (exAddresses != null && !exAddresses.isEmpty()) {
+                mergeStringList(mergedAddresses, exAddresses);
+            } else {
+                String exAddress = (String) getFieldValue(ex, "address", data.getAddress());
+                if (!isUnknown(exAddress)) {
+                    mergeStringList(mergedAddresses, List.of(exAddress));
+                }
             }
 
             // employeeTier
@@ -543,6 +592,7 @@ public class ExtractionMergeService {
         }
 
         // Build evidence for merged lists
+        if (!mergedAddresses.isEmpty()) evidence.add(listEvidence("contact.addresses", mergedAddresses, sourceDocIds, importJobIds, extractionIds));
         if (!mergedIndustries.isEmpty()) evidence.add(listEvidence("business.industries", mergedIndustries, sourceDocIds, importJobIds, extractionIds));
         if (!mergedMarkets.isEmpty()) evidence.add(listEvidence("business.markets", mergedMarkets, sourceDocIds, importJobIds, extractionIds));
         if (!mergedTargetCustomers.isEmpty()) evidence.add(listEvidence("business.targetCustomers", mergedTargetCustomers, sourceDocIds, importJobIds, extractionIds));
@@ -560,23 +610,22 @@ public class ExtractionMergeService {
         CompanyCandidate.Business business = CompanyCandidate.Business.builder()
                 .industries(mergedIndustries.isEmpty() ? null : mergedIndustries)
                 .businessModel(mergedBusinessModel)
+                .foundedYear(mergedFoundedYear)
+                .companyDescription(mergedCompanyDescription)
                 .products(mergedProducts.isEmpty() ? null : mergedProducts)
                 .markets(mergedMarkets.isEmpty() ? null : mergedMarkets)
                 .targetCustomers(mergedTargetCustomers.isEmpty() ? null : mergedTargetCustomers)
                 .build();
 
         CompanyCandidate.CompanySize companySize = CompanyCandidate.CompanySize.builder()
-                .employeeTier(mergedEmployeeTier)
-                .revenueTier(mergedCompanySize)
+                .employeeCount(mergedEmployeeCount)
                 .build();
 
         CompanyCandidate.Contact contact = CompanyCandidate.Contact.builder()
                 .website(mergedWebsite)
                 .emails(mergedEmails.isEmpty() ? null : mergedEmails)
                 .phones(mergedPhones.isEmpty() ? null : mergedPhones)
-                .addresses(mergedAddress != null ? List.of(CompanyCandidate.Address.builder()
-                        .fullAddress(mergedAddress)
-                        .build()) : null)
+                .addresses(!mergedAddresses.isEmpty() ? CompanyCandidate.Contact.toAddressObjects(mergedAddresses) : null)
                 .build();
 
         CompanyCandidate.Insights insights = CompanyCandidate.Insights.builder()
@@ -608,8 +657,11 @@ public class ExtractionMergeService {
         String mergedLegalName = null, mergedTradeName = null, mergedTaxCode = null;
         List<String> mergedIndustries = new ArrayList<>();
         String mergedBusinessModel = null;
+        Integer mergedFoundedYear = null;
+        String mergedCompanyDescription = null;
         List<String> mergedMarkets = new ArrayList<>();
         List<String> mergedWebsite = new ArrayList<>();
+        List<String> mergedAddresses = new ArrayList<>();
         List<String> mergedStrengths = new ArrayList<>();
         List<String> mergedWeaknesses = new ArrayList<>();
         List<String> mergedOpportunities = new ArrayList<>();
@@ -633,10 +685,25 @@ public class ExtractionMergeService {
             String exBusinessModel = (String) getFieldValue(ex, "businessModel", data.getBusinessModel());
             if (!isUnknown(exBusinessModel)) mergedBusinessModel = bestDisplayValue(mergedBusinessModel, exBusinessModel);
 
+            Object exFoundedYearObj = getFieldValue(ex, "foundedYear", data.getFoundedYear());
+            Integer exFoundedYear = exFoundedYearObj instanceof Number ? ((Number) exFoundedYearObj).intValue() : null;
+            if (exFoundedYear != null && mergedFoundedYear == null) mergedFoundedYear = exFoundedYear;
+
+            String exCompanyDescription = (String) getFieldValue(ex, "companyDescription", data.getCompanyDescription());
+            if (!isUnknown(exCompanyDescription)) mergedCompanyDescription = bestDisplayValue(mergedCompanyDescription, exCompanyDescription);
+
             mergeStringList(mergedMarkets, getListFieldValue(ex, "markets", data.getMarkets()));
 
             String exWebsite = (String) getFieldValue(ex, "website", data.getWebsite());
             if (!isUnknown(exWebsite)) { if (mergedWebsite.isEmpty()) mergedWebsite.add(exWebsite); }
+
+            List<String> exAddrs = getListFieldValue(ex, "addresses", data.getAddresses());
+            if (exAddrs != null && !exAddrs.isEmpty()) {
+                mergeStringList(mergedAddresses, exAddrs);
+            } else {
+                String exAddr = (String) getFieldValue(ex, "address", data.getAddress());
+                if (!isUnknown(exAddr)) mergeStringList(mergedAddresses, List.of(exAddr));
+            }
 
             mergeStringList(mergedStrengths, getListFieldValue(ex, "strengths", data.getStrengths()));
             mergeStringList(mergedWeaknesses, getListFieldValue(ex, "weaknesses", data.getWeaknesses()));
@@ -695,6 +762,32 @@ public class ExtractionMergeService {
             }
         }
 
+        // foundedYear
+        Integer curFoundedYear = current.getBusiness() != null ? current.getBusiness().getFoundedYear() : null;
+        if (mergedFoundedYear != null) {
+            if (curFoundedYear == null) {
+                proposedBusiness.put("foundedYear", mergedFoundedYear);
+                evidence.add(evidence("business.foundedYear", null, String.valueOf(mergedFoundedYear), sourceDocIds, importJobIds, extractionIds, MergeAction.ADD_VALUE, false, null));
+            } else if (curFoundedYear.equals(mergedFoundedYear)) {
+                evidence.add(evidence("business.foundedYear", String.valueOf(curFoundedYear), String.valueOf(mergedFoundedYear), sourceDocIds, importJobIds, extractionIds, MergeAction.KEEP_EXISTING, false, "Same founded year confirmed"));
+            } else {
+                evidence.add(evidence("business.foundedYear", String.valueOf(curFoundedYear), String.valueOf(mergedFoundedYear), sourceDocIds, importJobIds, extractionIds, MergeAction.CONFLICT, true, "Conflicting founded year"));
+            }
+        }
+
+        // companyDescription
+        String curCompanyDescription = current.getBusiness() != null ? current.getBusiness().getCompanyDescription() : null;
+        if (mergedCompanyDescription != null) {
+            if (isUnknown(curCompanyDescription)) {
+                proposedBusiness.put("companyDescription", mergedCompanyDescription);
+                evidence.add(evidence("business.companyDescription", null, mergedCompanyDescription, sourceDocIds, importJobIds, extractionIds, MergeAction.ADD_VALUE, false, null));
+            } else if (isSameValue(curCompanyDescription, mergedCompanyDescription)) {
+                evidence.add(evidence("business.companyDescription", curCompanyDescription, mergedCompanyDescription, sourceDocIds, importJobIds, extractionIds, MergeAction.KEEP_EXISTING, false, "Same company description confirmed"));
+            } else {
+                evidence.add(evidence("business.companyDescription", curCompanyDescription, mergedCompanyDescription, sourceDocIds, importJobIds, extractionIds, MergeAction.CONFLICT, true, "Conflicting company description"));
+            }
+        }
+
         // website
         String curWebsite = current.getContact() != null ? current.getContact().getWebsite() : null;
         if (!mergedWebsite.isEmpty()) {
@@ -704,6 +797,16 @@ public class ExtractionMergeService {
                 evidence.add(evidence("contact.website", null, newWeb, sourceDocIds, importJobIds, extractionIds, MergeAction.ADD_VALUE, false, null));
             } else if (normalizeWebsite(curWebsite).equals(normalizeWebsite(newWeb))) {
                 evidence.add(evidence("contact.website", curWebsite, newWeb, sourceDocIds, importJobIds, extractionIds, MergeAction.KEEP_EXISTING, false, null));
+            }
+        }
+
+        // addresses
+        List<String> curAddrs = current.getContact() != null ? current.getContact().getEffectiveAddressStrings() : Collections.emptyList();
+        if (!mergedAddresses.isEmpty()) {
+            List<String> newOnly = newListItems(mergedAddresses, curAddrs);
+            if (!newOnly.isEmpty()) {
+                proposedContact.put("addresses", mergeFullList(curAddrs, mergedAddresses));
+                evidence.add(listEvidence("contact.addresses", mergedAddresses, sourceDocIds, importJobIds, extractionIds));
             }
         }
 

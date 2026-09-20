@@ -59,7 +59,7 @@ public class CandidateController {
     // POST /api/v1/projects/{projectId}/tasks/{taskId}/candidates/manual
     // ─────────────────────────────────────────────
     @PostMapping("/projects/{projectId}/tasks/{taskId}/candidates/manual")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMember(#projectId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> createManualCandidate(
             @PathVariable Long projectId,
             @PathVariable Long taskId,

@@ -65,6 +65,7 @@ public class CandidateService {
     private final com.apms.domain.candidate.repository.mongo.CandidateDraftSequenceRepository draftSequenceRepository;
     private final com.apms.domain.audit.service.AuditLogService auditLogService;
     private final DocumentCompanyMatcher companyMatcher;
+    private final com.apms.domain.reference.service.IndustryCatalogService industryCatalogService;
 
     // ─────────────────────────────────────────────
     // CREATE (from AI)
@@ -117,6 +118,45 @@ public class CandidateService {
 
         com.apms.domain.project.Project project = projectRepository.findById(projectId)
                 .orElseThrow(() -> new com.apms.common.exception.ResourceNotFoundException("Project not found: " + projectId));
+
+        com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new com.apms.common.exception.ResourceNotFoundException("Task not found: " + taskId));
+
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new com.apms.common.exception.BusinessValidationException("Task does not belong to the specified project");
+        }
+
+        if (task.getStatus() == com.apms.common.enums.TaskStatus.DONE ||
+            task.getStatus() == com.apms.common.enums.TaskStatus.CANCELLED) {
+            throw new com.apms.common.exception.BusinessValidationException("Cannot create candidate for completed or cancelled task");
+        }
+
+        if (creatorId != null) {
+            boolean isMember = projectRepository.existsByIdAndMembersAccountId(projectId, creatorId)
+                    || projectRepository.existsByIdAndCreatedByAccountId(projectId, creatorId);
+            if (!isMember) {
+                throw new org.springframework.security.access.AccessDeniedException("User is not a member of this project");
+            }
+            if (task.getAssignedToAccount() != null && !task.getAssignedToAccount().getId().equals(creatorId)) {
+                throw new org.springframework.security.access.AccessDeniedException("Staff can only access tasks assigned to them");
+            }
+        }
+
+        // Check whether an active manual DRAFT already exists for this task
+        List<CompanyCandidate> existingManualDrafts = candidateRepository.findByTaskId(taskId).stream()
+                .filter(c -> c.getStatus() == CandidateStatus.DRAFT &&
+                        c.getExtractionSource() != null &&
+                        "MANUAL".equalsIgnoreCase(c.getExtractionSource().getExtractionMethod()))
+                .sorted((a, b) -> {
+                    int seqA = a.getDraftSequence() != null ? a.getDraftSequence() : 0;
+                    int seqB = b.getDraftSequence() != null ? b.getDraftSequence() : 0;
+                    return Integer.compare(seqB, seqA);
+                })
+                .toList();
+
+        if (!existingManualDrafts.isEmpty()) {
+            return toResponse(existingManualDrafts.get(0));
+        }
 
         int nextSeq = getNextDraftSequence(taskId);
         String draftName = "Draft " + nextSeq;
@@ -194,6 +234,8 @@ public class CandidateService {
         CompanyCandidate.Business business = CompanyCandidate.Business.builder()
                 .industries(extractedData.getIndustries())
                 .businessModel(extractedData.getBusinessModel())
+                .foundedYear(extractedData.getFoundedYear())
+                .companyDescription(extractedData.getCompanyDescription())
                 .products(extractedData.getProducts() != null ? extractedData.getProducts().stream()
                         .map(p -> CompanyCandidate.Product.builder()
                                 .name(p.getName())
@@ -206,17 +248,18 @@ public class CandidateService {
                 .build();
 
         CompanyCandidate.CompanySize size = CompanyCandidate.CompanySize.builder()
-                .employeeTier(extractedData.getEmployeeTier())
-                .revenueTier(extractedData.getCompanySize())
+                .employeeCount(extractedData.getEmployeeCount())
                 .build();
 
         CompanyCandidate.Contact contact = CompanyCandidate.Contact.builder()
                 .website(extractedData.getWebsite())
                 .emails(extractedData.getEmail())
                 .phones(extractedData.getPhone())
-                .addresses(extractedData.getAddress() != null ? java.util.List.of(CompanyCandidate.Address.builder()
-                        .fullAddress(extractedData.getAddress())
-                        .build()) : null)
+                .addresses(extractedData.getAddresses() != null && !extractedData.getAddresses().isEmpty()
+                        ? CompanyCandidate.Contact.toAddressObjects(extractedData.getAddresses())
+                        : (extractedData.getAddress() != null && !extractedData.getAddress().isBlank()
+                                ? CompanyCandidate.Contact.toAddressObjects(java.util.List.of(extractedData.getAddress().trim()))
+                                : null))
                 .build();
 
         CompanyCandidate.Insights insights = CompanyCandidate.Insights.builder()
@@ -369,7 +412,12 @@ public class CandidateService {
         }
 
         if (request.getIdentity() != null) candidate.setIdentity(request.getIdentity());
-        if (request.getBusiness() != null) candidate.setBusiness(request.getBusiness());
+        if (request.getBusiness() != null) {
+            if (request.getBusiness().getFoundedYear() != null) {
+                validateFoundedYear(request.getBusiness().getFoundedYear());
+            }
+            candidate.setBusiness(request.getBusiness());
+        }
         if (request.getCompanySize() != null) candidate.setCompanySize(request.getCompanySize());
         if (request.getContact() != null) candidate.setContact(request.getContact());
         if (request.getInsights() != null) candidate.setInsights(request.getInsights());
@@ -511,6 +559,8 @@ public class CandidateService {
         return CompanyCandidate.Business.builder()
                 .industries(incoming.getIndustries())
                 .businessModel(incoming.getBusinessModel())
+                .foundedYear(incoming.getFoundedYear() != null ? incoming.getFoundedYear() : current.getFoundedYear())
+                .companyDescription(incoming.getCompanyDescription() != null ? incoming.getCompanyDescription() : current.getCompanyDescription())
                 .products(incoming.getProducts() != null ? incoming.getProducts() : current.getProducts())
                 .markets(incoming.getMarkets() != null ? incoming.getMarkets() : current.getMarkets())
                 .targetCustomers(incoming.getTargetCustomers() != null ? incoming.getTargetCustomers() : current.getTargetCustomers())
@@ -938,6 +988,17 @@ public class CandidateService {
         }
 
         CompanyCandidate refreshed = candidateRepository.findById(candidateId).orElse(candidate);
+        if (refreshed.getBusiness() != null && refreshed.getBusiness().getIndustries() != null && !refreshed.getBusiness().getIndustries().isEmpty()) {
+            String profileId = refreshed.getLifecycle() != null ? refreshed.getLifecycle().getConvertedCompanyProfileId() : null;
+            List<String> canonical = industryCatalogService.upsertApprovedIndustries(
+                    refreshed.getBusiness().getIndustries(),
+                    refreshed.getId(),
+                    profileId,
+                    reviewerId
+            );
+            refreshed.getBusiness().setIndustries(canonical);
+            refreshed = candidateRepository.save(refreshed);
+        }
         log.info("Candidate approved: id={}, finalType={}", candidateId, finalType);
         return toResponse(refreshed);
     }
@@ -979,6 +1040,9 @@ public class CandidateService {
         if (request.getFields() != null) {
             for (java.util.Map.Entry<String, com.apms.domain.candidate.dto.CandidateReviewRequest.FieldReviewUpdate> entry : request.getFields().entrySet()) {
                 String fieldPath = entry.getKey();
+                if ("contact.address".equals(fieldPath)) {
+                    fieldPath = "contact.addresses";
+                }
                 if (!STAFF_REVIEWABLE_FIELDS.contains(fieldPath) && CandidateFieldAccessor.getDefinition(fieldPath) == null) {
                     throw new BusinessValidationException("Unknown or unsupported candidate review field: " + fieldPath);
                 }
@@ -1392,17 +1456,27 @@ public class CandidateService {
             case "identity.legalName" -> candidate.getIdentity() != null ? candidate.getIdentity().getLegalName() : null;
             case "identity.tradeName" -> candidate.getIdentity() != null ? candidate.getIdentity().getTradeName() : null;
             case "identity.taxCode" -> candidate.getIdentity() != null ? candidate.getIdentity().getTaxCode() : null;
-            case "contact.address" -> {
-                if (candidate.getContact() == null || candidate.getContact().getAddresses() == null || candidate.getContact().getAddresses().isEmpty()) {
+            case "contact.addresses" -> {
+                if (candidate.getContact() == null) {
                     yield null;
                 }
-                yield candidate.getContact().getAddresses().get(0).getFullAddress();
+                List<String> list = candidate.getContact().getEffectiveAddressStrings();
+                yield list.isEmpty() ? null : list;
+            }
+            case "contact.address" -> {
+                if (candidate.getContact() == null) {
+                    yield null;
+                }
+                List<String> list = candidate.getContact().getEffectiveAddressStrings();
+                yield list.isEmpty() ? null : list.get(0);
             }
             case "contact.website" -> candidate.getContact() != null ? candidate.getContact().getWebsite() : null;
             case "contact.emails" -> candidate.getContact() != null ? candidate.getContact().getEmails() : null;
             case "contact.phones" -> candidate.getContact() != null ? candidate.getContact().getPhones() : null;
             case "business.businessModel" -> candidate.getBusiness() != null ? candidate.getBusiness().getBusinessModel() : null;
             case "business.industries" -> candidate.getBusiness() != null ? candidate.getBusiness().getIndustries() : null;
+            case "business.foundedYear" -> candidate.getBusiness() != null ? candidate.getBusiness().getFoundedYear() : null;
+            case "business.companyDescription" -> candidate.getBusiness() != null ? candidate.getBusiness().getCompanyDescription() : null;
             case "business.markets" -> candidate.getBusiness() != null ? candidate.getBusiness().getMarkets() : null;
             case "business.targetCustomers" -> candidate.getBusiness() != null ? candidate.getBusiness().getTargetCustomers() : null;
             case "business.products" -> candidate.getBusiness() != null ? candidate.getBusiness().getProducts() : null;
@@ -1449,6 +1523,15 @@ public class CandidateService {
                 case "business.businessModel":
                     candidate.getBusiness().setBusinessModel((String) value);
                     break;
+                case "business.foundedYear":
+                    if (value != null) {
+                        validateFoundedYear(value);
+                    }
+                    candidate.getBusiness().setFoundedYear(value instanceof Number ? ((Number) value).intValue() : (value instanceof String s && !s.trim().isEmpty() ? Integer.parseInt(s.trim()) : null));
+                    break;
+                case "business.companyDescription":
+                    candidate.getBusiness().setCompanyDescription((String) value);
+                    break;
                 case "business.markets":
                     candidate.getBusiness().setMarkets((List<String>) value);
                     break;
@@ -1466,10 +1549,10 @@ public class CandidateService {
                         candidate.getBusiness().setProducts(products);
                     }
                     break;
+                case "contact.addresses":
                 case "contact.address":
-                    candidate.getContact().setAddresses(value != null && !String.valueOf(value).isBlank()
-                            ? java.util.List.of(CompanyCandidate.Address.builder().fullAddress(String.valueOf(value)).build())
-                            : null);
+                    List<String> normalizedAddrs = CandidateFieldAccessor.normalizeAddressList(value);
+                    candidate.getContact().setAddresses(normalizedAddrs.isEmpty() ? null : CompanyCandidate.Contact.toAddressObjects(normalizedAddrs));
                     break;
                 case "contact.website":
                     candidate.getContact().setWebsite((String) value);
@@ -1700,6 +1783,9 @@ public class CandidateService {
             for (com.apms.domain.ai.dto.ExtractionFieldResult fr : c.getFieldResults().values()) {
                 if (fr.getFieldName() != null) {
                     decodedFieldResults.put(fr.getFieldName(), fr);
+                    if ("contact.address".equals(fr.getFieldName())) {
+                        decodedFieldResults.putIfAbsent("contact.addresses", fr);
+                    }
                 }
             }
         }
@@ -1724,6 +1810,7 @@ public class CandidateService {
                 .currentReviewRound(c.getRevisionNumber() != null ? c.getRevisionNumber() : 1)
                 .draftName(c.getDraftName() != null && !c.getDraftName().isBlank() ? c.getDraftName() : (c.getDraftSequence() != null ? "Draft " + c.getDraftSequence() : "Draft"))
                 .draftSequence(c.getDraftSequence())
+                .draftNumber(c.getDraftSequence())
                 .status(c.getStatus())
                 .suggestedRelationshipType(c.getSuggestedRelationshipType())
                 .relationshipConfidenceScore(c.getRelationshipConfidenceScore())
@@ -1824,11 +1911,15 @@ public class CandidateService {
 
         if (candidate.getFieldApprovals() != null && !candidate.getFieldApprovals().isEmpty()) {
             for (com.apms.domain.project.fieldapproval.FieldApprovalRecord record : candidate.getFieldApprovals()) {
-                if (record == null || record.getFieldPath() == null || !STAFF_REVIEWABLE_FIELDS.contains(record.getFieldPath())) {
+                if (record == null || record.getFieldPath() == null) {
+                    continue;
+                }
+                String normalizedPath = "contact.address".equals(record.getFieldPath()) ? "contact.addresses" : record.getFieldPath();
+                if (!STAFF_REVIEWABLE_FIELDS.contains(normalizedPath)) {
                     continue;
                 }
 
-                com.apms.domain.ai.dto.ExtractionFieldResult fieldResult = decodedFieldResults.computeIfAbsent(record.getFieldPath(), fieldPath -> {
+                com.apms.domain.ai.dto.ExtractionFieldResult fieldResult = decodedFieldResults.computeIfAbsent(normalizedPath, fieldPath -> {
                     com.apms.domain.ai.dto.ExtractionFieldResult created = new com.apms.domain.ai.dto.ExtractionFieldResult();
                     created.setFieldName(fieldPath);
                     Object val = readEmbeddedField(candidate, fieldPath);
@@ -2300,6 +2391,10 @@ public class CandidateService {
             throw new BusinessValidationException("Company legal name is required");
         }
 
+        if (candidate.getBusiness() != null && candidate.getBusiness().getFoundedYear() != null) {
+            validateFoundedYear(candidate.getBusiness().getFoundedYear());
+        }
+
         if (candidate.getContact() != null) {
             String website = candidate.getContact().getWebsite();
             if (org.springframework.util.StringUtils.hasText(website) && !com.apms.domain.ai.service.AiExtractionQualityService.isValidUrl(website)) {
@@ -2370,7 +2465,9 @@ public class CandidateService {
 
     private void validateManualFieldFormat(String fieldPath, Object value) {
         if (value == null) return;
-        if ("contact.website".equals(fieldPath)) {
+        if ("business.foundedYear".equals(fieldPath)) {
+            validateFoundedYear(value);
+        } else if ("contact.website".equals(fieldPath)) {
             String str = String.valueOf(value);
             if (org.springframework.util.StringUtils.hasText(str) && !com.apms.domain.ai.service.AiExtractionQualityService.isValidUrl(str)) {
                 throw new BusinessValidationException("INVALID_WEBSITE", "Invalid website URL format: " + str);
@@ -2399,6 +2496,43 @@ public class CandidateService {
                     && !com.apms.domain.ai.service.AiExtractionQualityService.isValidPhone(str)) {
                 throw new BusinessValidationException("INVALID_PHONE", "Invalid phone format: " + str);
             }
+        } else if ("contact.addresses".equals(fieldPath) || "contact.address".equals(fieldPath)) {
+            if (value instanceof java.util.Collection<?> list) {
+                for (Object item : list) {
+                    if (item != null) {
+                        String str = String.valueOf(item).trim();
+                        if (str.length() > 500) {
+                            throw new BusinessValidationException("INVALID_ADDRESS", "Address must not exceed 500 characters");
+                        }
+                    }
+                }
+            } else if (value instanceof String str && org.springframework.util.StringUtils.hasText(str)) {
+                if (str.trim().length() > 500) {
+                    throw new BusinessValidationException("INVALID_ADDRESS", "Address must not exceed 500 characters");
+                }
+            }
+        }
+    }
+
+    public static void validateFoundedYear(Object value) {
+        if (value == null) return;
+        Integer year = null;
+        if (value instanceof Number n) {
+            year = n.intValue();
+        } else if (value instanceof String s) {
+            String trimmed = s.trim();
+            if (trimmed.isEmpty()) return;
+            try {
+                year = Integer.parseInt(trimmed);
+            } catch (NumberFormatException e) {
+                throw new BusinessValidationException("INVALID_FOUNDED_YEAR", "Founded year must be an integer");
+            }
+        } else {
+            throw new BusinessValidationException("INVALID_FOUNDED_YEAR", "Founded year must be an integer");
+        }
+        int currentYear = java.time.Year.now().getValue();
+        if (year < 1800 || year > currentYear) {
+            throw new BusinessValidationException("INVALID_FOUNDED_YEAR", "Founded year must be between 1800 and " + currentYear);
         }
     }
 
