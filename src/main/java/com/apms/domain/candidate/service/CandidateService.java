@@ -574,7 +574,19 @@ public class CandidateService {
         if (isFirstSubmission) {
             candidate.setRevisionNumber(1);
             candidate.setFieldApprovals(new java.util.ArrayList<>());
-            fieldApprovalService.initializeFirstSubmission(candidate, CandidateFieldAccessor.getReviewableDefinitions(), candidate.getFieldApprovals());
+            if (isManualCandidate(candidate)) {
+                for (String path : CandidateFieldAccessor.REVIEWABLE_FIELD_PATHS) {
+                    candidate.getFieldApprovals().add(
+                            com.apms.domain.project.fieldapproval.FieldApprovalRecord.builder()
+                                    .fieldPath(path)
+                                    .status(com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW)
+                                    .changedInRevision(1)
+                                    .build()
+                    );
+                }
+            } else {
+                fieldApprovalService.initializeFirstSubmission(candidate, CandidateFieldAccessor.getReviewableDefinitions(), candidate.getFieldApprovals());
+            }
         } else {
             // Resubmission: sendBackCandidate already opened the next revision. Do not increment again.
             if (candidate.getRevisionNumber() == null) {
@@ -633,6 +645,8 @@ public class CandidateService {
                                 fr.setManagerReviewedAt(null);
                                 fr.setReviewedRevision(null);
                                 fr.setChangedInRevision(candidate.getRevisionNumber());
+                                fr.setSubmittedRound(candidate.getRevisionNumber());
+                                fr.setResubmittedInCurrentRound(true);
                             }
                         }
                     }
@@ -745,20 +759,22 @@ public class CandidateService {
         java.util.List<String> blockingFields = new java.util.ArrayList<>();
 
         if (isManualCandidate(candidate)) {
-            java.util.Set<String> submitted = getSubmittedReviewableFieldPaths(candidate);
-            if (submitted.isEmpty() || candidate.getIdentity() == null || !org.springframework.util.StringUtils.hasText(candidate.getIdentity().getLegalName())) {
+            String legalName = candidate.getIdentity() != null ? candidate.getIdentity().getLegalName() : null;
+            if (!org.springframework.util.StringUtils.hasText(legalName) && candidate.getProjectId() != null) {
+                try {
+                    legalName = projectRepository.findById(Long.valueOf(candidate.getProjectId()))
+                            .map(com.apms.domain.project.Project::getTargetCompanyName)
+                            .orElse(null);
+                } catch (Exception ignored) {}
+            }
+            if (!org.springframework.util.StringUtils.hasText(legalName)) {
                 readyForApproval = false;
             }
             java.util.Map<String, com.apms.domain.project.fieldapproval.FieldApprovalRecord> approvalMap =
                     com.apms.domain.project.fieldapproval.FieldApprovalUtils.toMap(candidate.getFieldApprovals());
-            for (String fieldPath : submitted) {
-                com.apms.domain.project.fieldapproval.FieldApprovalRecord rec = approvalMap.get(fieldPath);
-                com.apms.domain.ai.dto.ExtractionFieldResult fr = candidate.getFieldResults() != null
-                        ? candidate.getFieldResults().get(com.apms.domain.ai.service.FieldKeyCodec.encode(fieldPath))
-                        : null;
-                boolean isApproved = (rec != null && rec.getStatus() == com.apms.common.enums.FieldApprovalStatus.APPROVED)
-                        || (fr != null && fr.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED);
-                if (!isApproved) {
+            for (String fieldPath : CandidateFieldAccessor.REVIEWABLE_FIELD_PATHS) {
+                EffectiveFieldDecision eff = resolveEffectiveFieldDecision(fieldPath, approvalMap, candidate.getFieldResults());
+                if (eff != EffectiveFieldDecision.APPROVED) {
                     readyForApproval = false;
                     blockingFields.add(fieldPath);
                 }
@@ -940,7 +956,7 @@ public class CandidateService {
 
         if (request.getFields() != null && !request.getFields().isEmpty()) {
             boolean hasManagerUpdates = request.getFields().values().stream()
-                    .anyMatch(u -> u != null && u.isManager());
+                    .anyMatch(u -> u != null && (u.isManager() || u.getManagerReviewStatus() != null));
             if (hasManagerUpdates) {
                 boolean activeReview = candidate.getStatus() == CandidateStatus.PENDING_REVIEW
                         || candidate.getStatus() == CandidateStatus.CORRECTED;
@@ -977,46 +993,40 @@ public class CandidateService {
                     candidate.getFieldResults().put(mapKey, fieldResult);
                 }
 
-                if (update.isManager()) {
+                boolean isManagerAction = update.isManager() || update.getManagerReviewStatus() != null;
+                if (isManagerAction) {
                     if (update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING) {
                         undoManagerFieldDecision(candidate, fieldPath, fieldResult, userId);
                     } else {
-                        if (update.getManagerReviewStatus() != null) {
-                            fieldResult.setManagerReviewStatus(update.getManagerReviewStatus());
-                        }
-                        if (update.isReviewedValuePresent() || update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED) {
-                            if (update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED && !update.isReviewedValuePresent()) {
-                                throw new BusinessValidationException("EDITED review status requires a reviewedValue.");
+                        if (update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW
+                                || update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.REJECTED) {
+                            if (!org.springframework.util.StringUtils.hasText(update.getManagerReviewComment())) {
+                                throw new BusinessValidationException("Lý do yêu cầu chỉnh sửa là bắt buộc.");
                             }
-                            fieldResult.setStaffReviewedValue(update.getReviewedValue());
                         }
-                        if (update.getManagerReviewComment() != null) {
-                            fieldResult.setManagerReviewComment(update.getManagerReviewComment());
+
+                        if (fieldResult != null) {
+                            if (update.getManagerReviewStatus() != null) {
+                                fieldResult.setManagerReviewStatus(update.getManagerReviewStatus());
+                            }
+                            if (update.isReviewedValuePresent() || update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED) {
+                                if (update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED && !update.isReviewedValuePresent()) {
+                                    throw new BusinessValidationException("EDITED review status requires a reviewedValue.");
+                                }
+                                fieldResult.setStaffReviewedValue(update.getReviewedValue());
+                            }
+                            if (update.getManagerReviewComment() != null) {
+                                fieldResult.setManagerReviewComment(update.getManagerReviewComment());
+                            }
+                            fieldResult.setManagerReviewedByUserId(userId);
+                            fieldResult.setManagerReviewedAt(LocalDateTime.now());
+                            fieldResult.setReviewedRevision(candidate.getRevisionNumber());
                         }
-                        fieldResult.setManagerReviewedByUserId(userId);
-                        fieldResult.setManagerReviewedAt(LocalDateTime.now());
-                        fieldResult.setReviewedRevision(candidate.getRevisionNumber());
                     }
-                    if (update.getManagerReviewStatus() != null) {
-                        fieldResult.setManagerReviewStatus(update.getManagerReviewStatus());
-                    }
-                    if (update.isReviewedValuePresent() || update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED) {
-                        if (update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED && !update.isReviewedValuePresent()) {
-                            throw new BusinessValidationException("EDITED review status requires a reviewedValue.");
-                        }
-                        fieldResult.setStaffReviewedValue(update.getReviewedValue());
-                    }
-                    if (update.getManagerReviewComment() != null) {
-                        fieldResult.setManagerReviewComment(update.getManagerReviewComment());
-                    } else if (update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING) {
-                        fieldResult.setManagerReviewComment(null);
-                    }
-                    fieldResult.setManagerReviewedByUserId(update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING ? null : userId);
-                    fieldResult.setManagerReviewedAt(update.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING ? null : LocalDateTime.now());
                 } else {
                     com.apms.domain.project.fieldapproval.FieldApprovalRecord approval = findFieldApproval(candidate, fieldPath);
                     if ((approval != null && approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.APPROVED)
-                            || fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED) {
+                            || (fieldResult != null && fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED)) {
                         throw new BusinessValidationException("This field has already been approved by the Manager and cannot be modified.");
                     }
 
@@ -1074,27 +1084,19 @@ public class CandidateService {
                 Object val;
                 if (update.isReviewedValuePresent()) {
                     val = update.getReviewedValue();
-                } else if (fieldResult.getStaffReviewedValue() != null) {
+                } else if (fieldResult != null && fieldResult.getStaffReviewedValue() != null) {
                     val = fieldResult.getStaffReviewedValue();
-                } else {
+                } else if (fieldResult != null) {
                     val = fieldResult.getValue();
+                } else {
+                    val = readEmbeddedField(candidate, fieldPath);
                 }
 
                 // Sync to embedded models
                 syncEmbeddedField(candidate, fieldPath, val);
-                if (update.isManager()) {
+                if (isManagerAction) {
                     if (update.getManagerReviewStatus() != com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING) {
                         syncFieldApprovalFromManagerReview(candidate, fieldPath, update.getManagerReviewStatus(), update.getManagerReviewComment(), userId);
-                        AuditAction action = switch (update.getManagerReviewStatus()) {
-                            case ACCEPTED -> AuditAction.FIELD_APPROVED;
-                            case REJECTED -> AuditAction.FIELD_REJECTED;
-                            case NEEDS_REVIEW -> AuditAction.FIELD_REVISION_REQUESTED;
-                            default -> null;
-                        };
-                        if (action != null) {
-                            auditLogService.log(userId, action, "CompanyCandidate", candidate.getId(),
-                                    "Field " + fieldPath + " manager review decision: " + update.getManagerReviewStatus());
-                        }
                     }
                 } else if (candidate.getChangedFieldPaths() == null || !candidate.getChangedFieldPaths().contains(fieldPath)) {
                     if (candidate.getChangedFieldPaths() == null) {
@@ -1119,8 +1121,8 @@ public class CandidateService {
 
         boolean isApproved = (fieldResult != null && fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED)
                 || (approval != null && approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.APPROVED);
-        boolean isRejected = (fieldResult != null && fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.REJECTED)
-                || (approval != null && approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.REJECTED);
+        boolean isRejected = (fieldResult != null && (fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.REJECTED || fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW))
+                || (approval != null && (approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.REJECTED || approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.REVISION_REQUIRED));
 
         if (!isApproved && !isRejected) {
             throw new BusinessValidationException(
@@ -1141,11 +1143,13 @@ public class CandidateService {
         }
 
         // 1. Reset ExtractionFieldResult current decision
-        fieldResult.setManagerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING);
-        fieldResult.setManagerReviewedByUserId(null);
-        fieldResult.setManagerReviewedAt(null);
-        fieldResult.setManagerReviewComment(null);
-        fieldResult.setReviewedRevision(null);
+        if (fieldResult != null) {
+            fieldResult.setManagerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING);
+            fieldResult.setManagerReviewedByUserId(null);
+            fieldResult.setManagerReviewedAt(null);
+            fieldResult.setManagerReviewComment(null);
+            fieldResult.setReviewedRevision(null);
+        }
 
         // 2. Synchronize FieldApprovalRecord
         if (approval != null) {
@@ -1294,10 +1298,10 @@ public class CandidateService {
             com.apms.domain.ai.dto.ExtractionFieldResult fieldResult,
             CompanyCandidate candidate,
             String fieldPath) {
-        if (fieldResult.getStaffReviewedValue() != null) {
+        if (fieldResult != null && fieldResult.getStaffReviewedValue() != null) {
             return fieldResult.getStaffReviewedValue();
         }
-        if (fieldResult.getValue() != null) {
+        if (fieldResult != null && fieldResult.getValue() != null) {
             return fieldResult.getValue();
         }
         return readEmbeddedField(candidate, fieldPath);
@@ -1717,6 +1721,7 @@ public class CandidateService {
                 .sourceDocumentIds(resolveSourceDocumentIds(c.getRawDocumentId(), c.getSourceDocumentIds()))
                 .candidateOrder(c.getCandidateOrder())
                 .revisionNumber(c.getRevisionNumber())
+                .currentReviewRound(c.getRevisionNumber() != null ? c.getRevisionNumber() : 1)
                 .draftName(c.getDraftName() != null && !c.getDraftName().isBlank() ? c.getDraftName() : (c.getDraftSequence() != null ? "Draft " + c.getDraftSequence() : "Draft"))
                 .draftSequence(c.getDraftSequence())
                 .status(c.getStatus())
@@ -1792,48 +1797,150 @@ public class CandidateService {
     private java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> applyFieldApprovalsToDecodedResults(
             CompanyCandidate candidate,
             java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> decodedFieldResults) {
-        if (candidate.getFieldApprovals() == null || candidate.getFieldApprovals().isEmpty()) {
-            return decodedFieldResults;
-        }
         if (decodedFieldResults == null) {
             decodedFieldResults = new java.util.HashMap<>();
         }
 
-        for (com.apms.domain.project.fieldapproval.FieldApprovalRecord record : candidate.getFieldApprovals()) {
-            if (record == null || record.getFieldPath() == null || !STAFF_REVIEWABLE_FIELDS.contains(record.getFieldPath())) {
-                continue;
+        if (isManualCandidate(candidate)) {
+            for (String fieldPath : STAFF_REVIEWABLE_FIELDS) {
+                decodedFieldResults.computeIfAbsent(fieldPath, fp -> {
+                    com.apms.domain.ai.dto.ExtractionFieldResult created = new com.apms.domain.ai.dto.ExtractionFieldResult();
+                    created.setFieldName(fp);
+                    Object val = readEmbeddedField(candidate, fp);
+                    if (isMeaningfulValue(val)) {
+                        created.setValue(val);
+                        created.setProvided(true);
+                    } else {
+                        created.setValue(null);
+                        created.setProvided(false);
+                    }
+                    created.setManagerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING);
+                    return created;
+                });
             }
+        }
 
-            com.apms.domain.ai.dto.ExtractionFieldResult fieldResult = decodedFieldResults.computeIfAbsent(record.getFieldPath(), fieldPath -> {
-                com.apms.domain.ai.dto.ExtractionFieldResult created = new com.apms.domain.ai.dto.ExtractionFieldResult();
-                created.setFieldName(fieldPath);
-                created.setValue(readEmbeddedField(candidate, fieldPath));
-                return created;
-            });
+        int currentRound = candidate.getRevisionNumber() != null ? candidate.getRevisionNumber() : 1;
 
-            fieldResult.setManagerReviewStatus(toExtractionReviewStatus(record.getStatus()));
-            fieldResult.setManagerReviewComment(record.getStatus() == com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW
-                    ? null
-                    : record.getComment());
-            fieldResult.setManagerReviewedByUserId(record.getReviewedByAccountId());
-            fieldResult.setManagerReviewedAt(record.getReviewedAt());
-            fieldResult.setChangedInRevision(record.getChangedInRevision());
-            fieldResult.setReviewedRevision(record.getReviewedRevision());
-
-            if (record.getPreviousStatus() != null) {
-                fieldResult.setPreviousManagerReviewStatus(toExtractionReviewStatus(record.getPreviousStatus()));
-                fieldResult.setPreviousManagerReviewComment(record.getPreviousComment());
-                Integer prevRev = record.getPreviousReviewedRevision();
-                if (prevRev == null && candidate.getRevisionNumber() != null && candidate.getRevisionNumber() > 1) {
-                    prevRev = 1;
+        if (candidate.getFieldApprovals() != null && !candidate.getFieldApprovals().isEmpty()) {
+            for (com.apms.domain.project.fieldapproval.FieldApprovalRecord record : candidate.getFieldApprovals()) {
+                if (record == null || record.getFieldPath() == null || !STAFF_REVIEWABLE_FIELDS.contains(record.getFieldPath())) {
+                    continue;
                 }
-                fieldResult.setPreviousReviewedRevision(prevRev);
-                fieldResult.setPreviousSubmittedValue(record.getPendingValue());
-            } else if (isReturnedApprovalStatus(record.getStatus())) {
-                fieldResult.setPreviousManagerReviewStatus(toExtractionReviewStatus(record.getStatus()));
-                fieldResult.setPreviousManagerReviewComment(record.getComment());
-                fieldResult.setPreviousReviewedRevision(record.getReviewedRevision());
-                fieldResult.setPreviousSubmittedValue(record.getPendingValue());
+
+                com.apms.domain.ai.dto.ExtractionFieldResult fieldResult = decodedFieldResults.computeIfAbsent(record.getFieldPath(), fieldPath -> {
+                    com.apms.domain.ai.dto.ExtractionFieldResult created = new com.apms.domain.ai.dto.ExtractionFieldResult();
+                    created.setFieldName(fieldPath);
+                    Object val = readEmbeddedField(candidate, fieldPath);
+                    if (isMeaningfulValue(val)) {
+                        created.setValue(val);
+                        created.setProvided(true);
+                    } else {
+                        created.setValue(null);
+                        created.setProvided(false);
+                    }
+                    return created;
+                });
+
+                com.apms.domain.ai.dto.ExtractionReviewStatus currentStatus = toExtractionReviewStatus(record.getStatus());
+                String currentComment = record.getStatus() == com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW
+                        ? null
+                        : record.getComment();
+
+                fieldResult.setManagerReviewStatus(currentStatus);
+                fieldResult.setManagerReviewComment(currentComment);
+                fieldResult.setManagerReviewedByUserId(record.getReviewedByAccountId());
+                fieldResult.setManagerReviewedAt(record.getReviewedAt());
+                fieldResult.setChangedInRevision(record.getChangedInRevision());
+                fieldResult.setReviewedRevision(record.getReviewedRevision());
+
+                // Canonical current round review context
+                Object currentSubmittedVal = resolveCurrentFieldValue(fieldResult, candidate, record.getFieldPath());
+                com.apms.domain.ai.dto.FieldReviewDecision currentDecision = com.apms.domain.ai.dto.FieldReviewDecision.builder()
+                        .roundNumber(currentRound)
+                        .status(currentStatus)
+                        .comment(currentComment)
+                        .submittedValue(currentSubmittedVal)
+                        .reviewedAt(record.getReviewedAt())
+                        .reviewedByUserId(record.getReviewedByAccountId())
+                        .build();
+                fieldResult.setCurrentDecision(currentDecision);
+
+                // Canonical previous round review context: strictly earlier rounds only (< currentRound)
+                boolean hasValidPreviousRound = currentRound > 1
+                        && record.getPreviousStatus() != null
+                        && record.getPreviousStatus() != com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW;
+
+                if (hasValidPreviousRound) {
+                    com.apms.domain.ai.dto.ExtractionReviewStatus prevExtractionStatus = toExtractionReviewStatus(record.getPreviousStatus());
+                    Integer prevRev = record.getPreviousReviewedRevision();
+                    if (prevRev == null || prevRev >= currentRound) {
+                        prevRev = currentRound - 1;
+                    }
+                    Object prevSubmittedVal = record.getPendingValue() != null
+                            ? record.getPendingValue()
+                            : fieldResult.getPreviousSubmittedValue();
+
+                    com.apms.domain.ai.dto.FieldReviewDecision previousDecision = com.apms.domain.ai.dto.FieldReviewDecision.builder()
+                            .roundNumber(prevRev)
+                            .status(prevExtractionStatus)
+                            .comment(record.getPreviousComment())
+                            .submittedValue(prevSubmittedVal)
+                            .reviewedAt(null)
+                            .reviewedByUserId(null)
+                            .build();
+
+                    fieldResult.setPreviousDecision(previousDecision);
+                    fieldResult.setPreviousManagerReviewStatus(prevExtractionStatus);
+                    fieldResult.setPreviousManagerReviewComment(record.getPreviousComment());
+                    fieldResult.setPreviousReviewedRevision(prevRev);
+                    fieldResult.setPreviousSubmittedValue(prevSubmittedVal);
+                } else {
+                    fieldResult.setPreviousDecision(null);
+                    fieldResult.setPreviousManagerReviewStatus(null);
+                    fieldResult.setPreviousManagerReviewComment(null);
+                    fieldResult.setPreviousReviewedRevision(null);
+                    fieldResult.setPreviousSubmittedValue(null);
+                }
+
+                fieldResult.setSubmittedRound(currentRound);
+                fieldResult.setResubmittedInCurrentRound(currentRound > 1 && record.getPreviousStatus() != null);
+            }
+        }
+
+        for (com.apms.domain.ai.dto.ExtractionFieldResult fr : decodedFieldResults.values()) {
+            if (fr != null) {
+                if (fr.getProvided() == null) {
+                    Object val = fr.getValue() != null ? fr.getValue() : readEmbeddedField(candidate, fr.getFieldName());
+                    boolean meaningful = isMeaningfulValue(val);
+                    fr.setProvided(meaningful);
+                    if (!meaningful && isManualCandidate(candidate)) {
+                        fr.setValue(null);
+                    }
+                }
+                if (fr.getManagerReviewStatus() == null) {
+                    fr.setManagerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING);
+                }
+                if (fr.getCurrentDecision() == null) {
+                    fr.setCurrentDecision(com.apms.domain.ai.dto.FieldReviewDecision.builder()
+                            .roundNumber(currentRound)
+                            .status(fr.getManagerReviewStatus())
+                            .comment(fr.getManagerReviewComment())
+                            .submittedValue(fr.getValue())
+                            .reviewedAt(fr.getManagerReviewedAt())
+                            .reviewedByUserId(fr.getManagerReviewedByUserId())
+                            .build());
+                }
+                if (currentRound <= 1) {
+                    fr.setPreviousDecision(null);
+                    fr.setPreviousManagerReviewStatus(null);
+                    fr.setPreviousManagerReviewComment(null);
+                    fr.setPreviousReviewedRevision(null);
+                    fr.setPreviousSubmittedValue(null);
+                }
+                if (fr.getSubmittedRound() == null) {
+                    fr.setSubmittedRound(currentRound);
+                }
             }
         }
 
@@ -1870,49 +1977,148 @@ public class CandidateService {
                 && "PARTNER_CONTRACT".equalsIgnoreCase(rawDocument.getSource().getType());
     }
 
+    public enum EffectiveFieldDecision {
+        APPROVED,
+        CHANGES_REQUESTED,
+        PENDING
+    }
+
+    public static EffectiveFieldDecision resolveEffectiveFieldDecision(
+            String fieldPath,
+            java.util.Map<String, com.apms.domain.project.fieldapproval.FieldApprovalRecord> approvals,
+            java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> fieldResults) {
+
+        com.apms.domain.project.fieldapproval.FieldApprovalRecord approval = approvals != null ? approvals.get(fieldPath) : null;
+        com.apms.domain.ai.dto.ExtractionFieldResult fr = fieldResults != null ? fieldResults.get(com.apms.domain.ai.service.FieldKeyCodec.encode(fieldPath)) : null;
+
+        if (approval != null) {
+            if (approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.APPROVED) {
+                return EffectiveFieldDecision.APPROVED;
+            }
+            if (approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.REVISION_REQUIRED
+                    || approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.REJECTED) {
+                return EffectiveFieldDecision.CHANGES_REQUESTED;
+            }
+            if (approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW
+                    || approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.STALE) {
+                return EffectiveFieldDecision.PENDING;
+            }
+        }
+
+        if (fr != null) {
+            if (fr.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED) {
+                return EffectiveFieldDecision.APPROVED;
+            }
+            if (fr.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW
+                    || fr.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.REJECTED) {
+                return EffectiveFieldDecision.CHANGES_REQUESTED;
+            }
+            if (fr.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING) {
+                return EffectiveFieldDecision.PENDING;
+            }
+        }
+
+        return EffectiveFieldDecision.PENDING;
+    }
+
+    @Transactional
+    public CandidateResponse bulkApproveCandidateFields(String projectId, String candidateId, java.util.List<String> requestedFieldPaths, Long userId) {
+        CompanyCandidate candidate = findCandidateOrThrow(candidateId);
+
+        if (!projectId.equals(candidate.getProjectId())) {
+            throw new BusinessValidationException("Candidate does not belong to project");
+        }
+
+        boolean activeReview = candidate.getStatus() == CandidateStatus.PENDING_REVIEW
+                || candidate.getStatus() == CandidateStatus.CORRECTED;
+        if (!activeReview) {
+            throw new BusinessValidationException("Field decisions can only be modified during an active candidate review.");
+        }
+
+        if (candidate.getFieldApprovals() == null) {
+            candidate.setFieldApprovals(new java.util.ArrayList<>());
+        }
+
+        java.util.Map<String, com.apms.domain.project.fieldapproval.FieldApprovalRecord> approvalMap =
+                com.apms.domain.project.fieldapproval.FieldApprovalUtils.toMap(candidate.getFieldApprovals());
+
+        java.util.Collection<String> targetPaths = (requestedFieldPaths != null && !requestedFieldPaths.isEmpty())
+                ? requestedFieldPaths
+                : CandidateFieldAccessor.REVIEWABLE_FIELD_PATHS;
+
+        int approvedCount = 0;
+        for (String fieldPath : targetPaths) {
+            if (!CandidateFieldAccessor.REVIEWABLE_FIELD_PATHS.contains(fieldPath)) {
+                continue;
+            }
+
+            EffectiveFieldDecision currentDecision = resolveEffectiveFieldDecision(fieldPath, approvalMap, candidate.getFieldResults());
+            if (currentDecision == EffectiveFieldDecision.APPROVED) {
+                continue; // ignore fields already approved
+            }
+            if (currentDecision == EffectiveFieldDecision.CHANGES_REQUESTED) {
+                continue; // ignore fields already CHANGES_REQUESTED
+            }
+
+            // Only mark effective PENDING fields as APPROVED
+            syncFieldApprovalFromManagerReview(candidate, fieldPath, com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED, null, userId);
+
+            if (candidate.getFieldResults() != null) {
+                com.apms.domain.ai.dto.ExtractionFieldResult fr =
+                        candidate.getFieldResults().get(com.apms.domain.ai.service.FieldKeyCodec.encode(fieldPath));
+                if (fr != null) {
+                    fr.setManagerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED);
+                    fr.setManagerReviewedByUserId(userId);
+                    fr.setManagerReviewedAt(LocalDateTime.now());
+                    fr.setReviewedRevision(candidate.getRevisionNumber());
+                }
+            }
+
+            auditLogService.log(userId, AuditAction.FIELD_APPROVED, "CompanyCandidate", candidate.getId(),
+                    "Field " + fieldPath + " bulk-approved by manager");
+            approvedCount++;
+        }
+
+        if (candidate.getMetadata() != null) {
+            candidate.getMetadata().setLastModifiedBy(String.valueOf(userId));
+            candidate.getMetadata().setUpdatedAt(LocalDateTime.now());
+        }
+
+        candidate = candidateRepository.save(candidate);
+        log.info("Bulk-approved {} pending fields for candidateId={}", approvedCount, candidateId);
+        return toResponse(candidate);
+    }
+
     public void validateCandidateFinalApprovalEligibility(CompanyCandidate candidate, com.apms.common.enums.ReviewDecision decision) {
         if (decision == com.apms.common.enums.ReviewDecision.APPROVE) {
-            // Domain mandatory business field
-            if (candidate.getIdentity() == null || !org.springframework.util.StringUtils.hasText(candidate.getIdentity().getLegalName())) {
+            // Domain mandatory business field (with authoritative target fallback)
+            String legalName = candidate.getIdentity() != null ? candidate.getIdentity().getLegalName() : null;
+            if (!org.springframework.util.StringUtils.hasText(legalName) && candidate.getProjectId() != null) {
+                try {
+                    legalName = projectRepository.findById(Long.valueOf(candidate.getProjectId()))
+                            .map(com.apms.domain.project.Project::getTargetCompanyName)
+                            .orElse(null);
+                    if (org.springframework.util.StringUtils.hasText(legalName)) {
+                        if (candidate.getIdentity() == null) candidate.setIdentity(new CompanyCandidate.Identity());
+                        candidate.getIdentity().setLegalName(legalName);
+                    }
+                } catch (Exception ignored) {}
+            }
+            if (!org.springframework.util.StringUtils.hasText(legalName)) {
                 throw new BusinessValidationException("REQUIRED_CANDIDATE_FIELD_MISSING", "REQUIRED_CANDIDATE_FIELD_MISSING: Company legal name is required");
             }
 
             if (isManualCandidate(candidate)) {
-                java.util.Set<String> submitted = getSubmittedReviewableFieldPaths(candidate);
-                if (submitted.isEmpty()) {
-                    throw new BusinessValidationException("NO_SUBMITTED_FIELDS", "NO_SUBMITTED_FIELDS: At least one candidate field must be provided and approved");
-                }
-
                 java.util.Map<String, com.apms.domain.project.fieldapproval.FieldApprovalRecord> approvals =
                         com.apms.domain.project.fieldapproval.FieldApprovalUtils.toMap(candidate.getFieldApprovals());
 
-                for (String fieldPath : submitted) {
-                    com.apms.domain.project.fieldapproval.FieldApprovalRecord approval = approvals.get(fieldPath);
-                    com.apms.domain.ai.dto.ExtractionFieldResult fr = candidate.getFieldResults() != null
-                            ? candidate.getFieldResults().get(com.apms.domain.ai.service.FieldKeyCodec.encode(fieldPath))
-                            : null;
-
-                    // 1. Check for pending or stale
-                    if (approval != null && (approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW || approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.STALE)) {
-                        throw new BusinessValidationException("CANDIDATE_HAS_PENDING_FIELDS", "CANDIDATE_HAS_PENDING_FIELDS: Field " + fieldPath + " is " + approval.getStatus());
-                    }
-                    if (approval == null && fr != null && (fr.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING || fr.getManagerReviewStatus() == null)) {
+                for (String fieldPath : CandidateFieldAccessor.REVIEWABLE_FIELD_PATHS) {
+                    EffectiveFieldDecision decisionForField = resolveEffectiveFieldDecision(fieldPath, approvals, candidate.getFieldResults());
+                    if (decisionForField == EffectiveFieldDecision.PENDING) {
                         throw new BusinessValidationException("CANDIDATE_HAS_PENDING_FIELDS", "CANDIDATE_HAS_PENDING_FIELDS: Field " + fieldPath + " is PENDING");
                     }
-
-                    // 2. Check for rejected or revision required
-                    if (approval != null && (approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.REVISION_REQUIRED || approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.REJECTED)) {
-                        throw new BusinessValidationException("CANDIDATE_HAS_REJECTED_FIELDS", "CANDIDATE_HAS_REJECTED_FIELDS: Field " + fieldPath + " is " + approval.getStatus());
-                    }
-                    if (approval == null && fr != null && (fr.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.REJECTED || fr.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW)) {
-                        throw new BusinessValidationException("CANDIDATE_HAS_REJECTED_FIELDS", "CANDIDATE_HAS_REJECTED_FIELDS: Field " + fieldPath + " is " + fr.getManagerReviewStatus());
-                    }
-
-                    // 3. Confirm approved
-                    boolean isApproved = (approval != null && approval.getStatus() == com.apms.common.enums.FieldApprovalStatus.APPROVED)
-                            || (fr != null && fr.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED);
-                    if (!isApproved) {
-                        throw new BusinessValidationException("CANDIDATE_HAS_PENDING_FIELDS", "CANDIDATE_HAS_PENDING_FIELDS: Field " + fieldPath + " has not been approved");
+                    if (decisionForField == EffectiveFieldDecision.CHANGES_REQUESTED) {
+                        throw new BusinessValidationException("CANDIDATE_HAS_REJECTED_FIELDS", "CANDIDATE_HAS_REJECTED_FIELDS: Field " + fieldPath + " is CHANGES_REQUESTED");
                     }
                 }
             } else {

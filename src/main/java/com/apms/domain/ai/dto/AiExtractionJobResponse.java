@@ -25,4 +25,6 @@ public class AiExtractionJobResponse {
     private String errorMessage;
     private LocalDateTime startedAt;
     private LocalDateTime completedAt;
+    private LocalDateTime cancelledAt;
+    private Long cancelledBy;
 }

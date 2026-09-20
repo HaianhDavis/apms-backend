@@ -263,4 +263,19 @@ public class CandidateController {
         return ResponseEntity.ok(ApiResponse.success(
                 candidateService.sendBackCandidate(candidateId, currentUser.getId()), "Candidate sent back for revision successfully"));
     }
+
+    // ─────────────────────────────────────────────
+    // POST /api/v1/projects/{projectId}/candidates/{candidateId}/review/bulk-approve
+    // ─────────────────────────────────────────────
+    @PostMapping("/projects/{projectId}/candidates/{candidateId}/review/bulk-approve")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> bulkApproveCandidateFields(
+            @PathVariable Long projectId,
+            @PathVariable String candidateId,
+            @RequestBody(required = false) com.apms.domain.candidate.dto.BulkApproveFieldsRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(ApiResponse.success(
+                candidateService.bulkApproveCandidateFields(String.valueOf(projectId), candidateId, request != null ? request.getFieldPaths() : null, currentUser.getId()),
+                "Pending candidate fields approved successfully"));
+    }
 }

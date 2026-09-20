@@ -4,5 +4,6 @@ public enum AiExtractionJobStatus {
     PENDING,
     PROCESSING,
     COMPLETED,
-    FAILED
+    FAILED,
+    CANCELLED
 }

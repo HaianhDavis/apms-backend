@@ -449,6 +449,12 @@ public class DocumentService {
     public Page<ImportJobResponse> getTaskImportJobs(Long projectId, Long taskId, boolean includeHidden, Pageable pageable) {
         validateProjectExists(projectId);
 
+        ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + taskId));
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new BusinessValidationException("Task does not belong to the specified project");
+        }
+
         java.util.List<RawDocument> rawDocs;
         if (!includeHidden) {
             rawDocs = rawDocumentRepository.findByProjectIdAndTaskIdAndIsHiddenFalse(String.valueOf(projectId), String.valueOf(taskId));
@@ -460,13 +466,42 @@ public class DocumentService {
             return Page.empty(pageable);
         }
 
+        boolean isContractTask = isPartnerContractTask(taskId);
         java.util.List<String> linkedRawDocIds = rawDocs.stream()
-                .filter(rawDoc -> taskId == null || isPartnerContractTask(taskId) || !isPartnerContractRawDocument(rawDoc))
+                .filter(rawDoc -> isContractTask || !isPartnerContractRawDocument(rawDoc))
                 .map(RawDocument::getId)
                 .toList();
 
+        if (linkedRawDocIds.isEmpty()) {
+            return Page.empty(pageable);
+        }
+
         return importJobRepository.findByProject_IdAndRawDocumentIdIn(projectId, linkedRawDocIds, pageable)
                 .map(this::toImportJobResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public DocumentDownload getTaskDocumentDownload(Long projectId, Long taskId, String rawDocumentId) {
+        validateProjectExists(projectId);
+
+        ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + taskId));
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new BusinessValidationException("Task does not belong to the specified project");
+        }
+
+        RawDocument rawDoc = rawDocumentRepository.findById(rawDocumentId)
+                .orElseThrow(() -> new ResourceNotFoundException("RawDocument not found: " + rawDocumentId));
+
+        if (!String.valueOf(projectId).equals(rawDoc.getProjectId())) {
+            throw new BusinessValidationException("Document does not belong to the specified project");
+        }
+
+        if (rawDoc.getTaskId() == null || !rawDoc.getTaskId().equals(String.valueOf(taskId))) {
+            throw new BusinessValidationException("Document does not belong to the specified task");
+        }
+
+        return toDocumentDownload(rawDoc);
     }
 
     @Transactional(readOnly = true)
@@ -502,6 +537,39 @@ public class DocumentService {
 
     @Transactional
     public void deleteDocument(Long projectId, Long taskId, String rawDocumentId, Long currentUserId) {
+        if (projectId != null) {
+            validateProjectExists(projectId);
+        }
+
+        if (taskId != null) {
+            ProjectTask task = projectTaskRepository.findById(taskId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + taskId));
+
+            if (projectId != null && !task.getProject().getId().equals(projectId)) {
+                throw new BusinessValidationException("Task does not belong to the specified project");
+            }
+
+            if (task.getStatus() == com.apms.common.enums.TaskStatus.IN_REVIEW ||
+                task.getStatus() == com.apms.common.enums.TaskStatus.DONE ||
+                task.getStatus() == com.apms.common.enums.TaskStatus.CANCELLED) {
+                throw new BusinessValidationException("Cannot delete document while task is in review, completed, or cancelled.");
+            }
+
+            if (currentUserId != null) {
+                com.apms.domain.user.Account user = accountRepository.findById(currentUserId)
+                        .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
+                boolean isManager = user.getRoles().stream().anyMatch(r -> r == com.apms.common.enums.SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+                boolean isSystemAdmin = user.getRoles().stream().anyMatch(r -> r == com.apms.common.enums.SystemRole.SYSTEM_ADMIN);
+                boolean isOwner = user.getRoles().stream().anyMatch(r -> r == com.apms.common.enums.SystemRole.BUSINESS_OWNER);
+
+                if (!isManager && !isSystemAdmin && !isOwner) {
+                    if (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(currentUserId)) {
+                        throw new AccessDeniedException("Staff can only delete documents from tasks assigned to them");
+                    }
+                }
+            }
+        }
+
         RawDocument rawDoc = rawDocumentRepository.findById(rawDocumentId)
                 .orElseThrow(() -> new ResourceNotFoundException("RawDocument not found"));
 
@@ -509,22 +577,22 @@ public class DocumentService {
             throw new BusinessValidationException("Document does not belong to the specified project");
         }
 
-        Long resolvedTaskId = taskId;
-        if (resolvedTaskId == null && StringUtils.hasText(rawDoc.getTaskId())) {
-            try {
-                resolvedTaskId = Long.parseLong(rawDoc.getTaskId());
-            } catch (NumberFormatException ignored) {}
-        }
-        final Long effectiveTaskId = resolvedTaskId;
-
-        if (effectiveTaskId != null) {
-            ProjectTask task = projectTaskRepository.findById(effectiveTaskId)
-                    .orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + effectiveTaskId));
-
-            if (task.getStatus() == com.apms.common.enums.TaskStatus.IN_REVIEW ||
-                task.getStatus() == com.apms.common.enums.TaskStatus.DONE ||
-                task.getStatus() == com.apms.common.enums.TaskStatus.CANCELLED) {
-                throw new BusinessValidationException("Cannot delete document while task is in review, completed, or cancelled.");
+        if (taskId != null) {
+            if (rawDoc.getTaskId() == null || !rawDoc.getTaskId().equals(String.valueOf(taskId))) {
+                throw new BusinessValidationException("Document does not belong to the specified task");
+            }
+        } else {
+            if (StringUtils.hasText(rawDoc.getTaskId())) {
+                try {
+                    Long docTaskId = Long.parseLong(rawDoc.getTaskId());
+                    projectTaskRepository.findById(docTaskId).ifPresent(t -> {
+                        if (t.getStatus() == com.apms.common.enums.TaskStatus.IN_REVIEW ||
+                            t.getStatus() == com.apms.common.enums.TaskStatus.DONE ||
+                            t.getStatus() == com.apms.common.enums.TaskStatus.CANCELLED) {
+                            throw new BusinessValidationException("Cannot delete document while task is in review, completed, or cancelled.");
+                        }
+                    });
+                } catch (NumberFormatException ignored) {}
             }
         }
 
@@ -536,7 +604,7 @@ public class DocumentService {
         rawDoc.getMetadata().setUpdatedAt(LocalDateTime.now());
         rawDocumentRepository.save(rawDoc);
 
-        log.info("User {} soft-deleted document {} for project {} task {}", currentUserId, rawDocumentId, projectId, effectiveTaskId);
+        log.info("User {} soft-deleted document {} for project {} task {}", currentUserId, rawDocumentId, projectId, taskId);
     }
 
     private void validateProjectExists(Long projectId) {
@@ -554,9 +622,8 @@ public class DocumentService {
         }
 
         if (task.getTaskType() != com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION
-                && task.getTaskType() != com.apms.common.enums.TaskType.FINANCIAL_RESEARCH
-                && task.getTaskType() != com.apms.common.enums.TaskType.PARTNER_CONTRACT_COLLECTION) {
-            throw new com.apms.common.exception.BusinessValidationException("Task-linked document uploads are only supported for COMPANY_DATA_PREPARATION, FINANCIAL_RESEARCH, or PARTNER_CONTRACT_COLLECTION via this endpoint.");
+                && task.getTaskType() != com.apms.common.enums.TaskType.FINANCIAL_RESEARCH) {
+            throw new com.apms.common.exception.BusinessValidationException("Task-linked document uploads are only supported for COMPANY_DATA_PREPARATION or FINANCIAL_RESEARCH via this endpoint.");
         }
 
         com.apms.common.enums.TaskStatus status = task.getStatus();

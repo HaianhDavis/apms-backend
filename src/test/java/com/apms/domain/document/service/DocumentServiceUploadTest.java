@@ -236,4 +236,159 @@ public class DocumentServiceUploadTest {
         verify(rawDocumentRepository, never()).findByProjectId(anyString());
         verify(rawDocumentRepository, never()).findByProjectIdAndIsHiddenFalse(anyString());
     }
+
+    @Test
+    void getTaskImportJobs_preservesIncludeHidden_false() {
+        when(rawDocumentRepository.findByProjectIdAndTaskIdAndIsHiddenFalse("1", "10"))
+                .thenReturn(java.util.List.of(RawDocument.builder().id("r1").build()));
+        when(importJobRepository.findByProject_IdAndRawDocumentIdIn(eq(1L), any(), any()))
+                .thenReturn(org.springframework.data.domain.Page.empty());
+
+        documentService.getTaskImportJobs(1L, 10L, false, org.springframework.data.domain.Pageable.unpaged());
+
+        verify(rawDocumentRepository).findByProjectIdAndTaskIdAndIsHiddenFalse("1", "10");
+        verify(rawDocumentRepository, never()).findByProjectIdAndTaskId("1", "10");
+    }
+
+    @Test
+    void getTaskImportJobs_preservesIncludeHidden_true() {
+        when(rawDocumentRepository.findByProjectIdAndTaskId("1", "10"))
+                .thenReturn(java.util.List.of(RawDocument.builder().id("r1").build()));
+        when(importJobRepository.findByProject_IdAndRawDocumentIdIn(eq(1L), any(), any()))
+                .thenReturn(org.springframework.data.domain.Page.empty());
+
+        documentService.getTaskImportJobs(1L, 10L, true, org.springframework.data.domain.Pageable.unpaged());
+
+        verify(rawDocumentRepository).findByProjectIdAndTaskId("1", "10");
+        verify(rawDocumentRepository, never()).findByProjectIdAndTaskIdAndIsHiddenFalse("1", "10");
+    }
+
+    @Test
+    void getTaskImportJobs_taskFromDifferentProject_rejected() {
+        Project otherProject = new Project();
+        otherProject.setId(99L);
+        task.setProject(otherProject);
+
+        assertThrows(BusinessValidationException.class,
+                () -> documentService.getTaskImportJobs(1L, 10L, false, org.springframework.data.domain.Pageable.unpaged()));
+    }
+
+    // ─────────────────────────────────────────────
+    // TASK-SCOPED DOWNLOAD TESTS
+    // ─────────────────────────────────────────────
+
+    @Test
+    void getTaskDocumentDownload_success_forTaskDoc() {
+        RawDocument doc = RawDocument.builder()
+                .id("raw-doc-1")
+                .projectId("1")
+                .taskId("10")
+                .storage(RawDocument.Storage.builder().provider("LOCAL").path("path/test.pdf").mimeType("application/pdf").build())
+                .source(RawDocument.Source.builder().fileName("test.pdf").build())
+                .build();
+        when(rawDocumentRepository.findById("raw-doc-1")).thenReturn(Optional.of(doc));
+        when(storageService.loadAsResource("path/test.pdf")).thenReturn(mock(org.springframework.core.io.Resource.class));
+
+        DocumentService.DocumentDownload download = documentService.getTaskDocumentDownload(1L, 10L, "raw-doc-1");
+        assertNotNull(download);
+        assertEquals("test.pdf", download.fileName());
+    }
+
+    @Test
+    void getTaskDocumentDownload_crossTaskLeakage_rejected() {
+        // Document belongs to Task 20 (e.g. Financial), requested via Task 10 (Basic Company)
+        RawDocument financialDoc = RawDocument.builder()
+                .id("fin-doc")
+                .projectId("1")
+                .taskId("20")
+                .build();
+        when(rawDocumentRepository.findById("fin-doc")).thenReturn(Optional.of(financialDoc));
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class,
+                () -> documentService.getTaskDocumentDownload(1L, 10L, "fin-doc"));
+        assertTrue(ex.getMessage().contains("Document does not belong to the specified task"));
+    }
+
+    @Test
+    void getTaskDocumentDownload_legacyDocWithoutTaskId_rejected() {
+        // Legacy document with taskId == null must be excluded from task download
+        RawDocument legacyDoc = RawDocument.builder()
+                .id("legacy-doc")
+                .projectId("1")
+                .taskId(null)
+                .build();
+        when(rawDocumentRepository.findById("legacy-doc")).thenReturn(Optional.of(legacyDoc));
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class,
+                () -> documentService.getTaskDocumentDownload(1L, 10L, "legacy-doc"));
+        assertTrue(ex.getMessage().contains("Document does not belong to the specified task"));
+    }
+
+    @Test
+    void getTaskDocumentDownload_projectMismatch_rejected() {
+        RawDocument doc = RawDocument.builder()
+                .id("raw-doc-other-project")
+                .projectId("2")
+                .taskId("10")
+                .build();
+        when(rawDocumentRepository.findById("raw-doc-other-project")).thenReturn(Optional.of(doc));
+
+        assertThrows(BusinessValidationException.class,
+                () -> documentService.getTaskDocumentDownload(1L, 10L, "raw-doc-other-project"));
+    }
+
+    // ─────────────────────────────────────────────
+    // TASK-SCOPED DELETE TESTS
+    // ─────────────────────────────────────────────
+
+    @Test
+    void deleteDocument_withTaskId_success_forTaskDoc() {
+        RawDocument doc = RawDocument.builder()
+                .id("raw-doc-1")
+                .projectId("1")
+                .taskId("10")
+                .isHidden(false)
+                .build();
+        when(rawDocumentRepository.findById("raw-doc-1")).thenReturn(Optional.of(doc));
+
+        documentService.deleteDocument(1L, 10L, "raw-doc-1", 100L);
+
+        assertTrue(doc.getIsHidden());
+        verify(rawDocumentRepository).save(doc);
+    }
+
+    @Test
+    void deleteDocument_withTaskId_crossTaskLeakage_rejected() {
+        // Doc belongs to Task 20, tried to delete through Task 10
+        RawDocument doc = RawDocument.builder()
+                .id("doc-task-20")
+                .projectId("1")
+                .taskId("20")
+                .build();
+        when(rawDocumentRepository.findById("doc-task-20")).thenReturn(Optional.of(doc));
+
+        BusinessValidationException ex = assertThrows(BusinessValidationException.class,
+                () -> documentService.deleteDocument(1L, 10L, "doc-task-20", 100L));
+        assertTrue(ex.getMessage().contains("Document does not belong to the specified task"));
+        verify(rawDocumentRepository, never()).save(any());
+    }
+
+    @Test
+    void deleteDocument_withTaskId_unassignedStaff_rejected() {
+        Account otherStaff = new Account();
+        otherStaff.setId(101L);
+        otherStaff.setRoles(Set.of(SystemRole.BUSINESS_DEVELOPMENT_STAFF));
+        when(accountRepository.findById(101L)).thenReturn(Optional.of(otherStaff));
+
+        assertThrows(AccessDeniedException.class,
+                () -> documentService.deleteDocument(1L, 10L, "any-doc", 101L));
+    }
+
+    @Test
+    void deleteDocument_withTaskId_inReviewStatus_rejected() {
+        task.setStatus(TaskStatus.IN_REVIEW);
+
+        assertThrows(BusinessValidationException.class,
+                () -> documentService.deleteDocument(1L, 10L, "any-doc", 100L));
+    }
 }

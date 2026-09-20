@@ -6,5 +6,6 @@ public enum AiExtractionJobStage {
     MERGING,
     CREATING_CANDIDATE,
     COMPLETED,
-    FAILED
+    FAILED,
+    CANCELLED
 }

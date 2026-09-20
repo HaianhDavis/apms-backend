@@ -16,6 +16,7 @@ public class CandidateResponse {
     private java.util.List<String> sourceDocumentIds;
     private Integer candidateOrder;
     private Integer revisionNumber;
+    private Integer currentReviewRound;
     private String draftName;
     private Integer draftSequence;
     private CandidateStatus status;

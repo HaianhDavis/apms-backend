@@ -19,6 +19,8 @@ import com.apms.domain.document.RawDocument;
 import com.apms.domain.document.repository.mongo.RawDocumentRepository;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.repository.sql.ProjectRepository;
+import com.apms.domain.user.Account;
+import com.apms.domain.user.repository.sql.AccountRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
@@ -26,6 +28,7 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,6 +58,7 @@ public class TaskExtractionOrchestrator {
     private final AiExtractionQualityService qualityService;
     private final com.apms.domain.project.repository.sql.ProjectTaskRepository projectTaskRepository;
     private final ProjectRepository projectRepository;
+    private final AccountRepository accountRepository;
     private final DocumentCompanyConsistencyValidator companyConsistencyValidator;
     private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
     private final com.apms.domain.financial.service.DocumentCompanyMatcher companyMatcher;
@@ -68,7 +72,7 @@ public class TaskExtractionOrchestrator {
 
     @Transactional
     public String startExtractionJob(Long projectId, Long taskId, List<String> rawDocumentIds, Long creatorId) {
-        validateResearchExtractionRequest(projectId, taskId, rawDocumentIds);
+        validateResearchExtractionRequest(projectId, taskId, rawDocumentIds, creatorId);
 
         String jobId = UUID.randomUUID().toString();
         AiExtractionJob job = AiExtractionJob.builder()
@@ -84,21 +88,28 @@ public class TaskExtractionOrchestrator {
         return jobId;
     }
 
-    private void validateResearchExtractionRequest(Long projectId, Long taskId, List<String> rawDocumentIds) {
+    private void validateResearchExtractionRequest(Long projectId, Long taskId, List<String> rawDocumentIds, Long currentUserId) {
+        // 1. project/task relationship & 2. current-user access
+        validateTaskAccess(projectId, taskId, currentUserId);
+
         com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found: " + taskId));
-        if (!task.getProject().getId().equals(projectId)) {
-            throw new com.apms.common.exception.BusinessValidationException("Task does not belong to the specified project");
-        }
-        if (task.getTaskType() != com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION) {
-            throw new com.apms.common.exception.BusinessValidationException("AI extraction is only allowed for COMPANY_DATA_PREPARATION research documents");
+
+        if (task.getStatus() == com.apms.common.enums.TaskStatus.DONE ||
+            task.getStatus() == com.apms.common.enums.TaskStatus.CANCELLED ||
+            task.getStatus() == com.apms.common.enums.TaskStatus.IN_REVIEW) {
+            throw new com.apms.common.exception.BusinessValidationException("Cannot run extraction while task is in review, completed, or cancelled.");
         }
 
+        // 3. each raw document exists, 4. rawDocument.projectId == projectId, 5. rawDocument.taskId == taskId
         for (String rawDocId : rawDocumentIds) {
             RawDocument doc = rawDocumentRepository.findById(rawDocId)
                     .orElseThrow(() -> new ResourceNotFoundException("RawDocument not found: " + rawDocId));
             if (!String.valueOf(projectId).equals(doc.getProjectId())) {
                 throw new com.apms.common.exception.BusinessValidationException("RawDocument does not belong to this project: " + rawDocId);
+            }
+            if (doc.getTaskId() == null || !String.valueOf(taskId).equals(doc.getTaskId())) {
+                throw new com.apms.common.exception.BusinessValidationException("RawDocument does not belong to this task: " + rawDocId);
             }
             if (doc.getSource() != null && SOURCE_TYPE_PARTNER_CONTRACT.equalsIgnoreCase(doc.getSource().getType())) {
                 throw new com.apms.common.exception.BusinessValidationException("Partner contract documents cannot be used for AI company extraction: " + rawDocId);
@@ -170,6 +181,11 @@ public class TaskExtractionOrchestrator {
         AiExtractionJob job = jobRepository.findById(jobId)
                 .orElseThrow(() -> new ResourceNotFoundException("Job not found: " + jobId));
 
+        if (isJobCancelled(jobId)) {
+            log.info("Extraction job {} was cancelled before processing started", jobId);
+            return;
+        }
+
         try {
             job.setStatus(AiExtractionJobStatus.PROCESSING);
             job.setStage(AiExtractionJobStage.PREPARING);
@@ -182,6 +198,11 @@ public class TaskExtractionOrchestrator {
             StringBuilder combinedText = new StringBuilder();
             int processed = 0;
             for (String rawDocId : rawDocumentIds) {
+                if (isJobCancelled(jobId)) {
+                    log.info("Extraction job {} was cancelled during document preparation", jobId);
+                    return;
+                }
+
                 RawDocument doc = rawDocumentRepository.findById(rawDocId)
                         .orElseThrow(() -> new ResourceNotFoundException("RawDocument not found: " + rawDocId));
                 String text = extractTextFromDocument(doc);
@@ -198,12 +219,23 @@ public class TaskExtractionOrchestrator {
                 jobRepository.save(job);
             }
 
+            if (isJobCancelled(jobId)) {
+                log.info("Extraction job {} was cancelled before AI extraction", jobId);
+                return;
+            }
+
             job.setStage(AiExtractionJobStage.EXTRACTING);
             job.setProgress(30);
             jobRepository.save(job);
 
             // 2. Call Gemini
             RawExtractionOutput output = geminiProvider.extract(combinedText.toString());
+
+            if (isJobCancelled(jobId)) {
+                log.info("Extraction job {} was cancelled after AI extraction", jobId);
+                return;
+            }
+
             Project project = projectRepository.findById(projectId)
                     .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + projectId));
 
@@ -293,6 +325,11 @@ public class TaskExtractionOrchestrator {
                 });
             }
 
+            if (isJobCancelled(jobId)) {
+                log.info("Extraction job {} was cancelled before creating candidate", jobId);
+                return;
+            }
+
             job.setStage(AiExtractionJobStage.CREATING_CANDIDATE);
             job.setProgress(90);
             jobRepository.save(job);
@@ -343,6 +380,11 @@ public class TaskExtractionOrchestrator {
                             .build())
                     .build();
 
+            if (isJobCancelled(jobId)) {
+                log.info("Extraction job {} was cancelled before candidate save", jobId);
+                return;
+            }
+
             CompanyCandidate saved = candidateRepository.save(candidate);
             log.info("Created Candidate {} from multi-document extraction", saved.getId());
 
@@ -368,6 +410,12 @@ public class TaskExtractionOrchestrator {
             }
             
             try {
+                AiExtractionJob latestJob = jobRepository.findById(jobId).orElse(job);
+                if (latestJob.getStatus() == AiExtractionJobStatus.CANCELLED) {
+                    log.info("Extraction job {} was cancelled, skipping failure status update", jobId);
+                    return;
+                }
+
                 job.setStatus(AiExtractionJobStatus.FAILED);
                 job.setStage(AiExtractionJobStage.FAILED);
                  
@@ -388,6 +436,90 @@ public class TaskExtractionOrchestrator {
     public AiExtractionJob getExtractionJob(String jobId) {
         return jobRepository.findById(jobId)
                 .orElseThrow(() -> new ResourceNotFoundException("Job not found: " + jobId));
+    }
+
+    public AiExtractionJob getExtractionJob(Long projectId, Long taskId, String jobId, Long currentUserId) {
+        validateTaskAccess(projectId, taskId, currentUserId);
+        AiExtractionJob job = getExtractionJob(jobId);
+        if (!job.getTaskId().equals(taskId)) {
+            throw new com.apms.common.exception.BusinessValidationException("Job does not belong to task: " + taskId);
+        }
+        return job;
+    }
+
+    public AiExtractionJob getLatestExtractionJob(Long projectId, Long taskId, Long currentUserId) {
+        validateTaskAccess(projectId, taskId, currentUserId);
+        return jobRepository.findFirstByTaskIdOrderByCreatedAtDesc(taskId).orElse(null);
+    }
+
+    public AiExtractionJob getActiveExtractionJob(Long projectId, Long taskId, Long currentUserId) {
+        validateTaskAccess(projectId, taskId, currentUserId);
+        return jobRepository.findFirstByTaskIdAndStatusInOrderByCreatedAtDesc(
+                taskId, List.of(AiExtractionJobStatus.PENDING, AiExtractionJobStatus.PROCESSING))
+                .orElse(null);
+    }
+
+    public AiExtractionJob cancelExtractionJob(Long projectId, Long taskId, String jobId, Long currentUserId) {
+        validateTaskAccess(projectId, taskId, currentUserId);
+        AiExtractionJob job = getExtractionJob(jobId);
+        if (!job.getTaskId().equals(taskId)) {
+            throw new com.apms.common.exception.BusinessValidationException("Job does not belong to task: " + taskId);
+        }
+        if (job.getStatus() == AiExtractionJobStatus.COMPLETED) {
+            throw new com.apms.common.exception.BusinessValidationException("Cannot cancel a completed extraction job");
+        }
+        if (job.getStatus() == AiExtractionJobStatus.FAILED) {
+            throw new com.apms.common.exception.BusinessValidationException("Cannot cancel a failed extraction job");
+        }
+        if (job.getStatus() == AiExtractionJobStatus.CANCELLED) {
+            return job;
+        }
+
+        job.setStatus(AiExtractionJobStatus.CANCELLED);
+        job.setStage(AiExtractionJobStage.CANCELLED);
+        job.setCancelledAt(LocalDateTime.now());
+        job.setCancelledBy(currentUserId);
+        log.info("Extraction job {} cancelled by user {}", jobId, currentUserId);
+        return jobRepository.save(job);
+    }
+
+    private boolean isJobCancelled(String jobId) {
+        return jobRepository.findById(jobId)
+                .map(j -> j.getStatus() == AiExtractionJobStatus.CANCELLED)
+                .orElse(false);
+    }
+
+    public void validateTaskAccess(Long projectId, Long taskId, Long currentUserId) {
+        Project project = projectRepository.findById(projectId)
+                .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + projectId));
+        com.apms.domain.project.ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found: " + taskId));
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new com.apms.common.exception.BusinessValidationException("Task does not belong to the specified project");
+        }
+        if (task.getTaskType() != com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION) {
+            throw new com.apms.common.exception.BusinessValidationException("AI extraction is only allowed for COMPANY_DATA_PREPARATION research documents");
+        }
+
+        if (currentUserId != null) {
+            boolean isMember = projectRepository.existsByIdAndMembersAccountId(projectId, currentUserId)
+                    || projectRepository.existsByIdAndCreatedByAccountId(projectId, currentUserId);
+            if (!isMember) {
+                throw new AccessDeniedException("User is not a member of this project");
+            }
+
+            Account user = accountRepository.findById(currentUserId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
+            boolean isManager = user.getRoles().stream().anyMatch(r -> r == com.apms.common.enums.SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+            boolean isSystemAdmin = user.getRoles().stream().anyMatch(r -> r == com.apms.common.enums.SystemRole.SYSTEM_ADMIN);
+            boolean isOwner = user.getRoles().stream().anyMatch(r -> r == com.apms.common.enums.SystemRole.BUSINESS_OWNER);
+
+            if (!isManager && !isSystemAdmin && !isOwner) {
+                if (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(currentUserId)) {
+                    throw new AccessDeniedException("Staff can only access tasks assigned to them");
+                }
+            }
+        }
     }
 
     private String evidenceTextForSource(String evidenceText, String fileName, String rawDocumentId) {

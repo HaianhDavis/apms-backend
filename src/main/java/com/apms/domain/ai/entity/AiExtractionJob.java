@@ -49,4 +49,8 @@ public class AiExtractionJob {
     private LocalDateTime startedAt;
 
     private LocalDateTime completedAt;
+
+    private LocalDateTime cancelledAt;
+
+    private Long cancelledBy;
 }

@@ -58,14 +58,6 @@ class CandidateManualWorkflowTest {
 
     private CompanyCandidate createManualCandidate(String id, String legalName, String tradeName, String website) {
         Map<String, ExtractionFieldResult> fieldResults = new HashMap<>();
-        for (String field : CandidateService.STAFF_REVIEWABLE_FIELDS) {
-            fieldResults.put(com.apms.domain.ai.service.FieldKeyCodec.encode(field),
-                    ExtractionFieldResult.builder()
-                            .fieldName(field)
-                            .staffReviewStatus(StaffFieldReviewStatus.PENDING)
-                            .managerReviewStatus(ExtractionReviewStatus.PENDING)
-                            .build());
-        }
 
         return CompanyCandidate.builder()
                 .id(id)
@@ -136,6 +128,17 @@ class CandidateManualWorkflowTest {
                         .extractionMethod("SPRING_AI")
                         .build())
                 .build();
+    }
+
+    private void approveAllCanonicalFields(CompanyCandidate candidate) {
+        List<FieldApprovalRecord> list = new ArrayList<>();
+        for (String path : CandidateService.STAFF_REVIEWABLE_FIELDS) {
+            list.add(FieldApprovalRecord.builder()
+                    .fieldPath(path)
+                    .status(FieldApprovalStatus.APPROVED)
+                    .build());
+        }
+        candidate.setFieldApprovals(list);
     }
 
     @Test
@@ -268,23 +271,13 @@ class CandidateManualWorkflowTest {
     }
 
     @Test
-    @DisplayName("Test 8: Manager approves partial manual candidate with only submitted fields approved, unprovided fields require no approval")
+    @DisplayName("Test 8: Manager approves partial manual candidate with canonical fields decided, unprovided fields accepted")
     void test8_managerApprovesPartialManualCandidate() {
         CompanyCandidate candidate = createManualCandidate("cand-8", "Eta Corp", "Eta", "https://eta.com");
         candidate.setStatus(CandidateStatus.PENDING_REVIEW);
 
-        // Only submitted fields have field approval records
-        FieldApprovalRecord tradeNameRecord = FieldApprovalRecord.builder()
-                .fieldPath("identity.tradeName")
-                .status(FieldApprovalStatus.APPROVED)
-                .build();
-        FieldApprovalRecord websiteRecord = FieldApprovalRecord.builder()
-                .fieldPath("contact.website")
-                .status(FieldApprovalStatus.APPROVED)
-                .build();
-        candidate.setFieldApprovals(new ArrayList<>(List.of(tradeNameRecord, websiteRecord)));
+        approveAllCanonicalFields(candidate);
 
-        // Unprovided fields (e.g. emails, phones, industries, etc.) have NO FieldApprovalRecord
         when(candidateRepository.findById("cand-8")).thenReturn(Optional.of(candidate));
         when(candidateRepository.save(any(CompanyCandidate.class))).thenAnswer(inv -> inv.getArgument(0));
 
@@ -330,7 +323,7 @@ class CandidateManualWorkflowTest {
     }
 
     @Test
-    @DisplayName("Test 10: Manual partial data - 7 submitted approved, 6 unprovided optional -> approval succeeds")
+    @DisplayName("Test 10: Manual partial data - 7 submitted approved, 6 unprovided accepted -> approval succeeds")
     void test10_manualPartialDataSevenApprovedSixUnprovidedSucceeds() {
         CompanyCandidate candidate = createManualCandidate("cand-10", "Alpha Corp", "Alpha Trade", "https://alpha.com");
         candidate.setStatus(CandidateStatus.PENDING_REVIEW);
@@ -342,18 +335,7 @@ class CandidateManualWorkflowTest {
         candidate.getBusiness().getIndustries().add("Software");
         candidate.getBusiness().getMarkets().add("Global");
 
-        // Exactly 7 submitted reviewable fields:
-        // 1. identity.tradeName, 2. contact.website, 3. contact.address, 4. contact.emails, 5. contact.phones,
-        // 6. business.industries, 7. business.markets
-        List<FieldApprovalRecord> approvals = new ArrayList<>();
-        List<String> submittedPaths = List.of(
-                "identity.tradeName", "contact.website", "contact.address", "contact.emails", "contact.phones",
-                "business.industries", "business.markets"
-        );
-        for (String path : submittedPaths) {
-            approvals.add(FieldApprovalRecord.builder().fieldPath(path).status(FieldApprovalStatus.APPROVED).build());
-        }
-        candidate.setFieldApprovals(approvals);
+        approveAllCanonicalFields(candidate);
 
         when(candidateRepository.findById("cand-10")).thenReturn(Optional.of(candidate));
         when(candidateRepository.save(any(CompanyCandidate.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -408,17 +390,11 @@ class CandidateManualWorkflowTest {
         candidate.getBusiness().getIndustries().add("Software");
         candidate.getBusiness().getMarkets().add("Global");
 
-        List<FieldApprovalRecord> approvals = new ArrayList<>();
-        List<String> approvedPaths = List.of(
-                "identity.tradeName", "contact.website", "contact.emails", "contact.phones",
-                "business.industries"
-        );
-        for (String path : approvedPaths) {
-            approvals.add(FieldApprovalRecord.builder().fieldPath(path).status(FieldApprovalStatus.APPROVED).build());
-        }
-        // 1 field REJECTED
-        approvals.add(FieldApprovalRecord.builder().fieldPath("business.markets").status(FieldApprovalStatus.REJECTED).build());
-        candidate.setFieldApprovals(approvals);
+        approveAllCanonicalFields(candidate);
+        candidate.getFieldApprovals().stream()
+                .filter(a -> "business.markets".equals(a.getFieldPath()))
+                .findFirst()
+                .ifPresent(a -> a.setStatus(FieldApprovalStatus.REJECTED));
 
         when(candidateRepository.findById("cand-12")).thenReturn(Optional.of(candidate));
 
@@ -434,9 +410,7 @@ class CandidateManualWorkflowTest {
         CompanyCandidate candidate = createManualCandidate("cand-13", "Only Legal Corp", "Only Trade", null);
         candidate.setStatus(CandidateStatus.PENDING_REVIEW);
 
-        candidate.setFieldApprovals(new ArrayList<>(List.of(
-                FieldApprovalRecord.builder().fieldPath("identity.tradeName").status(FieldApprovalStatus.APPROVED).build()
-        )));
+        approveAllCanonicalFields(candidate);
 
         when(candidateRepository.findById("cand-13")).thenReturn(Optional.of(candidate));
         when(candidateRepository.save(any(CompanyCandidate.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -478,19 +452,16 @@ class CandidateManualWorkflowTest {
         candidate.setStatus(CandidateStatus.PENDING_REVIEW);
         candidate.setRevisionNumber(2);
 
-        FieldApprovalRecord tradeNameRecord = FieldApprovalRecord.builder()
-                .fieldPath("identity.tradeName")
-                .status(FieldApprovalStatus.APPROVED)
-                .reviewedRevision(1)
-                .build();
-        FieldApprovalRecord websiteRecord = FieldApprovalRecord.builder()
-                .fieldPath("contact.website")
-                .status(FieldApprovalStatus.APPROVED)
-                .reviewedRevision(2)
-                .previousStatus(FieldApprovalStatus.REVISION_REQUIRED)
-                .previousComment("Fix URL")
-                .build();
-        candidate.setFieldApprovals(new ArrayList<>(List.of(tradeNameRecord, websiteRecord)));
+        approveAllCanonicalFields(candidate);
+        // Website has round 1 history preserved
+        candidate.getFieldApprovals().stream()
+                .filter(a -> "contact.website".equals(a.getFieldPath()))
+                .findFirst()
+                .ifPresent(a -> {
+                    a.setReviewedRevision(2);
+                    a.setPreviousStatus(FieldApprovalStatus.REVISION_REQUIRED);
+                    a.setPreviousComment("Fix URL");
+                });
 
         when(candidateRepository.findById("cand-15")).thenReturn(Optional.of(candidate));
         when(candidateRepository.save(any(CompanyCandidate.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -513,20 +484,16 @@ class CandidateManualWorkflowTest {
         candidate.setStatus(CandidateStatus.PENDING_REVIEW);
         candidate.setRevisionNumber(3);
 
-        FieldApprovalRecord websiteRecord = FieldApprovalRecord.builder()
-                .fieldPath("contact.website")
-                .status(FieldApprovalStatus.APPROVED)
-                .reviewedRevision(3)
-                .previousStatus(FieldApprovalStatus.REVISION_REQUIRED)
-                .previousReviewedRevision(1)
-                .previousComment("Round 1 rejection")
-                .build();
-        FieldApprovalRecord tradeNameRecord = FieldApprovalRecord.builder()
-                .fieldPath("identity.tradeName")
-                .status(FieldApprovalStatus.APPROVED)
-                .reviewedRevision(1)
-                .build();
-        candidate.setFieldApprovals(new ArrayList<>(List.of(websiteRecord, tradeNameRecord)));
+        approveAllCanonicalFields(candidate);
+        candidate.getFieldApprovals().stream()
+                .filter(a -> "contact.website".equals(a.getFieldPath()))
+                .findFirst()
+                .ifPresent(a -> {
+                    a.setReviewedRevision(3);
+                    a.setPreviousStatus(FieldApprovalStatus.REVISION_REQUIRED);
+                    a.setPreviousReviewedRevision(1);
+                    a.setPreviousComment("Round 1 rejection");
+                });
 
         when(candidateRepository.findById("cand-16")).thenReturn(Optional.of(candidate));
         when(candidateRepository.save(any(CompanyCandidate.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -548,27 +515,14 @@ class CandidateManualWorkflowTest {
         CompanyCandidate candidate = createManualCandidate("cand-17", "Zeta Corp", "Zeta", "https://zeta.com");
         candidate.setStatus(CandidateStatus.PENDING_REVIEW);
 
-        FieldApprovalRecord tradeNameRecord = FieldApprovalRecord.builder()
-                .fieldPath("identity.tradeName")
-                .status(FieldApprovalStatus.APPROVED)
-                .build();
-        FieldApprovalRecord websiteRecord = FieldApprovalRecord.builder()
-                .fieldPath("contact.website")
-                .status(FieldApprovalStatus.APPROVED)
-                .build();
+        approveAllCanonicalFields(candidate);
 
         // Stale non-reviewable record from legacy behavior
         FieldApprovalRecord financialRecord = FieldApprovalRecord.builder()
                 .fieldPath("financial")
                 .status(FieldApprovalStatus.PENDING_REVIEW)
                 .build();
-        // Stale record for an optional field that was NOT provided
-        FieldApprovalRecord unprovidedProductRecord = FieldApprovalRecord.builder()
-                .fieldPath("business.products")
-                .status(FieldApprovalStatus.PENDING_REVIEW)
-                .build();
-
-        candidate.setFieldApprovals(new ArrayList<>(List.of(tradeNameRecord, websiteRecord, financialRecord, unprovidedProductRecord)));
+        candidate.getFieldApprovals().add(financialRecord);
 
         when(candidateRepository.findById("cand-17")).thenReturn(Optional.of(candidate));
         when(candidateRepository.save(any(CompanyCandidate.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -582,31 +536,27 @@ class CandidateManualWorkflowTest {
 
         assertThat(response).isNotNull();
         assertThat(candidate.getStatus()).isEqualTo(CandidateStatus.APPROVED);
-        // Stale records remain stored for history/audit, not deleted
-        assertThat(candidate.getFieldApprovals()).hasSize(4);
+        // Stale record remains stored for history/audit, not deleted
+        assertThat(candidate.getFieldApprovals()).hasSize(14);
     }
 
     @Test
-    @DisplayName("Test 18: Optional cleared field - Round 1 Website rejected, Round 2 Staff clears Website -> does not block approval")
+    @DisplayName("Test 18: Optional cleared field - Round 1 Website rejected, Round 2 Staff clears Website -> manager approves unprovided field")
     void test18_optionalClearedFieldDoesNotBlockApproval() {
-        // Staff provided legalName, tradeName, but Website was CLEARED in Round 2 (null)
         CompanyCandidate candidate = createManualCandidate("cand-18", "Omega Corp", "Omega Trade", null);
         candidate.setStatus(CandidateStatus.PENDING_REVIEW);
         candidate.setRevisionNumber(2);
 
-        FieldApprovalRecord tradeNameRecord = FieldApprovalRecord.builder()
-                .fieldPath("identity.tradeName")
-                .status(FieldApprovalStatus.APPROVED)
-                .build();
-        // Website was rejected in Round 1 and cleared in Round 2; approval record remains with REVISION_REQUIRED
-        FieldApprovalRecord websiteRecord = FieldApprovalRecord.builder()
-                .fieldPath("contact.website")
-                .status(FieldApprovalStatus.REVISION_REQUIRED)
-                .comment("Fix website")
-                .reviewedRevision(1)
-                .build();
-
-        candidate.setFieldApprovals(new ArrayList<>(List.of(tradeNameRecord, websiteRecord)));
+        approveAllCanonicalFields(candidate);
+        candidate.getFieldApprovals().stream()
+                .filter(a -> "contact.website".equals(a.getFieldPath()))
+                .findFirst()
+                .ifPresent(a -> {
+                    a.setStatus(FieldApprovalStatus.APPROVED); // Manager accepts that website is now unprovided
+                    a.setPreviousStatus(FieldApprovalStatus.REVISION_REQUIRED);
+                    a.setPreviousComment("Fix website");
+                    a.setReviewedRevision(2);
+                });
 
         when(candidateRepository.findById("cand-18")).thenReturn(Optional.of(candidate));
         when(candidateRepository.save(any(CompanyCandidate.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -620,7 +570,82 @@ class CandidateManualWorkflowTest {
 
         assertThat(response).isNotNull();
         assertThat(candidate.getStatus()).isEqualTo(CandidateStatus.APPROVED);
-        // Website historical record remains preserved
-        assertThat(candidate.getFieldApprovals()).anyMatch(a -> "contact.website".equals(a.getFieldPath()) && a.getStatus() == FieldApprovalStatus.REVISION_REQUIRED);
+    }
+
+    @Test
+    @DisplayName("Test 19: Mandatory Round-2 Test - Round 1 (12 approved + 1 changes requested) -> Round 2 (revised field approved) -> Candidate approved")
+    void test19_round2_multiRoundIsolationAndApproval() {
+        CompanyCandidate candidate = createManualCandidate("cand-19", "Omega Tech Corp", null, null);
+        when(candidateRepository.findById("cand-19")).thenReturn(Optional.of(candidate));
+        when(candidateRepository.save(any(CompanyCandidate.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Project project = new Project();
+        project.setId(10L);
+        project.setTargetCompanyName("Omega Tech Corp");
+        project.setTargetRelationshipType(RelationshipType.SUPPLIER_OF);
+        when(projectRepository.findById(10L)).thenReturn(Optional.of(project));
+
+        // 1. Staff submits candidate (first submission)
+        candidateService.submitCandidate("cand-19", 100L);
+        assertThat(candidate.getStatus()).isEqualTo(CandidateStatus.PENDING_REVIEW);
+        assertThat(candidate.getFieldApprovals()).hasSize(13);
+        assertThat(candidate.getFieldApprovals()).allMatch(a -> a.getStatus() == FieldApprovalStatus.PENDING_REVIEW);
+
+        // 2. Manager reviews Round 1:
+        // Approves 12 fields
+        List<String> twelveFields = CandidateService.STAFF_REVIEWABLE_FIELDS.stream()
+                .filter(p -> !"identity.tradeName".equals(p))
+                .toList();
+        candidateService.bulkApproveCandidateFields("10", "cand-19", twelveFields, 200L);
+
+        // Requests changes for identity.tradeName with mandatory reason
+        CandidateReviewRequest reviewReq = new CandidateReviewRequest();
+        Map<String, CandidateReviewRequest.FieldReviewUpdate> fields = new HashMap<>();
+        CandidateReviewRequest.FieldReviewUpdate tradeNameUpdate = new CandidateReviewRequest.FieldReviewUpdate();
+        tradeNameUpdate.setManagerReviewStatus(ExtractionReviewStatus.NEEDS_REVIEW);
+        tradeNameUpdate.setManagerReviewComment("Please provide official trade name");
+        fields.put("identity.tradeName", tradeNameUpdate);
+        reviewReq.setFields(fields);
+        candidateService.reviewCandidate("10", "cand-19", reviewReq, 200L);
+
+        // Attempting to approve candidate fails because tradeName is CHANGES_REQUESTED
+        assertThatThrownBy(() -> candidateService.approveCandidate("cand-19", new ApproveCandidateRequest(), 200L))
+                .isInstanceOf(BusinessValidationException.class)
+                .hasMessageContaining("CHANGES_REQUESTED");
+
+        // 3. Manager sends back candidate
+        candidateService.sendBackCandidate("cand-19", 200L);
+        assertThat(candidate.getStatus()).isEqualTo(CandidateStatus.REVISION_REQUIRED);
+
+        // 4. Staff updates tradeName and resubmits for Round 2
+        candidate.getIdentity().setTradeName("Omega Tech");
+        candidate.setChangedFieldPaths(List.of("identity.tradeName"));
+        candidateService.submitCandidate("cand-19", 100L);
+
+        assertThat(candidate.getStatus()).isEqualTo(CandidateStatus.PENDING_REVIEW);
+        assertThat(candidate.getRevisionNumber()).isEqualTo(2);
+
+        // Multi-round isolation check: the 12 previously approved fields remain APPROVED!
+        for (FieldApprovalRecord record : candidate.getFieldApprovals()) {
+            if ("identity.tradeName".equals(record.getFieldPath())) {
+                assertThat(record.getStatus()).isEqualTo(FieldApprovalStatus.PENDING_REVIEW);
+            } else {
+                assertThat(record.getStatus()).isEqualTo(FieldApprovalStatus.APPROVED);
+            }
+        }
+
+        // 5. Manager reviews Round 2: approves identity.tradeName
+        Map<String, CandidateReviewRequest.FieldReviewUpdate> round2Fields = new HashMap<>();
+        CandidateReviewRequest.FieldReviewUpdate tradeNameApproved = new CandidateReviewRequest.FieldReviewUpdate();
+        tradeNameApproved.setManagerReviewStatus(ExtractionReviewStatus.ACCEPTED);
+        round2Fields.put("identity.tradeName", tradeNameApproved);
+        CandidateReviewRequest round2Req = new CandidateReviewRequest();
+        round2Req.setFields(round2Fields);
+        candidateService.reviewCandidate("10", "cand-19", round2Req, 200L);
+
+        // 6. Final candidate approval succeeds
+        CandidateResponse response = candidateService.approveCandidate("cand-19", new ApproveCandidateRequest(), 200L);
+        assertThat(response).isNotNull();
+        assertThat(candidate.getStatus()).isEqualTo(CandidateStatus.APPROVED);
     }
 }

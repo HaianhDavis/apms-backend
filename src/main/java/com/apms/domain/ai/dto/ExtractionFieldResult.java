@@ -19,6 +19,7 @@ public class ExtractionFieldResult {
     private String evidenceText;
     private java.util.List<String> sourceDocumentIds;
     private Integer pageNumber;
+    private Boolean provided;
 
     @Builder.Default
     private ExtractionValidationStatus validationStatus = ExtractionValidationStatus.NOT_CHECKED;
@@ -43,4 +44,9 @@ public class ExtractionFieldResult {
     private Object previousSubmittedValue;
     private Integer previousReviewedRevision;
     private Integer changedInRevision;
+
+    private FieldReviewDecision currentDecision;
+    private FieldReviewDecision previousDecision;
+    private Integer submittedRound;
+    private Boolean resubmittedInCurrentRound;
 }

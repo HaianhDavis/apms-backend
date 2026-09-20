@@ -40,15 +40,50 @@ public class TaskExtractionController {
         return ResponseEntity.ok(ApiResponse.success(response, "AI extraction job started."));
     }
 
+    @GetMapping("/latest")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<AiExtractionJobResponse>> getLatestExtractionJob(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        AiExtractionJob job = orchestrator.getLatestExtractionJob(projectId, taskId, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(job != null ? mapToResponse(job) : null, "Latest extraction job retrieved."));
+    }
+
+    @GetMapping("/active")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<AiExtractionJobResponse>> getActiveExtractionJob(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        AiExtractionJob job = orchestrator.getActiveExtractionJob(projectId, taskId, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(job != null ? mapToResponse(job) : null, "Active extraction job retrieved."));
+    }
+
     @GetMapping("/{jobId}")
     @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<AiExtractionJobResponse>> getExtractionJobStatus(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
-            @PathVariable String jobId) {
-            
-        AiExtractionJob job = orchestrator.getExtractionJob(jobId);
+            @PathVariable String jobId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        AiExtractionJob job = orchestrator.getExtractionJob(projectId, taskId, jobId, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(mapToResponse(job), "Job status retrieved."));
+    }
+
+    @PostMapping("/{jobId}/cancel")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<AiExtractionJobResponse>> cancelExtractionJob(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String jobId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        AiExtractionJob job = orchestrator.cancelExtractionJob(projectId, taskId, jobId, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(mapToResponse(job), "AI extraction job cancelled."));
     }
 
     private AiExtractionJobResponse mapToResponse(AiExtractionJob job) {
@@ -64,6 +99,8 @@ public class TaskExtractionController {
                 .errorMessage(job.getErrorMessage())
                 .startedAt(job.getStartedAt())
                 .completedAt(job.getCompletedAt())
+                .cancelledAt(job.getCancelledAt())
+                .cancelledBy(job.getCancelledBy())
                 .build();
     }
 

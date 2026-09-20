@@ -12,7 +12,7 @@ public enum ExtractionReviewStatus {
         if (value == null) {
             return null;
         }
-        if ("CHANGES_REQUESTED".equalsIgnoreCase(value) || "REVISION_REQUIRED".equalsIgnoreCase(value)) {
+        if ("CHANGES_REQUESTED".equalsIgnoreCase(value) || "REQUEST_CHANGES".equalsIgnoreCase(value) || "REVISION_REQUIRED".equalsIgnoreCase(value)) {
             return NEEDS_REVIEW;
         }
         if ("APPROVED".equalsIgnoreCase(value)) {
