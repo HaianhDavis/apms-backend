@@ -118,7 +118,7 @@ public class OwnerAiAssistantService {
         }
 
         return switch (intent) {
-            case GREETING -> List.of(
+            case GREETING, THANK_YOU, CAPABILITIES -> List.of(
                     "Who are our current partners?",
                     "Who are our current competitors?",
                     "What risks should I pay attention to?",

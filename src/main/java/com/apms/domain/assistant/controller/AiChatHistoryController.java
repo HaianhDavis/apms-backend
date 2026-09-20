@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -46,6 +47,16 @@ public class AiChatHistoryController {
         return ResponseEntity.ok(ApiResponse.success(messages));
     }
 
+    @DeleteMapping("/ai-assistant/sessions/{sessionId}")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Void>> deleteProjectAssistantSession(
+            @PathVariable String sessionId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        aiChatHistoryService.deleteProjectAssistantSession(currentUser.getId(), sessionId);
+        return ResponseEntity.ok(ApiResponse.success(null, "Session deleted successfully"));
+    }
+
     // ─────────────────────────────────────────────
     // OWNER ASSISTANT HISTORY
     // ─────────────────────────────────────────────
@@ -67,5 +78,15 @@ public class AiChatHistoryController {
 
         List<AiChatMessageResponse> messages = aiChatHistoryService.getOwnerAssistantMessages(currentUser.getId(), sessionId);
         return ResponseEntity.ok(ApiResponse.success(messages));
+    }
+
+    @DeleteMapping("/owner/ai-assistant/sessions/{sessionId}")
+    @PreAuthorize("hasRole('BUSINESS_OWNER')")
+    public ResponseEntity<ApiResponse<Void>> deleteOwnerAssistantSession(
+            @PathVariable String sessionId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        aiChatHistoryService.deleteOwnerAssistantSession(currentUser.getId(), sessionId);
+        return ResponseEntity.ok(ApiResponse.success(null, "Session deleted successfully"));
     }
 }

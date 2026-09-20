@@ -94,10 +94,27 @@ public class GraphService {
         }
     }
 
-    private void mergeCompanyNode(CompanyProfile profile) {
-        String name = profile.getIdentity() != null && profile.getIdentity().getLegalName() != null ? profile.getIdentity().getLegalName() : "Unknown";
+    public void mergeCompanyNode(CompanyProfile profile) {
+        if (profile == null || !StringUtils.hasText(profile.getCompanyId())) {
+            return;
+        }
+
+        String name = CompanyProfile.getCanonicalDisplayName(profile, "Unknown");
+        if ("Unknown Company".equals(name) || !StringUtils.hasText(name)) {
+            name = "Unknown";
+        }
+        name = name.trim();
+
         String industry = profile.getBusiness() != null && profile.getBusiness().getIndustries() != null && !profile.getBusiness().getIndustries().isEmpty()
                 ? profile.getBusiness().getIndustries().get(0) : "Unknown";
+
+        mergeCompanyNode(profile.getCompanyId().trim(), name, industry);
+    }
+
+    public void mergeCompanyNode(String companyId, String name, String industry) {
+        if (!StringUtils.hasText(companyId)) return;
+        String canonicalName = StringUtils.hasText(name) ? name.trim() : "Unknown";
+        String canonicalIndustry = StringUtils.hasText(industry) ? industry.trim() : "Unknown";
 
         String cypher = """
             MERGE (c:Company {companyId: $companyId})
@@ -107,13 +124,13 @@ public class GraphService {
 
         neo4jClient.query(cypher)
                 .bindAll(Map.of(
-                        "companyId", profile.getCompanyId(),
-                        "name", name,
-                        "industry", industry
+                        "companyId", companyId.trim(),
+                        "name", canonicalName,
+                        "industry", canonicalIndustry
                 ))
                 .run();
 
-        log.info("Merged CompanyNode: companyId={}, name={}", profile.getCompanyId(), name);
+        log.info("Merged CompanyNode: companyId={}, name={}", companyId.trim(), canonicalName);
     }
 
     public void createRelationship(String sourceCompanyId, String targetCompanyId, String relType, String confirmedBy, String projectId, String candidateId, double confidenceScore) {
@@ -131,6 +148,18 @@ public class GraphService {
     public void createRelationship(CompanyRelationshipDto dto) {
         if (!dto.getRelationshipType().matches("^[A-Z_]+$")) {
             throw new IllegalArgumentException("Invalid relationship type: " + dto.getRelationshipType());
+        }
+
+        if (profileRepository != null && StringUtils.hasText(dto.getTargetCompanyId())) {
+            CompanyProfile targetProfile = profileRepository.findByCompanyId(dto.getTargetCompanyId().trim())
+                    .or(() -> profileRepository.findById(dto.getTargetCompanyId().trim()))
+                    .orElse(null);
+            if (targetProfile != null) {
+                mergeCompanyNode(targetProfile);
+            }
+        }
+        if (ownerOrganizationService != null && StringUtils.hasText(dto.getSourceCompanyId())) {
+            ownerOrganizationService.findOwnerCompanyProfile().ifPresent(this::mergeCompanyNode);
         }
 
         if (dto.getStartDate() != null && dto.getEndDate() != null && dto.getEndDate().isBefore(dto.getStartDate())) {
@@ -184,20 +213,71 @@ public class GraphService {
             throw new IllegalArgumentException("Invalid relationship type: " + newRelType);
         }
 
+        String canonicalSourceId = StringUtils.hasText(sourceCompanyId)
+                ? sourceCompanyId.trim()
+                : (ownerOrganizationService != null ? ownerOrganizationService.getOwnerCompanyId() : "");
+
+        String canonicalTargetId = targetCompanyId != null ? targetCompanyId.trim() : "";
+        List<String> targetIds = new ArrayList<>();
+        if (StringUtils.hasText(canonicalTargetId)) {
+            targetIds.add(canonicalTargetId);
+        }
+
+        if (profileRepository != null && StringUtils.hasText(targetCompanyId)) {
+            CompanyProfile profile = profileRepository.findByCompanyId(targetCompanyId)
+                    .or(() -> profileRepository.findById(targetCompanyId))
+                    .orElse(null);
+            if (profile != null) {
+                mergeCompanyNode(profile);
+                if (StringUtils.hasText(profile.getCompanyId())) {
+                    String pCompanyId = profile.getCompanyId().trim();
+                    if (!targetIds.contains(pCompanyId)) {
+                        targetIds.add(pCompanyId);
+                    }
+                    canonicalTargetId = pCompanyId;
+                }
+                if (StringUtils.hasText(profile.getId()) && !targetIds.contains(profile.getId().trim())) {
+                    targetIds.add(profile.getId().trim());
+                }
+            }
+        }
+
+        // Delete ONLY supported APMS business relationship edges between this exact pair in either direction
         String deleteCypher = """
-            MATCH (c1:Company {companyId: $sourceCompanyId})-[r]->(c2:Company {companyId: $targetCompanyId})
+            MATCH (c1:Company {companyId: $sourceCompanyId})
+            MATCH (c2:Company)
+            WHERE c2.companyId IN $targetIds
+            MATCH (c1)-[r:PARTNER_WITH|COMPETITOR_OF|POTENTIAL_PARTNER_OF|SUPPLIER_OF|CUSTOMER_OF]-(c2)
             DELETE r
             """;
 
         neo4jClient.query(deleteCypher)
                 .bindAll(Map.of(
-                        "sourceCompanyId", sourceCompanyId,
-                        "targetCompanyId", targetCompanyId
+                        "sourceCompanyId", canonicalSourceId,
+                        "targetIds", targetIds
                 ))
                 .run();
 
-        createRelationship(sourceCompanyId, targetCompanyId, newRelType, confirmedBy, null, null, 1.0);
-        log.info("Replaced relationships from {} to {} with type {}", sourceCompanyId, targetCompanyId, newRelType);
+        // Ensure owner node and target node exist, then create exactly ONE canonical target relationship
+        String createCypher = String.format("""
+            MERGE (c1:Company {companyId: $sourceCompanyId})
+            MERGE (c2:Company {companyId: $targetCompanyId})
+            MERGE (c1)-[r:%s]->(c2)
+            SET r.confidenceScore = 1.0,
+                r.confirmedBy = $confirmedBy,
+                r.confirmedAt = coalesce(r.confirmedAt, datetime())
+            """, newRelType);
+
+        neo4jClient.query(createCypher)
+                .bindAll(Map.of(
+                        "sourceCompanyId", canonicalSourceId,
+                        "targetCompanyId", canonicalTargetId,
+                        "confirmedBy", StringUtils.hasText(confirmedBy) ? confirmedBy : "SYSTEM"
+                ))
+                .run();
+
+        log.info("Replaced relationships between owner {} and target {} (targetIds: {}) with type {}",
+                canonicalSourceId, canonicalTargetId, targetIds, newRelType);
     }
 
     public void updateRelationshipMetadata(String sourceCompanyId, String targetCompanyId, String relType, CompanyRelationshipDto metadataDto) {
@@ -409,6 +489,7 @@ public class GraphService {
         java.util.List<String> types = neo4jClient.query(cypher)
                 .bindAll(java.util.Map.of("sourceCompanyId", sourceCompanyId, "targetCompanyId", targetCompanyId))
                 .fetchAs(String.class)
+                .mappedBy((typeSystem, record) -> record.get("relType").asString())
                 .all()
                 .stream().toList();
         

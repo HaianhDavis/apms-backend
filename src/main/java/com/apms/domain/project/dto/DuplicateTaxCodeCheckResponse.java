@@ -12,4 +12,8 @@ public class DuplicateTaxCodeCheckResponse {
     private Long projectId;
     private String companyName;
     private String taxCode;
+    private boolean hasOpenProject;
+    private Long openProjectId;
+    private String openProjectName;
+    private com.apms.common.enums.ProjectStatus openProjectStatus;
 }

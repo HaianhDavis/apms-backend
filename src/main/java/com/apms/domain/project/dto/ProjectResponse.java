@@ -22,6 +22,8 @@ public class ProjectResponse {
     private String targetCompanyName;
     private String targetCompanyTaxCode;
     private RelationshipType targetRelationshipType;
+    private RelationshipType currentRelationshipType;
+    private RelationshipType originalRelationshipType;
     private String description;
     private String objective;
     private ProjectStatus status;

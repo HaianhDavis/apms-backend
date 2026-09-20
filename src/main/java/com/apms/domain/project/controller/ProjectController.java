@@ -92,6 +92,19 @@ public class ProjectController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    // GET /api/v1/projects/check-open-project
+    @GetMapping("/check-open-project")
+    @Operation(summary = "Check whether an unfinished project already exists for the company")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<ApiResponse<com.apms.domain.project.dto.OpenProjectCheckResponse>> checkOpenProject(
+            @RequestParam(value = "companyProfileId", required = false) String companyProfileId,
+            @RequestParam(value = "taxCode", required = false) String taxCode,
+            @RequestParam(value = "excludeProjectId", required = false) Long excludeProjectId) {
+        com.apms.domain.project.dto.OpenProjectCheckResponse response =
+                projectService.checkOpenProjectForCompany(companyProfileId, taxCode, excludeProjectId);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
     // ─────────────────────────────────────────────
     // GET /api/v1/projects/{id}
     // Role: All authenticated
@@ -173,7 +186,7 @@ public class ProjectController {
     // Role: BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#id))")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or ((hasRole('BUSINESS_DEVELOPMENT_MANAGER') or hasRole('BUSINESS_OWNER')) and @projectSecurity.isMember(#id))")
     public ResponseEntity<ApiResponse<Void>> deleteProject(
             @PathVariable Long id,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {

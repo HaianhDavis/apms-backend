@@ -45,5 +45,6 @@ public class ProfileResponse {
     private Boolean canEditProfile;
     private Boolean canManageVisibility;
     private Boolean canPublish;
+    private String publishBlockReason;
     private Boolean canAccessRelationshipCloseness;
 }

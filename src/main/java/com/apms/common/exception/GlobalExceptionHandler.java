@@ -45,10 +45,15 @@ public class GlobalExceptionHandler {
             body.put("details", ex.getDetails());
         }
 
-        // Use 422 for document company validation errors, 400 for others
-        HttpStatus status = ex.getErrorCode() != null && ex.getErrorCode().startsWith("DOCUMENT_COMPANY")
-                ? HttpStatus.UNPROCESSABLE_ENTITY
-                : HttpStatus.BAD_REQUEST;
+        // Use 422 for document company validation errors, 409 for conflict, 400 for others
+        HttpStatus status = HttpStatus.BAD_REQUEST;
+        if (ex.getErrorCode() != null) {
+            if (ex.getErrorCode().startsWith("DOCUMENT_COMPANY")) {
+                status = HttpStatus.UNPROCESSABLE_ENTITY;
+            } else if ("COMPANY_HAS_OPEN_PROJECT".equals(ex.getErrorCode()) || "PROJECT_NOT_DRAFT".equals(ex.getErrorCode())) {
+                status = HttpStatus.CONFLICT;
+            }
+        }
 
         return ResponseEntity.status(status).body(body);
     }

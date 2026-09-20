@@ -55,8 +55,10 @@ public class CompanyMonitoringService {
 
     @Transactional
     public CompanyMonitoringAssignmentResponse assignMonitor(CompanyMonitoringAssignmentRequest request, Long currentManagerId) {
-        CompanyProfile companyProfile = companyProfileRepository.findById(request.getCompanyProfileId())
-                .orElseThrow(() -> new IllegalArgumentException("Company Profile not found"));
+        CompanyProfile companyProfile = findProfile(request.getCompanyProfileId());
+        if (companyProfile == null) {
+            throw new IllegalArgumentException("Company Profile not found");
+        }
 
         Account manager = accountRepository.findById(currentManagerId)
                 .orElseThrow(() -> new IllegalArgumentException("Manager account not found"));
@@ -107,8 +109,10 @@ public class CompanyMonitoringService {
         Account manager = accountRepository.findById(currentManagerId)
                 .orElseThrow(() -> new IllegalArgumentException("Manager account not found"));
 
-        CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId())
-                .orElseThrow(() -> new IllegalArgumentException("Company Profile not found"));
+        CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
+        if (companyProfile == null) {
+            throw new IllegalArgumentException("Company Profile not found");
+        }
                 
         enforceResponsibleManager(companyProfile, manager);
 
@@ -138,8 +142,10 @@ public class CompanyMonitoringService {
         Account manager = accountRepository.findById(currentManagerId)
                 .orElseThrow(() -> new IllegalArgumentException("Manager account not found"));
 
-        CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId())
-                .orElseThrow(() -> new IllegalArgumentException("Company Profile not found"));
+        CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
+        if (companyProfile == null) {
+            throw new IllegalArgumentException("Company Profile not found");
+        }
                 
         enforceResponsibleManager(companyProfile, manager);
 
@@ -194,7 +200,7 @@ public class CompanyMonitoringService {
             }
 
             if ((proposal.getOriginalValues() == null || proposal.getOriginalValues().isEmpty()) && proposal.getChangedFieldPaths() != null) {
-                CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId()).orElse(null);
+                CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
                 if (companyProfile != null && versionService != null) {
                     Map<String, Object> snapshot = versionService.createSnapshotMap(companyProfile);
                     if (snapshot != null) {
@@ -238,7 +244,7 @@ public class CompanyMonitoringService {
         AuditAction action = request.getResult() == MonitoringReviewResult.NO_CHANGE ? AuditAction.MONITORING_REVIEW_COMPLETED : AuditAction.MONITORING_UPDATE_PROPOSED;
         auditLogService.log(staff.getId(), action, "CompanyMonitoringAssignment", assignment.getId().toString(), "Submitted review for assignment " + assignmentId);
 
-        CompanyProfile companyProfile = companyProfileRepository.findById(review.getCompanyProfileId()).orElse(null);
+        CompanyProfile companyProfile = findProfile(review.getCompanyProfileId());
         Map<String, CompanyProfile> profilesByKey = companyProfile != null ? profileKeyMap(List.of(companyProfile)) : Map.of();
         Map<String, String> updateProposalStatuses = StringUtils.hasText(review.getUpdateProposalId()) && submittedUpdateProposalStatus != null
                 ? Map.of(review.getUpdateProposalId(), submittedUpdateProposalStatus)
@@ -288,7 +294,7 @@ public class CompanyMonitoringService {
     public CompanyMonitoringAssignmentResponse getAssignment(Long id) {
         CompanyMonitoringAssignment assignment = assignmentRepository.findById(id)
                 .orElseThrow(() -> new com.apms.common.exception.ResourceNotFoundException("Assignment not found"));
-        CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId()).orElse(null);
+        CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
         return mapToResponse(assignment, companyProfile);
     }
 
@@ -296,7 +302,7 @@ public class CompanyMonitoringService {
     public Optional<CompanyMonitoringAssignmentResponse> getAssignmentByCompany(String companyProfileId) {
         return assignmentRepository.findByCompanyProfileId(companyProfileId)
                 .map(assignment -> {
-                    CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId()).orElse(null);
+                    CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
                     return mapToResponse(assignment, companyProfile);
                 });
     }
@@ -305,7 +311,7 @@ public class CompanyMonitoringService {
     public Page<CompanyMonitoringAssignmentResponse> getMyAssignments(Long staffId, Pageable pageable) {
         return assignmentRepository.findByAssignedStaffId(staffId, pageable)
                 .map(assignment -> {
-                    CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId()).orElse(null);
+                    CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
                     return mapToResponse(assignment, companyProfile);
                 });
     }
@@ -314,7 +320,7 @@ public class CompanyMonitoringService {
     public Page<CompanyMonitoringAssignmentResponse> getAllAssignments(Pageable pageable) {
         return assignmentRepository.findAll(pageable)
                 .map(assignment -> {
-                    CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId()).orElse(null);
+                    CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
                     return mapToResponse(assignment, companyProfile);
                 });
     }
@@ -324,7 +330,7 @@ public class CompanyMonitoringService {
         LocalDateTime now = LocalDateTime.now();
         return assignmentRepository.findDueOrOverdueActiveAssignments(now, pageable)
                 .map(assignment -> {
-                    CompanyProfile companyProfile = companyProfileRepository.findById(assignment.getCompanyProfileId()).orElse(null);
+                    CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
                     return mapToResponse(assignment, companyProfile);
                 });
     }
@@ -558,5 +564,12 @@ public class CompanyMonitoringService {
             }
         }
         return current;
+    }
+
+    private CompanyProfile findProfile(String idOrCompanyId) {
+        if (!StringUtils.hasText(idOrCompanyId)) return null;
+        return companyProfileRepository.findById(idOrCompanyId)
+                .or(() -> companyProfileRepository.findByCompanyId(idOrCompanyId))
+                .orElse(null);
     }
 }

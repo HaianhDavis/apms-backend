@@ -184,4 +184,46 @@ public class ProfileController {
         Long actorId = currentUser != null ? currentUser.getId() : null;
         return ResponseEntity.ok(ApiResponse.success(profileService.updateVisibility(companyId, request, actorId)));
     }
+
+    // ─────────────────────────────────────────────
+    // GET /api/v1/profiles/visibility-management
+    // Role: SYSTEM_ADMIN, BUSINESS_DEVELOPMENT_MANAGER
+    // ─────────────────────────────────────────────
+    @GetMapping("/visibility-management")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<ApiResponse<PageResponse<ProfileResponse>>> getVisibilityManagementProfiles(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) com.apms.common.enums.ProfileVisibility visibility,
+            @RequestParam(required = false) String eligibility,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        boolean isAdmin = currentUser != null && currentUser.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+        Long managerId = currentUser != null ? currentUser.getId() : null;
+
+        return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
+                profileService.getVisibilityManagementProfiles(
+                        keyword, visibility, eligibility, managerId, isAdmin, PageRequest.of(page, size))
+        )));
+    }
+
+    // ─────────────────────────────────────────────
+    // GET /api/v1/profiles/visibility-management/summary
+    // Role: SYSTEM_ADMIN, BUSINESS_DEVELOPMENT_MANAGER
+    // ─────────────────────────────────────────────
+    @GetMapping("/visibility-management/summary")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<ApiResponse<com.apms.domain.profile.dto.ProfileVisibilitySummaryDto>> getVisibilityManagementSummary(
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        boolean isAdmin = currentUser != null && currentUser.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+        Long managerId = currentUser != null ? currentUser.getId() : null;
+
+        return ResponseEntity.ok(ApiResponse.success(
+                profileService.getVisibilitySummary(managerId, isAdmin)
+        ));
+    }
 }

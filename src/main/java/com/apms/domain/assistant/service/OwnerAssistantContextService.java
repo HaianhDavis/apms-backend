@@ -249,7 +249,18 @@ public class OwnerAssistantContextService {
         } else if (intent == OwnerIntent.OUT_OF_SCOPE) {
             directAnswer = "I can help with your APMS business ecosystem, company relationships, risks, opportunities, company intelligence, and strategic insights.\nThis question is outside the available Owner AI scope.";
         } else if (intent == OwnerIntent.GREETING) {
-            directAnswer = "Hello! I can help you with your business ecosystem, partners, competitors, relationships, risks, opportunities, public company information, and strategic insights.";
+            directAnswer = "Hi! How can I help you today? You can ask me about your business ecosystem, partners, competitors, relationships, risks, opportunities, or strategic insights.";
+        } else if (intent == OwnerIntent.THANK_YOU) {
+            directAnswer = "You're welcome! Let me know if you'd like help with your business ecosystem, company relationships, risks, or strategic insights.";
+        } else if (intent == OwnerIntent.CAPABILITIES) {
+            directAnswer = "I can help you with:\n" +
+                    "- Business ecosystem overview (partners, competitors, customers, suppliers)\n" +
+                    "- Company profiles and company comparisons\n" +
+                    "- Relationship closeness and connection analysis\n" +
+                    "- Company risks, weaknesses, and threats\n" +
+                    "- Growth opportunities and strategic recommendations\n" +
+                    "- Partner priorities and relationship monitoring\n" +
+                    "- Approved company profiles and public company news";
         } else if (intent == OwnerIntent.RISKS && targetProfile != null) {
             StringBuilder sb = new StringBuilder("Risks for " + resolveCompanyName(targetProfile) + ":\n\n");
             if (targetProfile.getInsights() != null) {
@@ -738,18 +749,26 @@ public class OwnerAssistantContextService {
                intent == OwnerIntent.INTERNAL_NEWS_PROTECTED ||
                intent == OwnerIntent.OUT_OF_SCOPE ||
                intent == OwnerIntent.GREETING ||
+               intent == OwnerIntent.THANK_YOU ||
+               intent == OwnerIntent.CAPABILITIES ||
                intent == OwnerIntent.RELATIONSHIP_CLOSENESS ||
                intent == OwnerIntent.COMPANY_PROFILE ||
                intent == OwnerIntent.COMPANY_PUBLIC_NEWS;
     }
 
     private OwnerIntent detectOwnerIntent(String question) {
-        String lower = question.toLowerCase();
-        String trimmed = lower.replaceAll("[^a-z ]", "").trim();
-        
-        if (trimmed.equals("hi") || trimmed.equals("hello") || trimmed.equals("hey") || trimmed.equals("good morning") || trimmed.equals("thanks") || trimmed.equals("thank you")) {
+        ConversationalIntentDetector.ConversationalIntent conv = ConversationalIntentDetector.detect(question);
+        if (conv == ConversationalIntentDetector.ConversationalIntent.GREETING) {
             return OwnerIntent.GREETING;
         }
+        if (conv == ConversationalIntentDetector.ConversationalIntent.THANK_YOU) {
+            return OwnerIntent.THANK_YOU;
+        }
+        if (conv == ConversationalIntentDetector.ConversationalIntent.CAPABILITIES) {
+            return OwnerIntent.CAPABILITIES;
+        }
+
+        String lower = question.toLowerCase();
         
         if (lower.contains("internal news") || lower.contains("internal information") || lower.contains("confidential")) {
             return OwnerIntent.INTERNAL_NEWS_PROTECTED;

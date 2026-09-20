@@ -23,6 +23,7 @@ public class FinancialResearchApprovalHandler implements ProjectTaskSubmissionAp
 
     private final FinancialResearchRepository researchRepository;
     private final AuditLogService auditLogService;
+    private final com.apms.domain.profile.service.CompanyProfileFinancialService companyProfileFinancialService;
 
     @Override
     public boolean supports(SubmissionType submissionType) {
@@ -40,7 +41,12 @@ public class FinancialResearchApprovalHandler implements ProjectTaskSubmissionAp
                 if (reviewNote != null) {
                     res.setReviewReason(reviewNote);
                 }
-                researchRepository.save(res);
+                FinancialResearch saved = researchRepository.save(res);
+                try {
+                    companyProfileFinancialService.promoteFromApprovedResearch(saved);
+                } catch (Exception e) {
+                    log.error("Failed to promote approved financial research {} to canonical profile: {}", saved.getId(), e.getMessage(), e);
+                }
             });
         }
     }

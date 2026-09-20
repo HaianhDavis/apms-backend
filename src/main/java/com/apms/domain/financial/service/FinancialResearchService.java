@@ -70,6 +70,7 @@ public class FinancialResearchService {
     private final CompanyIdentityResolver companyIdentityResolver;
     private final CompanyProfileAccessService companyProfileAccessService;
     private final StaffCompanyScopeEvaluator companyScope;
+    private final com.apms.domain.profile.service.CompanyProfileFinancialService companyProfileFinancialService;
 
     @Autowired
     @Lazy
@@ -1848,8 +1849,15 @@ public class FinancialResearchService {
         recalculateReviewState(research, task, activeSub, reviewerId);
 
         research = researchRepository.save(research);
+        if (research.getStatus() == FinancialResearchStatus.APPROVED) {
+            try {
+                companyProfileFinancialService.promoteFromApprovedResearch(research);
+            } catch (Exception e) {
+                log.error("Failed to promote approved financial research {}: {}", research.getId(), e.getMessage(), e);
+            }
+        }
         String action = request.getStatus() == FinancialReportReviewStatus.APPROVED ? "Approved" : "Requested changes for";
-        auditLogService.log(reviewerId, AuditAction.FINANCIAL_RESEARCH_CHANGES_REQUESTED, "ProjectTask", taskId.toString(), action + " report " + report.getTitle());
+        auditLogService.log(reviewerId, request.getStatus() == FinancialReportReviewStatus.APPROVED ? AuditAction.FINANCIAL_RESEARCH_APPROVED : AuditAction.FINANCIAL_RESEARCH_CHANGES_REQUESTED, "ProjectTask", taskId.toString(), action + " report " + report.getTitle());
         return toResponse(research);
     }
 
