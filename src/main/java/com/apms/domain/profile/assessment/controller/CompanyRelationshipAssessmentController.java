@@ -51,8 +51,60 @@ public class CompanyRelationshipAssessmentController {
         return ResponseEntity.ok(assessmentService.getLiveCommercialEvidence(companyProfileId));
     }
 
+    @PostMapping("/api/v1/company-profiles/{companyProfileId}/relationship-assessments/complete")
+    @Operation(summary = "Manager atomically completes and finalizes a relationship closeness assessment")
+    public ResponseEntity<RelationshipAssessmentResponse> completeDirectAssessment(
+            @PathVariable String companyProfileId,
+            @RequestBody CompleteRelationshipAssessmentRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(assessmentService.completeDirectAssessment(companyProfileId, request, currentUser));
+    }
+
+    @PostMapping("/api/v1/company-profiles/{companyProfileId}/relationship-assessments/owner-adjustment/complete")
+    @Operation(summary = "Business Owner atomically completes and finalizes an assessment adjustment")
+    public ResponseEntity<RelationshipAssessmentResponse> completeDirectOwnerAdjustment(
+            @PathVariable String companyProfileId,
+            @RequestBody CompleteOwnerAdjustmentRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(assessmentService.completeDirectOwnerAdjustment(companyProfileId, request, currentUser));
+    }
+
+    @GetMapping("/api/v1/company-profiles/{companyProfileId}/relationship-assessments/drafts/current")
+    @Operation(summary = "Get current actor's private draft assessment")
+    public ResponseEntity<RelationshipAssessmentDraftResponse> getMyDraft(
+            @PathVariable String companyProfileId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(assessmentService.getMyDraft(companyProfileId, currentUser));
+    }
+
+    @PostMapping("/api/v1/company-profiles/{companyProfileId}/relationship-assessments/drafts")
+    @Operation(summary = "Save or update current actor's private draft")
+    public ResponseEntity<RelationshipAssessmentDraftResponse> saveDraft(
+            @PathVariable String companyProfileId,
+            @RequestBody SaveRelationshipAssessmentDraftRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(assessmentService.saveDraft(companyProfileId, request, currentUser));
+    }
+
+    @DeleteMapping("/api/v1/company-profiles/{companyProfileId}/relationship-assessments/drafts/current")
+    @Operation(summary = "Delete current actor's private draft")
+    public ResponseEntity<Void> deleteMyDraft(
+            @PathVariable String companyProfileId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        assessmentService.deleteMyDraft(companyProfileId, currentUser);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/v1/company-profiles/{companyProfileId}/relationship-assessments/drafts/owner/rebase")
+    @Operation(summary = "Rebase Owner private draft against the latest official assessment")
+    public ResponseEntity<RelationshipAssessmentDraftResponse> rebaseOwnerDraft(
+            @PathVariable String companyProfileId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(assessmentService.rebaseOwnerDraft(companyProfileId, currentUser));
+    }
+
     @PostMapping("/api/v1/company-profiles/{companyProfileId}/relationship-assessments")
-    @Operation(summary = "Create initial draft assessment")
+    @Operation(summary = "Create initial draft assessment (Deprecated/Disabled)")
     public ResponseEntity<RelationshipAssessmentResponse> createDraft(
             @PathVariable String companyProfileId,
             @RequestBody(required = false) CreateRelationshipAssessmentRequest request,

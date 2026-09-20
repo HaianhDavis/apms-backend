@@ -20,10 +20,14 @@ public class RelationshipAssessmentResponse {
     private String companyProfileId;
     private String ownerCompanyProfileId;
     private Integer versionNumber;
+    private Integer majorVersion;
+    private Integer minorRevision;
+    private String formattedVersion;
     private RelationshipAssessmentStatus status;
     private com.apms.domain.profile.assessment.RelationshipAssessmentType assessmentType;
     private Long sourceAssessmentId;
     private Integer sourceVersionNumber;
+    private String sourceFormattedVersion;
     private Boolean isOwnerAdjustment;
     private Long createdByAccountId;
     private String scoringPolicyVersion;
@@ -82,12 +86,17 @@ public class RelationshipAssessmentResponse {
 
     // Owner Final Assessment & Overrides
     private Integer ownerCommercialScore;
+    private String ownerCommercialNote;
     private Integer ownerCooperationScore;
+    private String ownerCooperationNote;
     private Integer ownerStrategicScore;
+    private String ownerStrategicNote;
     private Integer ownerRelationshipNetworkScore;
     private String ownerRelationshipNetworkNote;
     private Integer ownerEngagementScore;
+    private String ownerEngagementNote;
     private Integer ownerQualitativeScore;
+    private String ownerQualitativeNote;
     private Integer ownerTrustScore;
     private String ownerNote;
     private String ownerAdjustmentReason;

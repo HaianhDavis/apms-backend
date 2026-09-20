@@ -1,15 +1,13 @@
 package com.apms.domain.profile.assessment;
 
-import com.apms.common.enums.ProjectStatus;
 import com.apms.common.enums.SystemRole;
 import com.apms.common.exception.BusinessValidationException;
-import org.springframework.security.access.AccessDeniedException;
 import com.apms.domain.audit.service.AuditLogService;
-import com.apms.domain.contract.entity.PartnerContract;
-import com.apms.domain.contract.enums.ContractReviewStatus;
 import com.apms.domain.contract.repository.sql.PartnerContractRepository;
 import com.apms.domain.profile.CompanyProfile;
-import com.apms.domain.profile.assessment.dto.*;
+import com.apms.domain.profile.assessment.dto.CompanyRecentAssessmentSummaryDto;
+import com.apms.domain.profile.assessment.dto.RelationshipAssessmentResponse;
+import com.apms.domain.profile.assessment.dto.UpdateRelationshipAssessmentRequest;
 import com.apms.domain.profile.assessment.policy.RelationshipCommercialScoringPolicy;
 import com.apms.domain.profile.assessment.policy.RelationshipScoreCalculator;
 import com.apms.domain.profile.assessment.repository.CompanyRelationshipAssessmentRepository;
@@ -21,14 +19,14 @@ import com.apms.domain.profile.service.ProfileService;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.security.UserDetailsImpl;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -40,6 +38,8 @@ public class CompanyRelationshipAssessmentServiceTest {
 
     @Mock
     private CompanyRelationshipAssessmentRepository assessmentRepository;
+    @Mock
+    private com.apms.domain.profile.assessment.repository.RelationshipAssessmentDraftRepository relationshipAssessmentDraftRepository;
     @Mock
     private PartnerContractRepository partnerContractRepository;
     @Mock
@@ -75,6 +75,7 @@ public class CompanyRelationshipAssessmentServiceTest {
 
         service = new CompanyRelationshipAssessmentService(
                 assessmentRepository,
+                relationshipAssessmentDraftRepository,
                 partnerContractRepository,
                 companyProfileRepository,
                 ownerOrganizationService,
@@ -122,931 +123,7 @@ public class CompanyRelationshipAssessmentServiceTest {
     }
 
     @Test
-    void testCommercialSnapshotStability_AcrossManagerSubmitAndOwnerFinalize() {
-        // Step 1: Initial contract in DB (1 contract, 1B VND, signed 1 month ago)
-        PartnerContract c1 = PartnerContract.builder()
-                .effectiveDate(LocalDate.now().minusMonths(1))
-                .currency("VND")
-                .totalContractValue(new BigDecimal("1000000000"))
-                .build();
-        when(partnerContractRepository.findByPartnerCompanyIdAndReviewStatus(targetId, ContractReviewStatus.APPROVED))
-                .thenReturn(new ArrayList<>(List.of(c1)));
-
-        // Create Draft
-        when(assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(eq(ownerId), eq(targetId), any()))
-                .thenReturn(false);
-        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdOrderByVersionNumberDesc(ownerId, targetId))
-                .thenReturn(Optional.empty());
-
-        when(assessmentRepository.saveAndFlush(any())).thenAnswer(inv -> {
-            CompanyRelationshipAssessment a = inv.getArgument(0);
-            a.setId(100L);
-            return a;
-        });
-
-        CreateRelationshipAssessmentRequest createReq = CreateRelationshipAssessmentRequest.builder()
-                .commercialAwardedScore(5)
-                .commercialEvidenceNote("Initial commercial evidence")
-                .cooperationScore(5)
-                .cooperationEvidenceNote("Good cooperation")
-                .strategicScore(4)
-                .strategicEvidenceNote("Strategic partner")
-                .relationshipNetworkScore(4)
-                .relationshipNetworkNote("Network contacts")
-                .engagementScore(4)
-                .engagementEvidenceNote("Active engagement")
-                .qualitativeScore(4)
-                .qualitativeEvidenceNote("High quality")
-                .managerNote("Initial draft evaluation")
-                .build();
-
-        RelationshipAssessmentResponse draft = service.createDraft(targetId, createReq, managerUser);
-        assertNotNull(draft);
-        assertEquals(RelationshipAssessmentStatus.DRAFT, draft.getStatus());
-        assertNull(draft.getCommercialScore());
-        assertEquals(5, draft.getCommercialAwardedScore());
-
-        // Step 2: Manager Submits
-        CompanyRelationshipAssessment draftEntity = CompanyRelationshipAssessment.builder()
-                .id(100L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V5")
-                .commercialAwardedScore(5)
-                .commercialScore(null)
-                .commercialEvidenceNote("Commercial note")
-                .cooperationScore(5)
-                .cooperationEvidenceNote("Cooperation note")
-                .strategicScore(4)
-                .strategicEvidenceNote("Strategic note")
-                .relationshipNetworkScore(4)
-                .relationshipNetworkNote("Network note")
-                .engagementScore(4)
-                .engagementEvidenceNote("Engagement note")
-                .qualitativeScore(4)
-                .qualitativeEvidenceNote("Qualitative note")
-                .managerNote("Detailed manager assessment")
-                .scorableBase(30)
-                .normalizationApplied(true)
-                .build();
-        when(assessmentRepository.findById(100L)).thenReturn(Optional.of(draftEntity));
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        RelationshipAssessmentResponse submitted = service.submitAssessment(100L, managerUser);
-        assertEquals(RelationshipAssessmentStatus.SUBMITTED, submitted.getStatus());
-        assertNull(submitted.getCommercialScore());
-        assertEquals(5, submitted.getCommercialAwardedScore());
-
-        // Step 3: Owner Finalizes
-        // Finalize must use the frozen submitted snapshot! Zero contracts queried!
-        FinalizeRelationshipAssessmentRequest finReq = FinalizeRelationshipAssessmentRequest.builder().build();
-        RelationshipAssessmentResponse finalized = service.finalizeAssessment(100L, finReq, ownerUser);
-
-        assertEquals(RelationshipAssessmentStatus.FINALIZED, finalized.getStatus());
-        assertNull(finalized.getCommercialScore());
-        assertEquals(5, finalized.getOwnerCommercialScore());
-    }
-
-    @Test
-    void testChangesRequestedWorkflow_PreservesCommercialSnapshotOnResubmit() {
-        // Assessment is in SUBMITTED state with commercialScore = 15
-        CompanyRelationshipAssessment assessment = CompanyRelationshipAssessment.builder()
-                .id(200L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.SUBMITTED)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V2")
-                .commercialScore(15)
-                .commercialSuggestedScore(15)
-                .commercialAwardedScore(15)
-                .contractValueScore(6)
-                .contractCountScore(2)
-                .relationshipDurationScore(1)
-                .contractRecencyScore(6)
-                .cooperationScore(10)
-                .strategicScore(10)
-                .relationshipNetworkScore(8)
-                .engagementScore(3)
-                .qualitativeScore(3)
-                .managerNote("First submission note")
-                .scorableBase(100)
-                .normalizationApplied(false)
-                .build();
-
-        when(assessmentRepository.findById(200L)).thenReturn(Optional.of(assessment));
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        // Owner requests changes
-        RequestChangesAssessmentRequest reqChanges = new RequestChangesAssessmentRequest("Please adjust qualitative note");
-        RelationshipAssessmentResponse changesRequested = service.requestChanges(200L, reqChanges, ownerUser);
-
-        assertEquals(RelationshipAssessmentStatus.CHANGES_REQUESTED, changesRequested.getStatus());
-        assertEquals("Please adjust qualitative note", changesRequested.getChangesRequestedReason());
-        assertNotNull(changesRequested.getChangesRequestedAt());
-
-        // Manager edits note and resubmits
-        UpdateRelationshipAssessmentRequest updateReq = UpdateRelationshipAssessmentRequest.builder()
-                .managerNote("Updated qualitative assessment note addressing owner feedback")
-                .build();
-        service.updateDraft(200L, updateReq, managerUser);
-
-        RelationshipAssessmentResponse resubmitted = service.submitAssessment(200L, managerUser);
-        assertEquals(RelationshipAssessmentStatus.SUBMITTED, resubmitted.getStatus());
-        // Commercial score must remain frozen at 15!
-        assertEquals(15, resubmitted.getCommercialScore());
-        assertEquals("Please adjust qualitative note", resubmitted.getChangesRequestedReason());
-    }
-
-    @Test
-    void testReassessment_ComputesFreshCommercialSnapshotForNewVersion() {
-        // Version 1 is FINALIZED with commercialScore = 10
-        CompanyRelationshipAssessment v1 = CompanyRelationshipAssessment.builder()
-                .id(1L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.FINALIZED)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V1")
-                .commercialScore(10)
-                .cooperationScore(15)
-                .strategicScore(15)
-                .relationshipNetworkScore(12)
-                .engagementScore(4)
-                .qualitativeScore(4)
-                .ownerCooperationScore(15)
-                .ownerStrategicScore(15)
-                .ownerRelationshipNetworkScore(12)
-                .ownerEngagementScore(4)
-                .ownerQualitativeScore(4)
-                .ownerFinalTotalScore(70)
-                .ownerFinalRank("B")
-                .build();
-
-        when(assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(eq(ownerId), eq(targetId), any()))
-                .thenReturn(false);
-        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
-                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(Optional.of(v1));
-
-        // Now new contracts exist in the database!
-        PartnerContract cNew = PartnerContract.builder()
-                .effectiveDate(LocalDate.now().minusMonths(1))
-                .currency("VND")
-                .totalContractValue(new BigDecimal("25000000000")) // 25B VND
-                .build();
-        when(partnerContractRepository.findByPartnerCompanyIdAndReviewStatus(targetId, ContractReviewStatus.APPROVED))
-                .thenReturn(List.of(cNew));
-
-        when(assessmentRepository.saveAndFlush(any())).thenAnswer(inv -> {
-            CompanyRelationshipAssessment a = inv.getArgument(0);
-            a.setId(2L);
-            return a;
-        });
-
-        RelationshipAssessmentResponse v2 = service.createNewVersion(targetId, managerUser);
-
-        assertEquals(2, v2.getVersionNumber());
-        assertEquals(RelationshipAssessmentStatus.DRAFT, v2.getStatus());
-        assertEquals(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5, v2.getScoringPolicyVersion());
-        // Version 2 has newly computed commercial snapshot under V5!
-        assertEquals(1, v2.getApprovedContractCount());
-        // All criteria start null in V5!
-        assertNull(v2.getCommercialAwardedScore());
-        assertNull(v2.getEngagementScore());
-        assertNull(v2.getRelationshipNetworkScore());
-        assertNull(v2.getCooperationScore());
-        assertNull(v2.getStrategicScore());
-        assertNull(v2.getQualitativeScore());
-        assertNull(v2.getManagerNote()); // Fresh note required starts null
-    }
-
-    @Test
-    void testOwnerModification_PreservesManagerScoresSeparately() {
-        CompanyRelationshipAssessment submitted = CompanyRelationshipAssessment.builder()
-                .id(300L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.SUBMITTED)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V2")
-                .commercialScore(25)
-                .commercialSuggestedScore(25)
-                .commercialAwardedScore(25)
-                .cooperationScore(15)
-                .strategicScore(15)
-                .relationshipNetworkScore(8)
-                .engagementScore(4)
-                .qualitativeScore(4)
-                .managerRawScorableScore(71)
-                .managerTotalScore(71)
-                .managerRank("B")
-                .scorableBase(100)
-                .normalizationApplied(false)
-                .build();
-
-        when(assessmentRepository.findById(300L)).thenReturn(Optional.of(submitted));
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        // Owner adjusts Strategic score: 15 -> 20, providing reason
-        FinalizeRelationshipAssessmentRequest finReq = FinalizeRelationshipAssessmentRequest.builder()
-                .ownerCooperationScore(15)
-                .ownerStrategicScore(20) // adjusted +5
-                .ownerRelationshipNetworkScore(8)
-                .ownerEngagementScore(4)
-                .ownerQualitativeScore(4)
-                .ownerAdjustmentReason("Formally upgraded to strategic partner status")
-                .build();
-
-        RelationshipAssessmentResponse finalized = service.finalizeAssessment(300L, finReq, ownerUser);
-
-        // Manager score must remain preserved
-        assertEquals(71, finalized.getManagerTotalScore());
-        assertEquals("B", finalized.getManagerRank());
-
-        // Owner score is updated: 25 + 15 + 20 + 8 + 4 + 4 = 76
-        assertEquals(76, finalized.getOwnerFinalTotalScore());
-        assertEquals("B", finalized.getOwnerFinalRank());
-        assertEquals("Formally upgraded to strategic partner status", finalized.getOwnerAdjustmentReason());
-    }
-
-    @Test
-    void testConcurrency_DualActiveAssessmentBlocked() {
-        // Active assessment exists
-        when(assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(eq(ownerId), eq(targetId), any()))
-                .thenReturn(true);
-
-        assertThrows(BusinessValidationException.class, () ->
-                service.createDraft(targetId, new CreateRelationshipAssessmentRequest(), managerUser));
-    }
-
-    @Test
-    void testV2DraftNullableScoresAndStaffPermissions() {
-        lenient().when(projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(eq(targetId), eq(20L), any()))
-                .thenReturn(true);
-
-        CompanyRelationshipAssessment draft = CompanyRelationshipAssessment.builder()
-                .id(400L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V2")
-                .commercialSuggestedScore(25)
-                .commercialAwardedScore(null) // null draft score allowed
-                .cooperationScore(null)
-                .strategicScore(null)
-                .relationshipNetworkScore(null)
-                .engagementScore(null)
-                .qualitativeScore(null)
-                .build();
-
-        when(assessmentRepository.findById(400L)).thenReturn(Optional.of(draft));
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        // Staff updates draft with partial scores
-        UpdateRelationshipAssessmentRequest updateReq = UpdateRelationshipAssessmentRequest.builder()
-                .cooperationScore(18)
-                .cooperationEvidenceNote("Regular quarterly meetings")
-                .build();
-
-        RelationshipAssessmentResponse response = service.updateDraft(400L, updateReq, staffUser);
-        assertNotNull(response);
-        assertEquals(18, response.getCooperationScore());
-        assertEquals("Regular quarterly meetings", response.getCooperationEvidenceNote());
-        assertEquals(2, response.getCompletedCriteriaCount());
-        assertFalse(response.getIsComplete());
-
-        // Staff tries to submit -> AccessDeniedException (Manager ONLY)
-        assertThrows(AccessDeniedException.class, () -> service.submitAssessment(400L, staffUser));
-    }
-
-    @Test
-    void testV2ManagerSubmission_EnforcesAllCriteriaAndReasonWhenCommercialDiffers() {
-        CompanyRelationshipAssessment draft = CompanyRelationshipAssessment.builder()
-                .id(500L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V2")
-                .commercialSuggestedScore(20)
-                .commercialAwardedScore(25) // Differs from suggested (25 != 20)
-                .cooperationScore(18)
-                .strategicScore(13)
-                .relationshipNetworkScore(7)
-                .engagementScore(4)
-                .qualitativeScore(4)
-                .qualitativeEvidenceNote("Solid performance")
-                .managerNote("Overall positive relationship")
-                .commercialAdjustmentReason(null) // Missing reason!
-                .build();
-
-        when(assessmentRepository.findById(500L)).thenReturn(Optional.of(draft));
-
-        // Missing adjustment reason when awarded != suggested -> BusinessValidationException
-        assertThrows(BusinessValidationException.class, () -> service.submitAssessment(500L, managerUser));
-
-        // Provide adjustment reason
-        draft.setCommercialAdjustmentReason("High value ongoing unbilled projects");
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        RelationshipAssessmentResponse submitted = service.submitAssessment(500L, managerUser);
-        assertEquals(RelationshipAssessmentStatus.SUBMITTED, submitted.getStatus());
-        // Direct sum: 25 + 18 + 13 + 7 + 4 + 4 = 71
-        assertEquals(71, submitted.getManagerTotalScore());
-        assertEquals("B", submitted.getManagerRank());
-        assertEquals(6, submitted.getCompletedCriteriaCount());
-        assertTrue(submitted.getIsComplete());
-    }
-
-    @Test
-    void testV2OwnerCannotSubmit_CanReviewAndFinalize() {
-        CompanyRelationshipAssessment draft = CompanyRelationshipAssessment.builder()
-                .id(600L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V2")
-                .commercialSuggestedScore(20)
-                .commercialAwardedScore(20)
-                .cooperationScore(18)
-                .strategicScore(13)
-                .relationshipNetworkScore(7)
-                .engagementScore(4)
-                .qualitativeScore(4)
-                .qualitativeEvidenceNote("Solid")
-                .managerNote("Overall good")
-                .build();
-
-        when(assessmentRepository.findById(600L)).thenReturn(Optional.of(draft));
-
-        // Owner cannot submit to Owner! Manager ONLY
-        assertThrows(AccessDeniedException.class, () -> service.submitAssessment(600L, ownerUser));
-    }
-
-    @Test
-    void testV3Reassessment_FromV3Finalized_SeedsDraftScores() {
-        CompanyRelationshipAssessment v3Finalized = CompanyRelationshipAssessment.builder()
-                .id(700L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.FINALIZED)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V3")
-                .commercialScore(40)
-                .commercialSuggestedScore(40)
-                .commercialAwardedScore(40)
-                .engagementScore(15)
-                .relationshipNetworkScore(22)
-                .relationshipNetworkNote("Key contact CEO")
-                .ownerEngagementScore(16)
-                .ownerRelationshipNetworkScore(24)
-                .ownerRelationshipNetworkNote("CEO & VP of Engineering")
-                .ownerFinalTotalScore(80)
-                .ownerFinalRank("A")
-                .build();
-
-        when(assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(eq(ownerId), eq(targetId), any()))
-                .thenReturn(false);
-        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
-                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(Optional.of(v3Finalized));
-
-        PartnerContract c = PartnerContract.builder()
-                .effectiveDate(LocalDate.now().minusMonths(2))
-                .currency("VND")
-                .totalContractValue(new BigDecimal("1000000000"))
-                .build();
-        when(partnerContractRepository.findByPartnerCompanyIdAndReviewStatus(targetId, ContractReviewStatus.APPROVED))
-                .thenReturn(List.of(c));
-
-        when(assessmentRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        RelationshipAssessmentResponse response = service.createNewVersion(targetId, managerUser);
-        assertNotNull(response);
-        assertEquals(2, response.getVersionNumber());
-        assertEquals(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5, response.getScoringPolicyVersion());
-        // All criteria start null in V5!
-        assertNull(response.getCommercialAwardedScore());
-        assertNull(response.getEngagementScore());
-        assertNull(response.getRelationshipNetworkScore());
-        assertNull(response.getCooperationScore());
-        assertNull(response.getStrategicScore());
-        assertNull(response.getQualitativeScore());
-    }
-
-    @Test
-    void testV4CommercialReferenceOnly_NonVndContract() {
-        PartnerContract c = PartnerContract.builder()
-                .effectiveDate(LocalDate.now().minusMonths(2))
-                .currency("USD")
-                .totalContractValue(new BigDecimal("50000"))
-                .build();
-        when(partnerContractRepository.findByPartnerCompanyIdAndReviewStatus(targetId, ContractReviewStatus.APPROVED))
-                .thenReturn(List.of(c));
-
-        CommercialEvidenceResponse evidence = service.getLiveCommercialEvidence(targetId);
-        assertNotNull(evidence);
-        assertEquals("UNSCORABLE_NON_VND", evidence.getContractValueStatus());
-        assertNull(evidence.getContractValueScore());
-        assertEquals("REFERENCE_ONLY", evidence.getCommercialSuggestionStatus());
-        assertNull(evidence.getCommercialAvailablePoints());
-    }
-
-    @Test
-    void testV4CommercialReferenceOnly_MissingDates() {
-        PartnerContract c = PartnerContract.builder()
-                .effectiveDate(null) // No date
-                .currency("VND")
-                .totalContractValue(new BigDecimal("1000000000"))
-                .build();
-        when(partnerContractRepository.findByPartnerCompanyIdAndReviewStatus(targetId, ContractReviewStatus.APPROVED))
-                .thenReturn(List.of(c));
-
-        CommercialEvidenceResponse evidence = service.getLiveCommercialEvidence(targetId);
-        assertNotNull(evidence);
-        assertNull(evidence.getRelationshipDurationScore());
-        assertNull(evidence.getContractRecencyScore());
-        assertFalse(evidence.isHasValidHistoricalDates());
-        assertEquals("REFERENCE_ONLY", evidence.getCommercialSuggestionStatus());
-        assertNull(evidence.getCommercialAvailablePoints());
-    }
-
-    @Test
-    void testV3FullLifecycle_DraftSubmitFinalize() {
-        CompanyRelationshipAssessment draft = CompanyRelationshipAssessment.builder()
-                .id(900L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V3")
-                .commercialScore(40)
-                .commercialSuggestedScore(40)
-                .commercialAwardedScore(40)
-                .commercialAdjustmentReason("Strategic assessment based on full ecosystem partnership")
-                .engagementScore(15)
-                .engagementEvidenceNote("Active monthly reviews")
-                .relationshipNetworkScore(22)
-                .relationshipNetworkNote("Primary point of contact CTO")
-                .managerNote("Strong collaboration")
-                .build();
-
-        when(assessmentRepository.findById(900L)).thenReturn(Optional.of(draft));
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        // Submit
-        RelationshipAssessmentResponse submitted = service.submitAssessment(900L, managerUser);
-        assertEquals(RelationshipAssessmentStatus.SUBMITTED, submitted.getStatus());
-        assertEquals(77, submitted.getManagerTotalScore()); // 40 + 15 + 22 = 77
-        assertEquals("B", submitted.getManagerRank());
-        assertEquals(3, submitted.getCompletedCriteriaCount());
-        assertEquals(3, submitted.getTotalCriteriaCount());
-        assertTrue(submitted.getIsComplete());
-
-        // Finalize with Owner Adjustment
-        FinalizeRelationshipAssessmentRequest finReq = FinalizeRelationshipAssessmentRequest.builder()
-                .ownerCommercialScore(40)
-                .ownerEngagementScore(18) // modified 15 -> 18
-                .ownerRelationshipNetworkScore(22)
-                .ownerAdjustmentReason("Increased engagement due to executive sponsorship")
-                .build();
-
-        RelationshipAssessmentResponse finalized = service.finalizeAssessment(900L, finReq, ownerUser);
-        assertEquals(RelationshipAssessmentStatus.FINALIZED, finalized.getStatus());
-        assertEquals(80, finalized.getOwnerFinalTotalScore()); // 40 + 18 + 22 = 80
-        assertEquals("B", finalized.getOwnerFinalRank());
-        assertEquals("Increased engagement due to executive sponsorship", finalized.getOwnerAdjustmentReason());
-    }
-
-    @Test
-    void testExistingV2Draft_ContinuesUnderV2Policy() {
-        CompanyRelationshipAssessment v2Draft = CompanyRelationshipAssessment.builder()
-                .id(950L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V2")
-                .commercialAwardedScore(25)
-                .cooperationScore(18)
-                .strategicScore(15)
-                .relationshipNetworkScore(8)
-                .engagementScore(4)
-                .qualitativeScore(4)
-                .managerNote("V2 draft note")
-                .build();
-
-        when(assessmentRepository.findById(950L)).thenReturn(Optional.of(v2Draft));
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        UpdateRelationshipAssessmentRequest updateReq = UpdateRelationshipAssessmentRequest.builder()
-                .cooperationScore(20)
-                .build();
-
-        RelationshipAssessmentResponse updated = service.updateDraft(950L, updateReq, managerUser);
-        assertEquals("RELATIONSHIP_CLOSENESS_V2", updated.getScoringPolicyVersion());
-        assertEquals(6, updated.getTotalCriteriaCount());
-        assertEquals(6, updated.getCompletedCriteriaCount());
-        // 25 + 20 + 15 + 8 + 4 + 4 = 76
-        assertEquals(76, updated.getDraftSubtotalScore());
-        assertEquals("B", updated.getOfficialRank() != null ? updated.getOfficialRank() : updated.getManagerRank());
-    }
-
-    @Test
-    void testV4Draft_AllCriteriaStartNull() {
-        when(assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(eq(ownerId), eq(targetId), any()))
-                .thenReturn(false);
-        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdOrderByVersionNumberDesc(ownerId, targetId))
-                .thenReturn(Optional.empty());
-
-        when(assessmentRepository.saveAndFlush(any())).thenAnswer(inv -> {
-            CompanyRelationshipAssessment a = inv.getArgument(0);
-            a.setId(1001L);
-            return a;
-        });
-
-        CreateRelationshipAssessmentRequest createReq = CreateRelationshipAssessmentRequest.builder().build();
-
-        RelationshipAssessmentResponse draft = service.createDraft(targetId, createReq, managerUser);
-        assertNotNull(draft);
-        assertEquals(RelationshipAssessmentStatus.DRAFT, draft.getStatus());
-        assertEquals("RELATIONSHIP_CLOSENESS_V5", draft.getScoringPolicyVersion());
-        assertEquals(6, draft.getTotalCriteriaCount());
-        assertEquals(0, draft.getCompletedCriteriaCount());
-        assertFalse(draft.getIsComplete());
-        assertNull(draft.getDraftSubtotalScore());
-        assertNull(draft.getCommercialAwardedScore());
-        assertNull(draft.getCommercialScore());
-        assertNull(draft.getCommercialSuggestedScore());
-        assertNull(draft.getCooperationScore());
-        assertNull(draft.getStrategicScore());
-        assertNull(draft.getRelationshipNetworkScore());
-        assertNull(draft.getEngagementScore());
-        assertNull(draft.getQualitativeScore());
-        assertNull(draft.getManagerRank());
-    }
-
-    @Test
-    void testV4Draft_NoCommercialAutoFill_EvenWithApprovedContracts() {
-        PartnerContract c = PartnerContract.builder()
-                .effectiveDate(LocalDate.now().minusMonths(3))
-                .currency("VND")
-                .totalContractValue(new BigDecimal("5000000000"))
-                .build();
-        when(partnerContractRepository.findByPartnerCompanyIdAndReviewStatus(targetId, ContractReviewStatus.APPROVED))
-                .thenReturn(List.of(c));
-
-        when(assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(eq(ownerId), eq(targetId), any()))
-                .thenReturn(false);
-        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdOrderByVersionNumberDesc(ownerId, targetId))
-                .thenReturn(Optional.empty());
-
-        when(assessmentRepository.saveAndFlush(any())).thenAnswer(inv -> {
-            CompanyRelationshipAssessment a = inv.getArgument(0);
-            a.setId(1002L);
-            return a;
-        });
-
-        RelationshipAssessmentResponse draft = service.createDraft(targetId, null, managerUser);
-        assertNotNull(draft);
-        // Evidence is snapshotted:
-        assertEquals(1, draft.getApprovedContractCount());
-        assertEquals(new BigDecimal("5000000000"), draft.getTotalContractValueVnd());
-        // But commercial score is NOT auto-filled:
-        assertNull(draft.getCommercialAwardedScore());
-        assertNull(draft.getCommercialScore());
-        assertNull(draft.getCommercialSuggestedScore());
-    }
-
-    @Test
-    void testV4Draft_ScoreZeroIsAssessed_NotTreatedAsMissing() {
-        CompanyRelationshipAssessment draft = CompanyRelationshipAssessment.builder()
-                .id(1003L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V4")
-                .build();
-
-        when(assessmentRepository.findById(1003L)).thenReturn(Optional.of(draft));
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        UpdateRelationshipAssessmentRequest updateReq = UpdateRelationshipAssessmentRequest.builder()
-                .commercialAwardedScore(0)
-                .commercialEvidenceNote("No commercial ties yet")
-                .build();
-
-        RelationshipAssessmentResponse updated = service.updateDraft(1003L, updateReq, managerUser);
-        assertEquals(1, updated.getCompletedCriteriaCount());
-        assertEquals(0, updated.getDraftSubtotalScore());
-        assertEquals(0, updated.getCommercialAwardedScore());
-        assertFalse(updated.getIsComplete());
-    }
-
-    @Test
-    void testV4Submit_RequiresAllSixScores() {
-        // Missing qualitativeScore
-        CompanyRelationshipAssessment assessment = CompanyRelationshipAssessment.builder()
-                .id(1004L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V4")
-                .commercialAwardedScore(25)
-                .commercialEvidenceNote("Commercial note")
-                .cooperationScore(20)
-                .cooperationEvidenceNote("Cooperation note")
-                .strategicScore(15)
-                .strategicEvidenceNote("Strategic note")
-                .relationshipNetworkScore(8)
-                .relationshipNetworkNote("Network note")
-                .engagementScore(4)
-                .engagementEvidenceNote("Engagement note")
-                .qualitativeScore(null) // MISSING!
-                .qualitativeEvidenceNote("Qualitative note")
-                .managerNote("Overall note")
-                .build();
-
-        when(assessmentRepository.findById(1004L)).thenReturn(Optional.of(assessment));
-
-        assertThrows(BusinessValidationException.class, () ->
-                service.submitAssessment(1004L, managerUser));
-    }
-
-    @Test
-    void testV4Submit_RequiresAllSixEvidenceNotes() {
-        // Missing commercialEvidenceNote
-        CompanyRelationshipAssessment assessment = CompanyRelationshipAssessment.builder()
-                .id(1005L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V4")
-                .commercialAwardedScore(25)
-                .commercialEvidenceNote("") // MISSING / BLANK!
-                .cooperationScore(20)
-                .cooperationEvidenceNote("Cooperation note")
-                .strategicScore(15)
-                .strategicEvidenceNote("Strategic note")
-                .relationshipNetworkScore(8)
-                .relationshipNetworkNote("Network note")
-                .engagementScore(4)
-                .engagementEvidenceNote("Engagement note")
-                .qualitativeScore(4)
-                .qualitativeEvidenceNote("Qualitative note")
-                .managerNote("Overall note")
-                .build();
-
-        when(assessmentRepository.findById(1005L)).thenReturn(Optional.of(assessment));
-
-        assertThrows(BusinessValidationException.class, () ->
-                service.submitAssessment(1005L, managerUser));
-    }
-
-    @Test
-    void testV4Submit_RequiresManagerOverallNote() {
-        CompanyRelationshipAssessment assessment = CompanyRelationshipAssessment.builder()
-                .id(1006L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V4")
-                .commercialAwardedScore(25)
-                .commercialEvidenceNote("Commercial note")
-                .cooperationScore(20)
-                .cooperationEvidenceNote("Cooperation note")
-                .strategicScore(15)
-                .strategicEvidenceNote("Strategic note")
-                .relationshipNetworkScore(8)
-                .relationshipNetworkNote("Network note")
-                .engagementScore(4)
-                .engagementEvidenceNote("Engagement note")
-                .qualitativeScore(4)
-                .qualitativeEvidenceNote("Qualitative note")
-                .managerNote("") // MISSING!
-                .build();
-
-        when(assessmentRepository.findById(1006L)).thenReturn(Optional.of(assessment));
-
-        assertThrows(BusinessValidationException.class, () ->
-                service.submitAssessment(1006L, managerUser));
-    }
-
-    @Test
-    void testV4Submit_AllowsScoreZeroAcrossAllSix_YieldsRankD() {
-        CompanyRelationshipAssessment assessment = CompanyRelationshipAssessment.builder()
-                .id(1007L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V4")
-                .commercialAwardedScore(0)
-                .commercialEvidenceNote("No commercial contracts")
-                .cooperationScore(0)
-                .cooperationEvidenceNote("No cooperation history")
-                .strategicScore(0)
-                .strategicEvidenceNote("Not a strategic partner")
-                .relationshipNetworkScore(0)
-                .relationshipNetworkNote("No contacts established")
-                .engagementScore(0)
-                .engagementEvidenceNote("Zero business engagement")
-                .qualitativeScore(0)
-                .qualitativeEvidenceNote("No qualitative track record")
-                .managerNote("Initial partner evaluation with zero history")
-                .build();
-
-        when(assessmentRepository.findById(1007L)).thenReturn(Optional.of(assessment));
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        RelationshipAssessmentResponse submitted = service.submitAssessment(1007L, managerUser);
-        assertEquals(RelationshipAssessmentStatus.SUBMITTED, submitted.getStatus());
-        assertEquals(0, submitted.getManagerTotalScore());
-        assertEquals("D", submitted.getManagerRank());
-        assertEquals(6, submitted.getCompletedCriteriaCount());
-        assertTrue(submitted.getIsComplete());
-    }
-
-    @Test
-    void testV4Finalize_CompleteOwnerSnapshot_DefaultsToManagerScores() {
-        CompanyRelationshipAssessment submitted = CompanyRelationshipAssessment.builder()
-                .id(1008L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.SUBMITTED)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V4")
-                .commercialAwardedScore(30)
-                .cooperationScore(22)
-                .strategicScore(18)
-                .relationshipNetworkScore(9)
-                .relationshipNetworkNote("Primary point of contact Director")
-                .engagementScore(5)
-                .qualitativeScore(5)
-                .managerTotalScore(89)
-                .managerRank("B")
-                .build();
-
-        when(assessmentRepository.findById(1008L)).thenReturn(Optional.of(submitted));
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        // Owner finalizes without specifying any overrides
-        FinalizeRelationshipAssessmentRequest finReq = FinalizeRelationshipAssessmentRequest.builder().build();
-        RelationshipAssessmentResponse finalized = service.finalizeAssessment(1008L, finReq, ownerUser);
-
-        assertEquals(RelationshipAssessmentStatus.FINALIZED, finalized.getStatus());
-        // All 6 owner scores are fully persisted and equal Manager values:
-        assertEquals(30, finalized.getOwnerCommercialScore());
-        assertEquals(22, finalized.getOwnerCooperationScore());
-        assertEquals(18, finalized.getOwnerStrategicScore());
-        assertEquals(9, finalized.getOwnerRelationshipNetworkScore());
-        assertEquals(5, finalized.getOwnerEngagementScore());
-        assertEquals(5, finalized.getOwnerQualitativeScore());
-        assertEquals(89, finalized.getOwnerFinalTotalScore());
-        assertEquals("B", finalized.getOwnerFinalRank());
-    }
-
-    @Test
-    void testV4Finalize_OwnerOverrideRequiresReason() {
-        CompanyRelationshipAssessment submitted = CompanyRelationshipAssessment.builder()
-                .id(1009L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.SUBMITTED)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V4")
-                .commercialAwardedScore(30)
-                .cooperationScore(20)
-                .strategicScore(15)
-                .relationshipNetworkScore(8)
-                .engagementScore(4)
-                .qualitativeScore(4)
-                .build();
-
-        when(assessmentRepository.findById(1009L)).thenReturn(Optional.of(submitted));
-
-        // Owner modifies commercial score 30 -> 35 without reason
-        FinalizeRelationshipAssessmentRequest finReq = FinalizeRelationshipAssessmentRequest.builder()
-                .ownerCommercialScore(35)
-                .build();
-
-        assertThrows(BusinessValidationException.class, () ->
-                service.finalizeAssessment(1009L, finReq, ownerUser));
-    }
-
-    @Test
-    void testV4Finalize_OwnerOverrideWithReason_Succeeds() {
-        CompanyRelationshipAssessment submitted = CompanyRelationshipAssessment.builder()
-                .id(1010L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.SUBMITTED)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V4")
-                .commercialAwardedScore(30)
-                .cooperationScore(20)
-                .strategicScore(15)
-                .relationshipNetworkScore(8)
-                .engagementScore(4)
-                .qualitativeScore(4)
-                .build();
-
-        when(assessmentRepository.findById(1010L)).thenReturn(Optional.of(submitted));
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        // Owner increases commercial 30 -> 35, cooperation 20 -> 24 with reason
-        // Total = 35 + 24 + 15 + 8 + 4 + 4 = 90 -> Rank A
-        FinalizeRelationshipAssessmentRequest finReq = FinalizeRelationshipAssessmentRequest.builder()
-                .ownerCommercialScore(35)
-                .ownerCooperationScore(24)
-                .ownerAdjustmentReason("Expanded contract scope agreed at CEO summit")
-                .build();
-
-        RelationshipAssessmentResponse finalized = service.finalizeAssessment(1010L, finReq, ownerUser);
-        assertEquals(RelationshipAssessmentStatus.FINALIZED, finalized.getStatus());
-        assertEquals(35, finalized.getOwnerCommercialScore());
-        assertEquals(24, finalized.getOwnerCooperationScore());
-        assertEquals(15, finalized.getOwnerStrategicScore());
-        assertEquals(8, finalized.getOwnerRelationshipNetworkScore());
-        assertEquals(4, finalized.getOwnerEngagementScore());
-        assertEquals(4, finalized.getOwnerQualitativeScore());
-        assertEquals(90, finalized.getOwnerFinalTotalScore());
-        assertEquals("A", finalized.getOwnerFinalRank());
-        assertEquals("Expanded contract scope agreed at CEO summit", finalized.getOwnerAdjustmentReason());
-    }
-
-    // =========================================================================
-    // V5 Unit Tests (Equal-Weight Guided Qualitative Scoring)
-    // =========================================================================
-
-    @Test
-    void testV5Draft_AllCriteriaStartNull_AndReferenceOnly() {
-        when(assessmentRepository.saveAndFlush(any())).thenAnswer(inv -> {
-            CompanyRelationshipAssessment a = inv.getArgument(0);
-            a.setId(1020L);
-            return a;
-        });
-
-        RelationshipAssessmentResponse draft = service.createDraft(targetId, null, managerUser);
-        assertNotNull(draft);
-        assertEquals(RelationshipAssessmentStatus.DRAFT, draft.getStatus());
-        assertEquals("RELATIONSHIP_CLOSENESS_V5", draft.getScoringPolicyVersion());
-        assertEquals(6, draft.getTotalCriteriaCount());
-        assertEquals(0, draft.getCompletedCriteriaCount());
-        assertFalse(draft.getIsComplete());
-        assertNull(draft.getDraftSubtotalScore());
-        assertNull(draft.getCommercialScore());
-        assertNull(draft.getCommercialSuggestedScore());
-        assertNull(draft.getCommercialAwardedScore());
-        assertNull(draft.getCooperationScore());
-        assertNull(draft.getStrategicScore());
-        assertNull(draft.getRelationshipNetworkScore());
-        assertNull(draft.getEngagementScore());
-        assertNull(draft.getQualitativeScore());
-        assertNull(draft.getTrustScore());
-        assertEquals("REFERENCE_ONLY", draft.getCommercialSuggestionStatus());
-        assertNull(draft.getCommercialAvailablePoints());
-    }
-
-    @Test
-    void testV5Draft_ValidationRanges_0To5() {
-        // Valid 0 score
-        CreateRelationshipAssessmentRequest reqZero = CreateRelationshipAssessmentRequest.builder()
-                .commercialAwardedScore(0)
-                .cooperationScore(0)
-                .strategicScore(0)
-                .relationshipNetworkScore(0)
-                .engagementScore(0)
-                .trustScore(0)
-                .build();
-        when(assessmentRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
-        assertDoesNotThrow(() -> service.createDraft(targetId, reqZero, managerUser));
-
-        // Invalid: score > 5
-        CreateRelationshipAssessmentRequest reqTooHigh = CreateRelationshipAssessmentRequest.builder()
-                .commercialAwardedScore(6)
-                .build();
-        BusinessValidationException ex1 = assertThrows(BusinessValidationException.class,
-                () -> service.createDraft(targetId, reqTooHigh, managerUser));
-        assertTrue(ex1.getMessage().contains("must be between 0 and 5"));
-
-        // Invalid: score < 0
-        CreateRelationshipAssessmentRequest reqNegative = CreateRelationshipAssessmentRequest.builder()
-                .cooperationScore(-1)
-                .build();
-        BusinessValidationException ex2 = assertThrows(BusinessValidationException.class,
-                () -> service.createDraft(targetId, reqNegative, managerUser));
-        assertTrue(ex2.getMessage().contains("must be between 0 and 5"));
-    }
-
-    @Test
+    @DisplayName("V5 calculation thresholds, exact scores and ranks")
     void testV5Calculations_ExactThresholdsAndRanks() {
         // 30 -> 100 A
         var res30 = scoreCalculator.calculateV5(5, 5, 5, 5, 5, 5);
@@ -1106,296 +183,7 @@ public class CompanyRelationshipAssessmentServiceTest {
     }
 
     @Test
-    void testV5Draft_IncompleteDraft_HasNullRankAndRawSubtotal() {
-        CompanyRelationshipAssessment draft = CompanyRelationshipAssessment.builder()
-                .id(1030L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V5")
-                .commercialAwardedScore(4)
-                .cooperationScore(3)
-                .strategicScore(2)
-                .build();
-        when(assessmentRepository.findById(1030L)).thenReturn(Optional.of(draft));
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        UpdateRelationshipAssessmentRequest updateReq = UpdateRelationshipAssessmentRequest.builder()
-                .relationshipNetworkScore(3)
-                .build();
-
-        RelationshipAssessmentResponse response = service.updateDraft(1030L, updateReq, managerUser);
-        assertEquals(4, response.getCompletedCriteriaCount());
-        assertFalse(response.getIsComplete());
-        // Raw subtotal = 4 + 3 + 2 + 3 = 12 (out of 30)
-        assertEquals(12, response.getDraftSubtotalScore());
-        // Rank must remain null when incomplete
-        assertNull(response.getManagerRank());
-    }
-
-    @Test
-    void testV5Submit_RequiresAllSixScoresAndAllSixNotes() {
-        CompanyRelationshipAssessment draft = CompanyRelationshipAssessment.builder()
-                .id(1040L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V5")
-                .commercialAwardedScore(4)
-                .cooperationScore(4)
-                .strategicScore(4)
-                .relationshipNetworkScore(4)
-                .engagementScore(4)
-                // trustScore / qualitativeScore missing!
-                .commercialEvidenceNote("Commercial note")
-                .cooperationEvidenceNote("Coop note")
-                .strategicEvidenceNote("Strat note")
-                .relationshipNetworkNote("Net note")
-                .engagementEvidenceNote("Eng note")
-                .qualitativeEvidenceNote("Trust note")
-                .managerNote("Overall note")
-                .build();
-        when(assessmentRepository.findById(1040L)).thenReturn(Optional.of(draft));
-
-        BusinessValidationException exScore = assertThrows(BusinessValidationException.class,
-                () -> service.submitAssessment(1040L, managerUser));
-        assertTrue(exScore.getMessage().contains("Trust & Reliability score is required"));
-
-        // Now add the missing score, but omit an evidence note
-        draft.setQualitativeScore(4);
-        draft.setQualitativeEvidenceNote(""); // Empty note
-
-        BusinessValidationException exNote = assertThrows(BusinessValidationException.class,
-                () -> service.submitAssessment(1040L, managerUser));
-        assertTrue(exNote.getMessage().contains("Trust & Reliability evidence note is required"));
-
-        // Add trust note, but omit managerNote
-        draft.setQualitativeEvidenceNote("Solid partner track record");
-        draft.setManagerNote("");
-
-        BusinessValidationException exMgrNote = assertThrows(BusinessValidationException.class,
-                () -> service.submitAssessment(1040L, managerUser));
-        assertTrue(exMgrNote.getMessage().contains("Overall Assessment Note is required"));
-    }
-
-    @Test
-    void testV5OwnerFinalize_UnchangedCopiesManager_ModifiedRequiresReason() {
-        CompanyRelationshipAssessment submitted = CompanyRelationshipAssessment.builder()
-                .id(1050L)
-                .ownerCompanyProfileId(ownerId)
-                .companyProfileId(targetId)
-                .versionNumber(1)
-                .status(RelationshipAssessmentStatus.SUBMITTED)
-                .scoringPolicyVersion("RELATIONSHIP_CLOSENESS_V5")
-                .commercialAwardedScore(4)
-                .cooperationScore(4)
-                .strategicScore(4)
-                .relationshipNetworkScore(4)
-                .engagementScore(4)
-                .qualitativeScore(4) // 24 / 30 -> 80% -> B
-                .managerRawScorableScore(24)
-                .managerTotalScore(80)
-                .managerRank("B")
-                .relationshipNetworkNote("Manager network note")
-                .build();
-        when(assessmentRepository.findById(1050L)).thenReturn(Optional.of(submitted));
-        when(assessmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
-
-        // Case 1: Unchanged Owner finalize (empty request)
-        FinalizeRelationshipAssessmentRequest finReqEmpty = FinalizeRelationshipAssessmentRequest.builder().build();
-        RelationshipAssessmentResponse finalized = service.finalizeAssessment(1050L, finReqEmpty, ownerUser);
-
-        assertEquals(RelationshipAssessmentStatus.FINALIZED, finalized.getStatus());
-        assertEquals(4, finalized.getOwnerCommercialScore());
-        assertEquals(4, finalized.getOwnerCooperationScore());
-        assertEquals(4, finalized.getOwnerStrategicScore());
-        assertEquals(4, finalized.getOwnerRelationshipNetworkScore());
-        assertEquals(4, finalized.getOwnerEngagementScore());
-        assertEquals(4, finalized.getOwnerQualitativeScore());
-        assertEquals(4, finalized.getOwnerTrustScore());
-        assertEquals(24, finalized.getOwnerRawScorableScore());
-        assertEquals(80, finalized.getOwnerFinalTotalScore());
-        assertEquals("B", finalized.getOwnerFinalRank());
-
-        // Reset status for Case 2
-        submitted.setStatus(RelationshipAssessmentStatus.SUBMITTED);
-
-        // Case 2: Modified score without reason -> rejected
-        FinalizeRelationshipAssessmentRequest finReqNoReason = FinalizeRelationshipAssessmentRequest.builder()
-                .ownerTrustScore(5)
-                .build();
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class,
-                () -> service.finalizeAssessment(1050L, finReqNoReason, ownerUser));
-        assertTrue(ex.getMessage().contains("Owner Adjustment Reason is mandatory"));
-
-        // Reset status for Case 3
-        submitted.setStatus(RelationshipAssessmentStatus.SUBMITTED);
-
-        // Case 3: Modified score with reason -> accepted
-        // 4 + 4 + 4 + 4 + 4 + 5 = 25 / 30 -> 83% -> B
-        FinalizeRelationshipAssessmentRequest finReqWithReason = FinalizeRelationshipAssessmentRequest.builder()
-                .ownerTrustScore(5)
-                .ownerAdjustmentReason("Exceptional multi-year performance verified by executive board")
-                .build();
-        RelationshipAssessmentResponse finalized2 = service.finalizeAssessment(1050L, finReqWithReason, ownerUser);
-        assertEquals(5, finalized2.getOwnerTrustScore());
-        assertEquals(5, finalized2.getOwnerQualitativeScore());
-        assertEquals(25, finalized2.getOwnerRawScorableScore());
-        assertEquals(83, finalized2.getOwnerFinalTotalScore());
-        assertEquals("B", finalized2.getOwnerFinalRank());
-    }
-
-    @Test
-    void testV5TrustScoreAlias_ConflictingValuesRejected() {
-        CreateRelationshipAssessmentRequest conflictReq = CreateRelationshipAssessmentRequest.builder()
-                .qualitativeScore(3)
-                .trustScore(4) // Mismatch!
-                .build();
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class,
-                () -> service.createDraft(targetId, conflictReq, managerUser));
-        assertTrue(ex.getMessage().contains("Conflicting values provided for qualitativeScore and trustScore"));
-
-        CreateRelationshipAssessmentRequest conflictNoteReq = CreateRelationshipAssessmentRequest.builder()
-                .qualitativeEvidenceNote("Note A")
-                .trustEvidenceNote("Note B") // Mismatch!
-                .build();
-        BusinessValidationException exNote = assertThrows(BusinessValidationException.class,
-                () -> service.createDraft(targetId, conflictNoteReq, managerUser));
-        assertTrue(exNote.getMessage().contains("Conflicting values provided for qualitativeEvidenceNote and trustEvidenceNote"));
-    }
-
-    @Test
-    void testCreateDraft_WithZeroApprovedContracts_SetsContractCountScoreToZero_AndSucceeds() {
-        when(partnerContractRepository.findByPartnerCompanyIdAndReviewStatus(targetId, ContractReviewStatus.APPROVED))
-                .thenReturn(List.of());
-        when(assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(eq(ownerId), eq(targetId), any()))
-                .thenReturn(false);
-        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdOrderByVersionNumberDesc(ownerId, targetId))
-                .thenReturn(Optional.empty());
-
-        final CompanyRelationshipAssessment[] savedHolder = new CompanyRelationshipAssessment[1];
-        when(assessmentRepository.saveAndFlush(any())).thenAnswer(inv -> {
-            CompanyRelationshipAssessment a = inv.getArgument(0);
-            savedHolder[0] = a;
-            a.setId(101L);
-            return a;
-        });
-
-        RelationshipAssessmentResponse response = service.createDraft(targetId, null, managerUser);
-        assertNotNull(response);
-        assertNotNull(savedHolder[0]);
-        assertNotNull(savedHolder[0].getContractCountScore(), "contract_count_score column must never be NULL");
-        assertEquals(0, savedHolder[0].getContractCountScore());
-        assertEquals(0, savedHolder[0].getApprovedContractCount());
-    }
-
-    @Test
-    void testCreateDraft_DataIntegrityViolation_NonUniqueConstraint_RethrowsException() {
-        when(partnerContractRepository.findByPartnerCompanyIdAndReviewStatus(targetId, ContractReviewStatus.APPROVED))
-                .thenReturn(List.of());
-        when(assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(eq(ownerId), eq(targetId), any()))
-                .thenReturn(false);
-        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdOrderByVersionNumberDesc(ownerId, targetId))
-                .thenReturn(Optional.empty());
-
-        when(assessmentRepository.saveAndFlush(any())).thenThrow(
-                new org.springframework.dao.DataIntegrityViolationException(
-                        "Cannot insert the value NULL into column 'contract_count_score', table 'apms.dbo.company_relationship_assessments'; column does not allow nulls."));
-
-        org.springframework.dao.DataIntegrityViolationException ex = assertThrows(
-                org.springframework.dao.DataIntegrityViolationException.class,
-                () -> service.createDraft(targetId, null, managerUser));
-        assertTrue(ex.getMessage().contains("Cannot insert the value NULL into column 'contract_count_score'"));
-    }
-
-    @Test
-    void testCreateDraft_DataIntegrityViolation_UniqueConstraint_ThrowsConcurrentAssessmentException() {
-        when(partnerContractRepository.findByPartnerCompanyIdAndReviewStatus(targetId, ContractReviewStatus.APPROVED))
-                .thenReturn(List.of());
-        when(assessmentRepository.existsByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusIn(eq(ownerId), eq(targetId), any()))
-                .thenReturn(false);
-        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdOrderByVersionNumberDesc(ownerId, targetId))
-                .thenReturn(Optional.empty());
-
-        when(assessmentRepository.saveAndFlush(any())).thenThrow(
-                new org.springframework.dao.DataIntegrityViolationException(
-                        "Cannot insert duplicate key row in object 'dbo.company_relationship_assessments' with unique index 'uq_active_company_relationship_assessment'."));
-
-        BusinessValidationException ex = assertThrows(
-                BusinessValidationException.class,
-                () -> service.createDraft(targetId, null, managerUser));
-        assertTrue(ex.getMessage().contains("An active assessment was created concurrently"));
-    }
-
-    @Test
-    void testUpdateDraftV5_SupportsPartialDraft_ExplicitScoreZero_AndClearing() {
-        CompanyRelationshipAssessment existing = new CompanyRelationshipAssessment();
-        existing.setId(200L);
-        existing.setOwnerCompanyProfileId(ownerId);
-        existing.setCompanyProfileId(targetId);
-        existing.setStatus(RelationshipAssessmentStatus.DRAFT);
-        existing.setScoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5);
-        existing.setVersionNumber(6);
-        existing.setCommercialAwardedScore(4);
-        existing.setCommercialEvidenceNote("Initial note");
-        existing.setCooperationScore(3);
-        existing.setManagerNote("Historical Manager note");
-
-        when(assessmentRepository.findById(200L)).thenReturn(Optional.of(existing));
-        when(assessmentRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-
-        // Step 1: Update draft with Commercial = 0, Cooperation = null (cleared), Note cleared, managerNote omitted
-        UpdateRelationshipAssessmentRequest req = UpdateRelationshipAssessmentRequest.builder()
-                .fullSnapshot(true)
-                .commercialAwardedScore(0)
-                .commercialEvidenceNote(null)
-                .cooperationScore(null)
-                .strategicScore(5)
-                .strategicEvidenceNote("Strategic note")
-                .relationshipNetworkScore(null)
-                .engagementScore(null)
-                .qualitativeScore(null)
-                .managerNote(null)
-                .build();
-
-        RelationshipAssessmentResponse resp = service.updateDraft(200L, req, managerUser);
-
-        // Commercial score must be explicitly 0, not null
-        assertEquals(0, resp.getCommercialAwardedScore());
-        assertNull(resp.getCommercialEvidenceNote());
-        // Cooperation was cleared to null
-        assertNull(resp.getCooperationScore());
-        // Strategic is 5
-        assertEquals(5, resp.getStrategicScore());
-        assertEquals("Strategic note", resp.getStrategicEvidenceNote());
-        // Incomplete draft -> rank and total score preview are null
-        assertNull(resp.getManagerRank());
-        assertNull(resp.getManagerTotalScore());
-        // managerNote was omitted -> historical note preserved
-        assertEquals("Historical Manager note", resp.getManagerNote());
-    }
-
-    @Test
-    void testEligibility_CompetitorThrowsBusinessValidationException() {
-        CompanyProfile profile = CompanyProfile.builder()
-                .id(targetId)
-                .companyId(targetId)
-                .identity(CompanyProfile.Identity.builder().tradeName("Competitor Company").build())
-                .build();
-        when(companyProfileRepository.findById(targetId)).thenReturn(Optional.of(profile));
-        when(ownerOrganizationService.isOwnerCompany(targetId)).thenReturn(false);
-        when(accessEvaluator.resolveRelationshipType(targetId)).thenReturn("COMPETITOR_OF");
-        when(accessEvaluator.isEligibleRelationshipType("COMPETITOR_OF")).thenReturn(false);
-
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
-                service.createDraft(targetId, null, managerUser));
-
-        assertEquals("Relationship Closeness assessment is not available for this company relationship type.", ex.getMessage());
-    }
-
-    @Test
+    @DisplayName("Eligibility validation throws BusinessValidationException for unsupported relationship types")
     void testEligibility_NullOrUnsupportedThrowsBusinessValidationException() {
         CompanyProfile profile = CompanyProfile.builder()
                 .id(targetId)
@@ -1408,12 +196,13 @@ public class CompanyRelationshipAssessmentServiceTest {
         when(accessEvaluator.isEligibleRelationshipType(null)).thenReturn(false);
 
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
-                service.createDraft(targetId, null, managerUser));
+                service.validateRelationshipClosenessEligibility(targetId));
 
         assertEquals("Relationship Closeness assessment is not available for this company relationship type.", ex.getMessage());
     }
 
     @Test
+    @DisplayName("Eligibility validation passes for Customer and Supplier")
     void testEligibility_CustomerAndSupplierAllowed() {
         CompanyProfile profile = CompanyProfile.builder()
                 .id(targetId)
@@ -1435,33 +224,39 @@ public class CompanyRelationshipAssessmentServiceTest {
     }
 
     @Test
-    void testEligibility_UpdateDraft_CompetitorThrows() {
-        CompanyRelationshipAssessment draft = CompanyRelationshipAssessment.builder()
-                .id(999L)
+    @DisplayName("getOverview never returns activeAssessment or hasActiveAssessment=true")
+    void testGetOverview_NeverReturnsActiveDraft() {
+        CompanyRelationshipAssessment v1Finalized = CompanyRelationshipAssessment.builder()
+                .id(100L)
                 .ownerCompanyProfileId(ownerId)
                 .companyProfileId(targetId)
                 .versionNumber(1)
-                .status(RelationshipAssessmentStatus.DRAFT)
+                .status(RelationshipAssessmentStatus.FINALIZED)
+                .assessmentType(RelationshipAssessmentType.MANAGER_ASSESSMENT)
                 .scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5)
+                .managerTotalScore(80)
+                .managerRank("B")
+                .finalizedAt(LocalDateTime.now().minusDays(1))
                 .build();
-        when(assessmentRepository.findById(999L)).thenReturn(Optional.of(draft));
 
-        CompanyProfile profile = CompanyProfile.builder()
-                .id(targetId)
-                .companyId(targetId)
-                .build();
-        when(companyProfileRepository.findById(targetId)).thenReturn(Optional.of(profile));
-        when(ownerOrganizationService.isOwnerCompany(targetId)).thenReturn(false);
-        when(accessEvaluator.resolveRelationshipType(targetId)).thenReturn("COMPETITOR");
-        when(accessEvaluator.isEligibleRelationshipType("COMPETITOR")).thenReturn(false);
+        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByVersionNumberDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(Optional.of(v1Finalized));
 
-        BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
-                service.updateDraft(999L, UpdateRelationshipAssessmentRequest.builder().build(), managerUser));
+        Map<String, Object> overview = service.getOverview(targetId, managerUser);
 
-        assertEquals("Relationship Closeness assessment is not available for this company relationship type.", ex.getMessage());
+        assertNotNull(overview);
+        assertEquals(false, overview.get("hasActiveAssessment"));
+        assertNull(overview.get("activeAssessment"));
+
+        RelationshipAssessmentResponse official = (RelationshipAssessmentResponse) overview.get("officialFinalizedAssessment");
+        assertNotNull(official);
+        assertEquals(1, official.getVersionNumber());
+        assertEquals(80, official.getOfficialScore());
+        assertEquals("B", official.getOfficialRank());
     }
 
     @Test
+    @DisplayName("Recent assessments summary: single assessment newly scored")
     void testRecentAssessmentsSummary_FirstAssessment_NewlyScored() {
         when(ownerOrganizationService.getOwnerCompanyProfileId()).thenReturn(ownerId);
 
@@ -1474,8 +269,8 @@ public class CompanyRelationshipAssessmentServiceTest {
                 .assessmentType(RelationshipAssessmentType.MANAGER_ASSESSMENT)
                 .managerTotalScore(74)
                 .managerRank("B")
-                .finalizedAt(java.time.LocalDateTime.now().minusHours(2))
-                .commercialAwardedScore(25)
+                .finalizedAt(LocalDateTime.now().minusHours(2))
+                .commercialAwardedScore(4)
                 .cooperationScore(4)
                 .strategicScore(4)
                 .relationshipNetworkScore(3)
@@ -1514,6 +309,7 @@ public class CompanyRelationshipAssessmentServiceTest {
     }
 
     @Test
+    @DisplayName("Recent assessments summary: two assessments with trend delta")
     void testRecentAssessmentsSummary_TwoAssessments_TrendDelta() {
         when(ownerOrganizationService.getOwnerCompanyProfileId()).thenReturn(ownerId);
 
@@ -1526,8 +322,8 @@ public class CompanyRelationshipAssessmentServiceTest {
                 .assessmentType(RelationshipAssessmentType.MANAGER_ASSESSMENT)
                 .managerTotalScore(74)
                 .managerRank("B")
-                .finalizedAt(java.time.LocalDateTime.now().minusHours(24))
-                .commercialAwardedScore(25)
+                .finalizedAt(LocalDateTime.now().minusHours(24))
+                .commercialAwardedScore(4)
                 .build();
 
         CompanyRelationshipAssessment v2 = CompanyRelationshipAssessment.builder()
@@ -1539,8 +335,8 @@ public class CompanyRelationshipAssessmentServiceTest {
                 .assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
                 .ownerFinalTotalScore(82)
                 .ownerFinalRank("A")
-                .finalizedAt(java.time.LocalDateTime.now().minusHours(1))
-                .ownerCommercialScore(28)
+                .finalizedAt(LocalDateTime.now().minusHours(1))
+                .ownerCommercialScore(5)
                 .build();
 
         when(assessmentRepository.findTop2FinalizedPerCompany(ownerId)).thenReturn(List.of(v2, v1));
@@ -1567,5 +363,241 @@ public class CompanyRelationshipAssessmentServiceTest {
         assertEquals(1, summary.getPreviousAssessment().getVersionNumber());
         assertEquals(74, summary.getPreviousAssessment().getScore());
         assertEquals("B", summary.getPreviousAssessment().getRank());
+    }
+
+    @Test
+    @DisplayName("Legacy draft lifecycle methods throw BusinessValidationException and never persist drafts")
+    void testLegacyDraftMethods_Blocked() {
+        assertThrows(BusinessValidationException.class, () ->
+                service.createDraft(targetId, null, managerUser));
+
+        assertThrows(BusinessValidationException.class, () ->
+                service.updateDraft(100L, UpdateRelationshipAssessmentRequest.builder().build(), managerUser));
+
+        assertThrows(BusinessValidationException.class, () ->
+                service.submitAssessment(100L, managerUser));
+
+        assertThrows(BusinessValidationException.class, () ->
+                service.requestChanges(100L, null, ownerUser));
+
+        assertThrows(BusinessValidationException.class, () ->
+                service.finalizeAssessment(100L, null, ownerUser));
+
+        assertThrows(BusinessValidationException.class, () ->
+                service.createNewVersion(targetId, managerUser));
+
+        verify(assessmentRepository, never()).save(any());
+        verify(assessmentRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("Acceptance Test 1: V1 (67) -> V1.1 (97) -> V2 (60). V2 trend compares against V1.1 (-37 pts), History orders V2, V1.1, V1")
+    void testAcceptanceTest1_V2ComparesAgainstV1_1() {
+        LocalDateTime t1 = LocalDateTime.of(2026, 9, 1, 10, 0);
+        LocalDateTime t2 = LocalDateTime.of(2026, 9, 10, 10, 0);
+        LocalDateTime t3 = LocalDateTime.of(2026, 9, 18, 10, 0);
+
+        CompanyRelationshipAssessment v1 = CompanyRelationshipAssessment.builder()
+                .id(1L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(1)
+                .majorVersion(1)
+                .minorRevision(0)
+                .assessmentType(RelationshipAssessmentType.MANAGER_ASSESSMENT)
+                .status(RelationshipAssessmentStatus.FINALIZED)
+                .managerTotalScore(67)
+                .managerRank("B")
+                .finalizedAt(t1)
+                .scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5)
+                .build();
+
+        CompanyRelationshipAssessment v1_1 = CompanyRelationshipAssessment.builder()
+                .id(2L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(101)
+                .majorVersion(1)
+                .minorRevision(1)
+                .assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .sourceAssessmentId(1L)
+                .status(RelationshipAssessmentStatus.FINALIZED)
+                .managerTotalScore(67)
+                .ownerFinalTotalScore(97)
+                .ownerFinalRank("A")
+                .finalizedAt(t2)
+                .scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5)
+                .build();
+
+        CompanyRelationshipAssessment v2 = CompanyRelationshipAssessment.builder()
+                .id(3L)
+                .ownerCompanyProfileId(ownerId)
+                .companyProfileId(targetId)
+                .versionNumber(2)
+                .majorVersion(2)
+                .minorRevision(0)
+                .assessmentType(RelationshipAssessmentType.MANAGER_ASSESSMENT)
+                .sourceAssessmentId(2L)
+                .status(RelationshipAssessmentStatus.FINALIZED)
+                .managerTotalScore(60)
+                .managerRank("B")
+                .finalizedAt(t3)
+                .scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5)
+                .build();
+
+        when(assessmentRepository.findAllByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByFinalizedAtDescMajorVersionDescMinorRevisionDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED))
+                .thenReturn(List.of(v2, v1_1, v1));
+
+        // Test V2 previous is V1.1 (-37 points)
+        Optional<CompanyRelationshipAssessment> prevV2 = service.getPreviousOfficialAssessment(v2);
+        assertTrue(prevV2.isPresent());
+        assertEquals(v1_1.getId(), prevV2.get().getId());
+        assertEquals("V1.1", prevV2.get().getFormattedVersion());
+        assertEquals(97, service.getOfficialTotalScore(prevV2.get()));
+        assertEquals(60, service.getOfficialTotalScore(v2));
+        assertEquals(-37, service.getOfficialTotalScore(v2) - service.getOfficialTotalScore(prevV2.get()));
+
+        // Test V1.1 previous is V1 (+30 points)
+        Optional<CompanyRelationshipAssessment> prevV1_1 = service.getPreviousOfficialAssessment(v1_1);
+        assertTrue(prevV1_1.isPresent());
+        assertEquals(v1.getId(), prevV1_1.get().getId());
+        assertEquals("V1", prevV1_1.get().getFormattedVersion());
+        assertEquals(67, service.getOfficialTotalScore(prevV1_1.get()));
+        assertEquals(30, service.getOfficialTotalScore(v1_1) - service.getOfficialTotalScore(prevV1_1.get()));
+
+        // Test V1 previous is empty
+        Optional<CompanyRelationshipAssessment> prevV1 = service.getPreviousOfficialAssessment(v1);
+        assertTrue(prevV1.isEmpty());
+    }
+
+    @Test
+    @DisplayName("Acceptance Tests 2, 3, 4: V2 (60) -> V2.1 (80, +20) -> V2.2 (75, -5) -> V3 (90, +15)")
+    void testAcceptanceTests_ChainTransitions() {
+        LocalDateTime t1 = LocalDateTime.of(2026, 9, 1, 10, 0);
+        LocalDateTime t2 = LocalDateTime.of(2026, 9, 2, 10, 0);
+        LocalDateTime t3 = LocalDateTime.of(2026, 9, 3, 10, 0);
+        LocalDateTime t4 = LocalDateTime.of(2026, 9, 4, 10, 0);
+
+        CompanyRelationshipAssessment v2 = CompanyRelationshipAssessment.builder()
+                .id(20L).ownerCompanyProfileId(ownerId).companyProfileId(targetId)
+                .versionNumber(2).majorVersion(2).minorRevision(0)
+                .status(RelationshipAssessmentStatus.FINALIZED).assessmentType(RelationshipAssessmentType.MANAGER_ASSESSMENT)
+                .managerTotalScore(60).managerRank("B").finalizedAt(t1).scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5).build();
+
+        CompanyRelationshipAssessment v2_1 = CompanyRelationshipAssessment.builder()
+                .id(21L).ownerCompanyProfileId(ownerId).companyProfileId(targetId)
+                .versionNumber(201).majorVersion(2).minorRevision(1)
+                .status(RelationshipAssessmentStatus.FINALIZED).assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .sourceAssessmentId(20L).ownerFinalTotalScore(80).ownerFinalRank("A").finalizedAt(t2).scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5).build();
+
+        CompanyRelationshipAssessment v2_2 = CompanyRelationshipAssessment.builder()
+                .id(22L).ownerCompanyProfileId(ownerId).companyProfileId(targetId)
+                .versionNumber(202).majorVersion(2).minorRevision(2)
+                .status(RelationshipAssessmentStatus.FINALIZED).assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .sourceAssessmentId(21L).ownerFinalTotalScore(75).ownerFinalRank("B").finalizedAt(t3).scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5).build();
+
+        CompanyRelationshipAssessment v3 = CompanyRelationshipAssessment.builder()
+                .id(30L).ownerCompanyProfileId(ownerId).companyProfileId(targetId)
+                .versionNumber(3).majorVersion(3).minorRevision(0)
+                .status(RelationshipAssessmentStatus.FINALIZED).assessmentType(RelationshipAssessmentType.MANAGER_ASSESSMENT)
+                .sourceAssessmentId(22L).managerTotalScore(90).managerRank("A").finalizedAt(t4).scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5).build();
+
+        when(assessmentRepository.findAllByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByFinalizedAtDescMajorVersionDescMinorRevisionDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED))
+                .thenReturn(List.of(v3, v2_2, v2_1, v2));
+
+        // Test 2: V2.1 compares against V2 -> delta = +20
+        Optional<CompanyRelationshipAssessment> prevV2_1 = service.getPreviousOfficialAssessment(v2_1);
+        assertTrue(prevV2_1.isPresent());
+        assertEquals(v2.getId(), prevV2_1.get().getId());
+        assertEquals(20, service.getOfficialTotalScore(v2_1) - service.getOfficialTotalScore(prevV2_1.get()));
+
+        // Test 3: V2.2 compares against V2.1 -> delta = -5
+        Optional<CompanyRelationshipAssessment> prevV2_2 = service.getPreviousOfficialAssessment(v2_2);
+        assertTrue(prevV2_2.isPresent());
+        assertEquals(v2_1.getId(), prevV2_2.get().getId());
+        assertEquals(-5, service.getOfficialTotalScore(v2_2) - service.getOfficialTotalScore(prevV2_2.get()));
+
+        // Test 4: V3 compares against V2.2 -> delta = +15
+        Optional<CompanyRelationshipAssessment> prevV3 = service.getPreviousOfficialAssessment(v3);
+        assertTrue(prevV3.isPresent());
+        assertEquals(v2_2.getId(), prevV3.get().getId());
+        assertEquals(15, service.getOfficialTotalScore(v3) - service.getOfficialTotalScore(prevV3.get()));
+    }
+
+    @Test
+    @DisplayName("getHistory returns official assessments strictly in chronological order: newest to oldest")
+    void testGetHistory_ChronologicalOrdering() {
+        LocalDateTime t1 = LocalDateTime.of(2026, 9, 1, 10, 0);
+        LocalDateTime t2 = LocalDateTime.of(2026, 9, 10, 10, 0);
+        LocalDateTime t3 = LocalDateTime.of(2026, 9, 18, 10, 0);
+
+        CompanyRelationshipAssessment v1 = CompanyRelationshipAssessment.builder()
+                .id(1L).ownerCompanyProfileId(ownerId).companyProfileId(targetId)
+                .versionNumber(1).majorVersion(1).minorRevision(0)
+                .status(RelationshipAssessmentStatus.FINALIZED).finalizedAt(t1).scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5).build();
+
+        CompanyRelationshipAssessment v1_1 = CompanyRelationshipAssessment.builder()
+                .id(2L).ownerCompanyProfileId(ownerId).companyProfileId(targetId)
+                .versionNumber(101).majorVersion(1).minorRevision(1)
+                .status(RelationshipAssessmentStatus.FINALIZED).finalizedAt(t2).scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5).build();
+
+        CompanyRelationshipAssessment v2 = CompanyRelationshipAssessment.builder()
+                .id(3L).ownerCompanyProfileId(ownerId).companyProfileId(targetId)
+                .versionNumber(2).majorVersion(2).minorRevision(0)
+                .status(RelationshipAssessmentStatus.FINALIZED).finalizedAt(t3).scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5).build();
+
+        // Pass in out-of-order list to test in-memory defensive sort
+        when(assessmentRepository.findAllByOwnerCompanyProfileIdAndCompanyProfileIdOrderByFinalizedAtDescMajorVersionDescMinorRevisionDesc(
+                ownerId, targetId)).thenReturn(List.of(v1_1, v2, v1));
+
+        List<RelationshipAssessmentResponse> history = service.getHistory(targetId, managerUser);
+        assertNotNull(history);
+        assertEquals(3, history.size());
+        assertEquals("V2", history.get(0).getFormattedVersion());
+        assertEquals("V1.1", history.get(1).getFormattedVersion());
+        assertEquals("V1", history.get(2).getFormattedVersion());
+    }
+
+    @Test
+    @DisplayName("getOverview populates trendInfo and previousOfficialAssessment for V2 vs V1.1")
+    void testGetOverview_TrendInfoPopulated() {
+        LocalDateTime t1 = LocalDateTime.of(2026, 9, 10, 10, 0);
+        LocalDateTime t2 = LocalDateTime.of(2026, 9, 18, 10, 0);
+
+        CompanyRelationshipAssessment v1_1 = CompanyRelationshipAssessment.builder()
+                .id(2L).ownerCompanyProfileId(ownerId).companyProfileId(targetId)
+                .versionNumber(101).majorVersion(1).minorRevision(1)
+                .status(RelationshipAssessmentStatus.FINALIZED).assessmentType(RelationshipAssessmentType.OWNER_ADJUSTMENT)
+                .ownerFinalTotalScore(97).ownerFinalRank("A").finalizedAt(t1).scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5).build();
+
+        CompanyRelationshipAssessment v2 = CompanyRelationshipAssessment.builder()
+                .id(3L).ownerCompanyProfileId(ownerId).companyProfileId(targetId)
+                .versionNumber(2).majorVersion(2).minorRevision(0)
+                .status(RelationshipAssessmentStatus.FINALIZED).assessmentType(RelationshipAssessmentType.MANAGER_ASSESSMENT)
+                .managerTotalScore(60).managerRank("B").finalizedAt(t2).scoringPolicyVersion(RelationshipCommercialScoringPolicy.POLICY_VERSION_V5).build();
+
+        when(assessmentRepository.findFirstByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByFinalizedAtDescMajorVersionDescMinorRevisionDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(Optional.of(v2));
+
+        when(assessmentRepository.findAllByOwnerCompanyProfileIdAndCompanyProfileIdAndStatusOrderByFinalizedAtDescMajorVersionDescMinorRevisionDesc(
+                ownerId, targetId, RelationshipAssessmentStatus.FINALIZED)).thenReturn(List.of(v2, v1_1));
+
+        Map<String, Object> overview = service.getOverview(targetId, managerUser);
+        assertNotNull(overview);
+        assertNotNull(overview.get("officialFinalizedAssessment"));
+        assertNotNull(overview.get("previousOfficialAssessment"));
+        assertNotNull(overview.get("trendInfo"));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> trendInfo = (Map<String, Object>) overview.get("trendInfo");
+        assertEquals("V1.1", trendInfo.get("prevFormattedVersion"));
+        assertEquals(97, trendInfo.get("prevScore"));
+        assertEquals("A", trendInfo.get("prevRank"));
+        assertEquals("V2", trendInfo.get("currentFormattedVersion"));
+        assertEquals(60, trendInfo.get("currentScore"));
+        assertEquals("B", trendInfo.get("currentRank"));
+        assertEquals(-37, trendInfo.get("diff"));
     }
 }

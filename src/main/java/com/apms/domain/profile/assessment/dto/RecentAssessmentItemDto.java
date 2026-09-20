@@ -14,6 +14,9 @@ import java.util.Map;
 public class RecentAssessmentItemDto {
     private Long id;
     private Integer versionNumber;
+    private Integer majorVersion;
+    private Integer minorRevision;
+    private String formattedVersion;
     private String assessmentType;
     private Integer score;
     private String rank;

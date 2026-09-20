@@ -10,7 +10,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "company_relationship_assessments")
+@Table(name = "company_relationship_assessments", uniqueConstraints = {
+        @UniqueConstraint(name = "uq_company_relationship_assessment_version_v2",
+                columnNames = {"owner_company_profile_id", "company_profile_id", "major_version", "minor_revision"})
+})
 @Getter
 @Setter
 @NoArgsConstructor
@@ -28,6 +31,16 @@ public class CompanyRelationshipAssessment {
     @Column(name = "company_profile_id", nullable = false, length = 255)
     private String companyProfileId;
 
+    @Column(name = "major_version", nullable = false)
+    private Integer majorVersion;
+
+    @Column(name = "minor_revision", nullable = false)
+    @Builder.Default
+    private Integer minorRevision = 0;
+
+    /**
+     * Legacy version number retained for compatibility with older references.
+     */
     @Column(name = "version_number", nullable = false)
     private Integer versionNumber;
 
@@ -177,11 +190,20 @@ public class CompanyRelationshipAssessment {
     @Column(name = "owner_commercial_score")
     private Integer ownerCommercialScore;
 
+    @Column(name = "owner_commercial_note", length = 1000)
+    private String ownerCommercialNote;
+
     @Column(name = "owner_cooperation_score")
     private Integer ownerCooperationScore;
 
+    @Column(name = "owner_cooperation_note", length = 1000)
+    private String ownerCooperationNote;
+
     @Column(name = "owner_strategic_score")
     private Integer ownerStrategicScore;
+
+    @Column(name = "owner_strategic_note", length = 1000)
+    private String ownerStrategicNote;
 
     @Column(name = "owner_relationship_network_score")
     private Integer ownerRelationshipNetworkScore;
@@ -192,8 +214,14 @@ public class CompanyRelationshipAssessment {
     @Column(name = "owner_engagement_score")
     private Integer ownerEngagementScore;
 
+    @Column(name = "owner_engagement_note", length = 1000)
+    private String ownerEngagementNote;
+
     @Column(name = "owner_qualitative_score")
     private Integer ownerQualitativeScore;
+
+    @Column(name = "owner_qualitative_note", length = 1000)
+    private String ownerQualitativeNote;
 
     @Column(name = "owner_note", length = 2000)
     private String ownerNote;
@@ -231,4 +259,13 @@ public class CompanyRelationshipAssessment {
     @Version
     @Column(name = "version", nullable = false)
     private Long version;
+
+    public String getFormattedVersion() {
+        if (majorVersion == null) {
+            return versionNumber != null ? "V" + versionNumber : "V1";
+        }
+        return (minorRevision != null && minorRevision > 0)
+                ? "V" + majorVersion + "." + minorRevision
+                : "V" + majorVersion;
+    }
 }
