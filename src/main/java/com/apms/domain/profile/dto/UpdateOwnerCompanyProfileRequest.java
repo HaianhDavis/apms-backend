@@ -1,5 +1,6 @@
 package com.apms.domain.profile.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Min;
@@ -99,13 +100,10 @@ public class UpdateOwnerCompanyProfileRequest {
     }
 
     @Data
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ProductRequest {
         @Length(max = 255, message = "Tên sản phẩm tối đa 255 ký tự")
         private String name;
-        @Length(max = 255, message = "Phân loại sản phẩm tối đa 255 ký tự")
-        private String category;
-        @Length(max = 2000, message = "Mô tả sản phẩm tối đa 2000 ký tự")
-        private String description;
     }
 
     @Data

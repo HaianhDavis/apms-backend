@@ -292,8 +292,6 @@ Every field found during the repository audit, classified:
 | `business.industries` | COMPANY_FACT |
 | `business.businessModel` | COMPANY_FACT |
 | `business.products[].name` | COMPANY_FACT |
-| `business.products[].category` | COMPANY_FACT |
-| `business.products[].description` | COMPANY_FACT |
 | `business.markets` | COMPANY_FACT |
 | `business.targetCustomers` | COMPANY_FACT |
 | `companySize.*` | COMPANY_FACT |

@@ -614,8 +614,12 @@ public class AssistantDemoDataSeeder implements CommandLineRunner {
     private CompanyProfile.Product product(String name, String category, String description) {
         return CompanyProfile.Product.builder()
                 .name(name)
-                .category(category)
-                .description(description)
+                .build();
+    }
+
+    private CompanyProfile.Product product(String name) {
+        return CompanyProfile.Product.builder()
+                .name(name)
                 .build();
     }
 

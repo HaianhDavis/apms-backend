@@ -170,7 +170,6 @@ class AdminOwnerCompanyProfileControllerSecurityTest {
         assertThat(value.getInsights().getThreats()).containsExactly("Intense competition");
         assertThat(value.getProducts()).hasSize(1);
         assertThat(value.getProducts().get(0).getName()).isEqualTo("Software Outsourcing");
-        assertThat(value.getProducts().get(0).getCategory()).isEqualTo("IT Services");
         assertThat(value.getTargetCustomers()).containsExactly("Banking", "Healthcare");
         assertThat(value.getCompanyMembers()).hasSize(1);
         assertThat(value.getCompanyMembers().get(0).getFullName()).isEqualTo("Truong Gia Binh");

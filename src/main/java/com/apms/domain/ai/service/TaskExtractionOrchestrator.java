@@ -7,6 +7,7 @@ import com.apms.domain.ai.dto.ExtractionFieldResult;
 import com.apms.domain.ai.dto.ExtractionQualityMetrics;
 import com.apms.domain.ai.dto.ExtractionQualityStatus;
 import com.apms.domain.ai.service.provider.GeminiExtractionProvider;
+import java.util.Set;
 import com.apms.domain.candidate.CompanyCandidate;
 import com.apms.domain.candidate.dto.CandidateResponse;
 import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
@@ -680,9 +681,15 @@ public class TaskExtractionOrchestrator {
         if (d == null) return null;
         List<CompanyCandidate.Product> products = null;
         if (d.getProducts() != null) {
-            products = d.getProducts().stream().map(p -> CompanyCandidate.Product.builder()
-                    .name(p.getName()).category(p.getCategory()).description(p.getDescription()).build()
-            ).toList();
+            Set<String> seen = new java.util.HashSet<>();
+            products = d.getProducts().stream()
+                    .map(com.apms.domain.ai.dto.ExtractedCompanyData.Product::getName)
+                    .filter(java.util.Objects::nonNull)
+                    .map(String::trim)
+                    .filter(n -> !n.isEmpty())
+                    .filter(n -> seen.add(n.toLowerCase(java.util.Locale.ROOT)))
+                    .map(n -> CompanyCandidate.Product.builder().name(n).build())
+                    .toList();
         }
         return CompanyCandidate.Business.builder()
                 .industries(d.getIndustries())

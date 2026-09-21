@@ -28,7 +28,7 @@ public record OwnerCompanyIntelligenceResponse(
                                String sourceUrl, LocalDateTime date) {}
     public record FinancialSignal(String name, String value, String currency, LocalDateTime period) {}
     public record Person(String name, String position, String sourceUrl, LocalDateTime researchedAt) {}
-    public record Product(String name, String category, String description) {}
+    public record Product(String name) {}
     public record Evidence(String sourceName, String sourceType, String sourceUrl,
                            LocalDateTime publishedAt, LocalDateTime retrievedAt, String reliability) {}
     public record Metadata(LocalDateTime lastUpdated, String dataQuality) {}

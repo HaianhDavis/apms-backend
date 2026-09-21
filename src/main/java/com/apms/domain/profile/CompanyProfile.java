@@ -1,5 +1,6 @@
 package com.apms.domain.profile;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -167,10 +168,9 @@ public class CompanyProfile {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Product {
         private String name;
-        private String category;
-        private String description;
     }
 
     @Data

@@ -3,6 +3,7 @@ package com.apms.domain.candidate;
 import com.apms.common.enums.CandidateStatus;
 import com.apms.common.enums.RelationshipType;
 import com.apms.domain.financial.DocumentCompanyValidationStatus;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -199,10 +200,9 @@ public class CompanyCandidate implements org.springframework.data.domain.Persist
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Product {
         private String name;
-        private String category;
-        private String description;
     }
 
     @Data

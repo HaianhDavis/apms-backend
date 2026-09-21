@@ -2,6 +2,7 @@ package com.apms.domain.ai.service;
 
 import com.apms.domain.ai.dto.DocumentCompanyIdentity;
 import com.apms.domain.ai.service.provider.GeminiExtractionProvider;
+import com.apms.domain.ai.service.provider.GeminiRequestExecutor;
 import com.apms.domain.document.RawDocument;
 import com.apms.domain.document.repository.mongo.RawDocumentRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -28,16 +29,16 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class CompanyIdentityDetectionService {
 
+    private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={key}";
+
     private final GeminiExtractionProvider geminiProvider; // for lightweight AI fallback
+    private final GeminiRequestExecutor geminiRequestExecutor;
     private final CompanyNameNormalizer companyNameNormalizer;
     private final RawDocumentRepository rawDocumentRepository;
     private final ObjectMapper objectMapper;
 
     @Value("${app.storage.upload-dir:uploads/}")
     private String uploadDir;
-
-    @Value("${app.ai.gemini.api-key:dummy-key}")
-    private String geminiApiKey;
 
     @Value("${app.ai.gemini.model:gemini-3.6-flash}")
     private String geminiModel;
@@ -218,9 +219,6 @@ public class CompanyIdentityDetectionService {
 
             // Use a lightweight Gemini call - we construct a minimal request
             org.springframework.web.client.RestClient restClient = org.springframework.web.client.RestClient.create();
-            String url = String.format(
-                    "https://generativelanguage.googleapis.com/v1/models/%s:generateContent?key=%s",
-                    geminiModel, geminiApiKey);
 
             Map<String, Object> requestBody = Map.of(
                     "contents", List.of(
@@ -232,15 +230,15 @@ public class CompanyIdentityDetectionService {
                     )
             );
 
-            org.springframework.http.ResponseEntity<String> response = restClient.post()
-                    .uri(url)
+            String responseBody = geminiRequestExecutor.execute(apiKey -> restClient.post()
+                    .uri(GEMINI_API_URL, geminiModel, apiKey)
                     .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                     .body(requestBody)
                     .retrieve()
-                    .toEntity(String.class);
+                    .body(String.class));
 
             // Parse Gemini response
-            JsonNode root = objectMapper.readTree(response.getBody());
+            JsonNode root = objectMapper.readTree(responseBody);
             String responseText = root.path("candidates").get(0)
                     .path("content").path("parts").get(0)
                     .path("text").asText();
@@ -274,7 +272,7 @@ public class CompanyIdentityDetectionService {
                     .build();
 
         } catch (Exception e) {
-            log.error("AI identity detection failed for doc {}: {}", docId, e.getMessage());
+            log.warn("AI identity detection failed for doc {}. Returning UNKNOWN identity.", docId);
             return DocumentCompanyIdentity.builder()
                     .rawDocumentId(docId)
                     .fileName(fileName)

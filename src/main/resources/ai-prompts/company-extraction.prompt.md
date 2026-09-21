@@ -61,10 +61,13 @@ Field rules:
     - Keep it concise.
     - FORBIDDEN: Do NOT invent claims, add unsupported marketing language, add subjective praise, or infer strategy not stated in the source.
     - If insufficient information is available: return null for value.
-- products: array of objects with "name", "category", and "description".
-    - EXHAUSTIVE EXTRACTION: When documents enumerate products (e.g. "finished products such as smartphones, network systems, computers, TVs, refrigerators, washing machines, air conditioners, and medical equipment"), extract EVERY SINGLE product mentioned. Do NOT skip items such as "network systems", "computers", or "medical equipment".
-    - EXTRACT BOTH LINES AND NOTABLE MODELS: Extract both overarching product lines/divisions and specific key models or technologies mentioned in the text (e.g. HBM4, Exynos 2600, Galaxy series, server SSDs).
-    - EVIDENCE CONSISTENCY: Every product mentioned in your "evidenceText" quote MUST have an entry in "products". If it appears in evidenceText, it must NOT be missing from "products".
+- products: array of objects with "name" only.
+    - Extract only product/service names that are explicitly stated in the source documents.
+    - Do NOT assign categories, descriptions, summaries, or inferred attributes to individual products/services.
+    - Do NOT invent products based on general company knowledge.
+    - EXHAUSTIVE EXTRACTION: When documents enumerate products, extract EVERY SINGLE product/service mentioned. Do NOT skip items.
+    - EVIDENCE CONSISTENCY: Every product name mentioned in your "evidenceText" quote MUST have an entry in "products". If it appears in evidenceText, it must NOT be missing from "products".
+    - Deduplicate product names case-insensitively.
 - markets: array of geographic markets, countries, regions, or operating areas explicitly mentioned.
     - Every market or country extracted MUST be backed by an exact quote and page citation in evidenceText.
 - targetCustomers: array of customer segments and client types explicitly identified or directly served by the company.
@@ -237,6 +240,7 @@ For industries, businessModel, targetCustomers, products, and markets:
    - Is each customer category supported by an exact quote in evidenceText?
    - Did you use concise terms directly grounded in the quote (e.g. "B2C Customers", "B2B Customers") instead of synthetic embellishments?
 4. "products" & "markets":
-   - Does every extracted product or market have its source quote in evidenceText?
-   - Did you extract all products enumerated in the evidenceText quote?
+   - Does every extracted product name or market have its source quote in evidenceText?
+   - Did you extract all product names enumerated in the evidenceText quote?
+   - Did you include ONLY the product name (no category, no description)?
 

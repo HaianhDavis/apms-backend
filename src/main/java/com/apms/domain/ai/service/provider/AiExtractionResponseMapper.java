@@ -245,27 +245,30 @@ public class AiExtractionResponseMapper {
         }
 
         List<Map<String, Object>> products = new ArrayList<>();
+        Set<String> seenNames = new java.util.HashSet<>();
         for (Object item : iterable) {
             Object unwrapped = unwrapAiValue(item);
-            if (!(unwrapped instanceof Map<?, ?>)) {
-                String name = normalizeString(unwrapped);
-                if (name != null && !name.isBlank()) {
-                    Map<String, Object> product = new LinkedHashMap<>();
-                    product.put("name", name);
-                    product.put("category", null);
-                    product.put("description", null);
-                    products.add(product);
-                }
+            String rawName = null;
+            if (unwrapped instanceof Map<?, ?> itemMap) {
+                rawName = normalizeString(itemMap.get("name"));
+            } else if (unwrapped != null) {
+                rawName = normalizeString(unwrapped);
+            }
+
+            if (rawName == null) {
                 continue;
             }
-            if (!(unwrapped instanceof Map<?, ?> itemMap)) {
+            String trimmedName = rawName.trim();
+            if (trimmedName.isEmpty()) {
+                continue;
+            }
+            String lowerKey = trimmedName.toLowerCase(java.util.Locale.ROOT);
+            if (!seenNames.add(lowerKey)) {
                 continue;
             }
 
             Map<String, Object> product = new LinkedHashMap<>();
-            product.put("name", normalizeString(itemMap.get("name")));
-            product.put("category", normalizeString(itemMap.get("category")));
-            product.put("description", normalizeString(itemMap.get("description")));
+            product.put("name", trimmedName);
             products.add(product);
         }
         return products;

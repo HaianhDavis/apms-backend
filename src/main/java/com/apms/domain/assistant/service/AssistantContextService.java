@@ -154,9 +154,7 @@ public class AssistantContextService {
             if (profile.getBusiness().getProducts() != null && !profile.getBusiness().getProducts().isEmpty()) {
                 sb.append("Products/Services:\n");
                 profile.getBusiness().getProducts().forEach(p ->
-                        sb.append("  - ").append(p.getName())
-                                .append(" [").append(p.getCategory()).append("]: ")
-                                .append(p.getDescription()).append("\n")
+                        sb.append("  - ").append(p.getName()).append("\n")
                 );
             }
         }

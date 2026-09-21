@@ -28,6 +28,7 @@ import com.apms.domain.project.fieldapproval.CandidateFieldAccessor;
 import com.apms.domain.project.fieldapproval.FieldApprovalGuard;
 import com.apms.domain.project.fieldapproval.FieldApprovalService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
@@ -236,13 +237,7 @@ public class CandidateService {
                 .businessModel(extractedData.getBusinessModel())
                 .foundedYear(extractedData.getFoundedYear())
                 .companyDescription(extractedData.getCompanyDescription())
-                .products(extractedData.getProducts() != null ? extractedData.getProducts().stream()
-                        .map(p -> CompanyCandidate.Product.builder()
-                                .name(p.getName())
-                                .category(p.getCategory())
-                                .description(p.getDescription())
-                                .build())
-                        .toList() : null)
+                .products(extractedData.getProducts() != null ? cleanCandidateProducts(extractedData.getProducts()) : null)
                 .markets(extractedData.getMarkets())
                 .targetCustomers(extractedData.getTargetCustomers())
                 .build();
@@ -1542,11 +1537,23 @@ public class CandidateService {
                     if (value == null) {
                         candidate.getBusiness().setProducts(null);
                     } else {
-                        java.util.List<CompanyCandidate.Product> products = objectMapper.convertValue(
+                        java.util.List<CompanyCandidate.Product> rawProducts = objectMapper.convertValue(
                                 value,
                                 objectMapper.getTypeFactory().constructCollectionType(java.util.List.class, CompanyCandidate.Product.class)
                         );
-                        candidate.getBusiness().setProducts(products);
+                        if (rawProducts == null) {
+                            candidate.getBusiness().setProducts(null);
+                        } else {
+                            Set<String> seen = new java.util.HashSet<>();
+                            List<CompanyCandidate.Product> cleanProducts = rawProducts.stream()
+                                    .filter(p -> p != null && org.springframework.util.StringUtils.hasText(p.getName()))
+                                    .map(p -> p.getName().trim())
+                                    .filter(name -> !name.isEmpty())
+                                    .filter(name -> seen.add(name.toLowerCase(java.util.Locale.ROOT)))
+                                    .map(name -> CompanyCandidate.Product.builder().name(name).build())
+                                    .toList();
+                            candidate.getBusiness().setProducts(cleanProducts);
+                        }
                     }
                     break;
                 case "contact.addresses":
@@ -2541,5 +2548,17 @@ public class CandidateService {
         if (val instanceof String s) return org.springframework.util.StringUtils.hasText(s);
         if (val instanceof java.util.Collection<?> c) return !c.isEmpty();
         return true;
+    }
+
+    private List<CompanyCandidate.Product> cleanCandidateProducts(List<com.apms.domain.ai.dto.ExtractedCompanyData.Product> raw) {
+        if (raw == null) return null;
+        Set<String> seen = new java.util.HashSet<>();
+        return raw.stream()
+                .filter(p -> p != null && org.springframework.util.StringUtils.hasText(p.getName()))
+                .map(p -> p.getName().trim())
+                .filter(name -> !name.isEmpty())
+                .filter(name -> seen.add(name.toLowerCase(java.util.Locale.ROOT)))
+                .map(name -> CompanyCandidate.Product.builder().name(name).build())
+                .toList();
     }
 }

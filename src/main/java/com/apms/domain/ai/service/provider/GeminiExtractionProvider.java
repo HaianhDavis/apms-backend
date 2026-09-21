@@ -10,7 +10,6 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientResponseException;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -22,9 +21,9 @@ import java.util.Map;
 public class GeminiExtractionProvider implements ExtractionProvider {
 
     private final RestClient restClient;
+    private final GeminiRequestExecutor requestExecutor;
     private final ObjectMapper objectMapper;
     private final AiExtractionResponseMapper responseMapper;
-    private final String geminiApiKey;
     private final String geminiModel;
     private final String extractionSystemPrompt;
 
@@ -32,12 +31,12 @@ public class GeminiExtractionProvider implements ExtractionProvider {
 
     public GeminiExtractionProvider(ObjectMapper objectMapper,
                                     AiExtractionResponseMapper responseMapper,
-                                    @Value("${app.ai.gemini.api-key:dummy-key}") String geminiApiKey,
+                                    GeminiRequestExecutor requestExecutor,
                                     @Value("${app.ai.gemini.model:gemini-3.6-flash}") String geminiModel) {
         this.restClient = RestClient.builder().build();
+        this.requestExecutor = requestExecutor;
         this.objectMapper = objectMapper;
         this.responseMapper = responseMapper;
-        this.geminiApiKey = geminiApiKey;
         this.geminiModel = geminiModel != null && geminiModel.startsWith("models/") ? geminiModel.substring(7) : geminiModel;
         this.extractionSystemPrompt = loadPrompt();
     }
@@ -75,12 +74,12 @@ public class GeminiExtractionProvider implements ExtractionProvider {
         while (attempt < maxRetries) {
             try {
                 attempt++;
-                String responseBody = restClient.post()
-                        .uri(GEMINI_API_URL, geminiModel, geminiApiKey)
+                String responseBody = requestExecutor.execute(apiKey -> restClient.post()
+                        .uri(GEMINI_API_URL, geminiModel, apiKey)
                         .contentType(MediaType.APPLICATION_JSON)
                         .body(requestPayload)
                         .retrieve()
-                        .body(String.class);
+                        .body(String.class));
 
                 // Parse the Gemini JSON structure to extract the text
                 JsonNode rootNode = objectMapper.readTree(responseBody);
@@ -96,33 +95,8 @@ public class GeminiExtractionProvider implements ExtractionProvider {
 
                 return responseMapper.mapResponse(rawAiOutput);
 
-            } catch (RestClientResponseException e) {
-                int statusCode = e.getStatusCode().value();
-                if (statusCode == 429 || statusCode >= 500) {
-                    log.warn("Gemini API rate limit or server error ({}). Attempt {} of {}", statusCode, attempt, maxRetries);
-                    if (attempt >= maxRetries) {
-                        log.error("Gemini API error after {} attempts.", maxRetries, e);
-                        throw new BusinessValidationException(statusCode == 429 ? "GEMINI_RATE_LIMITED" : "GEMINI_SERVICE_UNAVAILABLE");
-                    }
-                    try {
-                        Thread.sleep((long) Math.pow(2, attempt) * 1000); // exponential backoff
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        throw new BusinessValidationException("Extraction interrupted");
-                    }
-                } else if (statusCode == 404) {
-                    log.error("Gemini model unavailable (404): {}", e.getResponseBodyAsString());
-                    throw new BusinessValidationException("GEMINI_MODEL_UNAVAILABLE");
-                } else if (statusCode == 400) {
-                    log.error("Gemini invalid request (400): {}", e.getResponseBodyAsString());
-                    throw new BusinessValidationException("GEMINI_INVALID_REQUEST");
-                } else if (statusCode == 401 || statusCode == 403) {
-                    log.error("Gemini authentication failed ({}): {}", statusCode, e.getResponseBodyAsString());
-                    throw new BusinessValidationException("GEMINI_AUTHENTICATION_FAILED");
-                } else {
-                    log.error("Gemini API call failed: {}", e.getResponseBodyAsString(), e);
-                    throw new BusinessValidationException("Gemini API call failed: " + statusCode);
-                }
+            } catch (BusinessValidationException e) {
+                throw e;
             } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
                 log.warn("Gemini extraction parsing failed. Attempt {} of {}. Error: {}", attempt, maxRetries, e.getOriginalMessage());
                 if (attempt < maxRetries) {
@@ -180,10 +154,9 @@ public class GeminiExtractionProvider implements ExtractionProvider {
                                 "items", Map.of(
                                         "type", "OBJECT",
                                         "properties", Map.of(
-                                                "name", Map.of("type", "STRING"),
-                                                "category", Map.of("type", "STRING", "nullable", true),
-                                                "description", Map.of("type", "STRING", "nullable", true)
-                                        )
+                                                "name", Map.of("type", "STRING")
+                                        ),
+                                        "required", List.of("name")
                                 ),
                                 "nullable", true
                         ),

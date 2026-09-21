@@ -852,23 +852,19 @@ public class ExtractionMergeService {
         if (!(rawProducts instanceof Iterable<?> products)) return;
         for (Object item : products) {
             String name = null;
-            String category = null;
-            String description = null;
 
             if (item instanceof ExtractedCompanyData.Product product) {
                 name = product.getName();
-                category = product.getCategory();
-                description = product.getDescription();
             } else if (item instanceof Map<?, ?> map) {
                 name = stringValue(map.get("name"));
-                category = stringValue(map.get("category"));
-                description = stringValue(map.get("description"));
             } else if (item != null) {
                 name = String.valueOf(item);
             }
 
-            if (isUnknown(name)) continue;
-            String normalizedName = name.trim().toLowerCase(Locale.ROOT);
+            if (name != null) name = name.trim();
+            if (name == null || name.isEmpty() || isUnknown(name)) continue;
+
+            String normalizedName = name.toLowerCase(Locale.ROOT);
             boolean alreadyPresent = target.stream()
                     .map(CompanyCandidate.Product::getName)
                     .filter(Objects::nonNull)
@@ -877,8 +873,6 @@ public class ExtractionMergeService {
             if (!alreadyPresent) {
                 target.add(CompanyCandidate.Product.builder()
                         .name(name)
-                        .category(category)
-                        .description(description)
                         .build());
             }
         }

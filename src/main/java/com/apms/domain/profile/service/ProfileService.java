@@ -836,9 +836,22 @@ public class ProfileService {
         if (request.getMarkets() != null) profile.getBusiness().setMarkets(request.getMarkets());
         if (request.getTargetCustomers() != null) profile.getBusiness().setTargetCustomers(request.getTargetCustomers());
         if (request.getProducts() != null) {
-            profile.getBusiness().setProducts(request.getProducts());
+            Set<String> seen = new java.util.HashSet<>();
+            java.util.List<CompanyProfile.Product> prods = request.getProducts().stream()
+                    .filter(p -> p != null && StringUtils.hasText(p.getName()))
+                    .map(p -> p.getName().trim())
+                    .filter(name -> !name.isEmpty())
+                    .filter(name -> seen.add(name.toLowerCase(java.util.Locale.ROOT)))
+                    .map(name -> CompanyProfile.Product.builder().name(name).build())
+                    .collect(java.util.stream.Collectors.toList());
+            profile.getBusiness().setProducts(prods);
         } else if (request.getProductsServices() != null) {
+            Set<String> seen = new java.util.HashSet<>();
             java.util.List<CompanyProfile.Product> prods = request.getProductsServices().stream()
+                    .filter(StringUtils::hasText)
+                    .map(String::trim)
+                    .filter(name -> !name.isEmpty())
+                    .filter(name -> seen.add(name.toLowerCase(java.util.Locale.ROOT)))
                     .map(name -> CompanyProfile.Product.builder().name(name).build())
                     .collect(java.util.stream.Collectors.toList());
             profile.getBusiness().setProducts(prods);
@@ -1313,12 +1326,13 @@ public class ProfileService {
         if (request.getMarkets() != null) profile.getBusiness().setMarkets(request.getMarkets());
         if (request.getTargetCustomers() != null) profile.getBusiness().setTargetCustomers(request.getTargetCustomers());
         if (request.getProducts() != null) {
+            Set<String> seen = new java.util.HashSet<>();
             profile.getBusiness().setProducts(request.getProducts().stream()
-                    .map(product -> CompanyProfile.Product.builder()
-                            .name(product.getName())
-                            .category(product.getCategory())
-                            .description(product.getDescription())
-                            .build())
+                    .filter(product -> product != null && StringUtils.hasText(product.getName()))
+                    .map(product -> product.getName().trim())
+                    .filter(name -> !name.isEmpty())
+                    .filter(name -> seen.add(name.toLowerCase(java.util.Locale.ROOT)))
+                    .map(name -> CompanyProfile.Product.builder().name(name).build())
                     .toList());
         }
         if (request.getFoundedYear() != null) {
@@ -1608,13 +1622,13 @@ public class ProfileService {
                     .collect(java.util.stream.Collectors.toList()));
         }
         if (request.getProducts() != null) {
+            Set<String> seen = new java.util.HashSet<>();
             List<CompanyProfile.Product> prods = request.getProducts().stream()
                     .filter(p -> p != null && StringUtils.hasText(p.getName()))
-                    .map(p -> CompanyProfile.Product.builder()
-                            .name(p.getName().trim())
-                            .category(StringUtils.hasText(p.getCategory()) ? p.getCategory().trim() : null)
-                            .description(StringUtils.hasText(p.getDescription()) ? p.getDescription().trim() : null)
-                            .build())
+                    .map(p -> p.getName().trim())
+                    .filter(name -> !name.isEmpty())
+                    .filter(name -> seen.add(name.toLowerCase(java.util.Locale.ROOT)))
+                    .map(name -> CompanyProfile.Product.builder().name(name).build())
                     .collect(java.util.stream.Collectors.toList());
             profile.getBusiness().setProducts(prods);
         }
@@ -2217,16 +2231,22 @@ public class ProfileService {
                 .businessModel(b.getBusinessModel())
                 .foundedYear(b.getFoundedYear())
                 .companyDescription(b.getCompanyDescription())
-                .products(b.getProducts() != null ? b.getProducts().stream()
-                        .map(p -> CompanyProfile.Product.builder()
-                                .name(p.getName())
-                                .category(p.getCategory())
-                                .description(p.getDescription())
-                                .build())
-                        .toList() : null)
+                .products(b.getProducts() != null ? mapProducts(b.getProducts()) : null)
                 .markets(b.getMarkets())
                 .targetCustomers(b.getTargetCustomers())
                 .build();
+    }
+
+    private List<CompanyProfile.Product> mapProducts(List<CompanyCandidate.Product> candidateProducts) {
+        if (candidateProducts == null) return null;
+        Set<String> seen = new java.util.HashSet<>();
+        return candidateProducts.stream()
+                .filter(p -> p != null && StringUtils.hasText(p.getName()))
+                .map(p -> p.getName().trim())
+                .filter(name -> !name.isEmpty())
+                .filter(name -> seen.add(name.toLowerCase(java.util.Locale.ROOT)))
+                .map(name -> CompanyProfile.Product.builder().name(name).build())
+                .toList();
     }
 
     private CompanyProfile.CompanySize mapCompanySize(CompanyCandidate.CompanySize s) {

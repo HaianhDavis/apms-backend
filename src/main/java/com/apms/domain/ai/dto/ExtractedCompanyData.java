@@ -67,7 +67,5 @@ public class ExtractedCompanyData {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Product {
         private String name;
-        private String category;
-        private String description;
     }
 }

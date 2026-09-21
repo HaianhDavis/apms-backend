@@ -52,6 +52,9 @@ public class AiExtractionService {
     @Value("${app.ai.gemini.api-key:dummy-key}")
     private String geminiApiKey;
 
+    @Value("${app.ai.gemini.api-keys:}")
+    private String geminiApiKeys;
+
     @Value("${spring.ai.openai.api-key:dummy-key}")
     private String openAiApiKey;
 
@@ -300,12 +303,21 @@ public class AiExtractionService {
     private boolean isMockMode() {
         if ("mock".equalsIgnoreCase(aiProvider)) return true;
         if ("gemini".equalsIgnoreCase(aiProvider)) {
-            return "dummy-key".equals(geminiApiKey) || !StringUtils.hasText(geminiApiKey);
+            return !hasRealGeminiCredential();
         }
         if ("openai".equalsIgnoreCase(aiProvider)) {
             return "dummy-key".equals(openAiApiKey) || !StringUtils.hasText(openAiApiKey);
         }
         return true;
+    }
+
+    private boolean hasRealGeminiCredential() {
+        if (StringUtils.hasText(geminiApiKeys)) {
+            return java.util.Arrays.stream(geminiApiKeys.split(","))
+                    .map(String::trim)
+                    .anyMatch(key -> StringUtils.hasText(key) && !"dummy-key".equals(key));
+        }
+        return StringUtils.hasText(geminiApiKey) && !"dummy-key".equals(geminiApiKey);
     }
 
     private void applyProjectControlledIdentity(com.apms.domain.ai.dto.RawExtractionOutput output, Project project) {
