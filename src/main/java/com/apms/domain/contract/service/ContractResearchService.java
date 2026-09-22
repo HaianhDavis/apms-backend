@@ -77,6 +77,23 @@ public class ContractResearchService {
     private static final int PROGRESS_SAVING = 95;
     private static final int PROGRESS_COMPLETED = 100;
 
+    public void validateTaskAccess(Long projectId, Long taskId, Long userId, boolean write) {
+        documentService.validatePartnerContractTaskAccess(projectId, taskId, userId, write);
+    }
+
+    public void validateSourceDocument(Long projectId, Long taskId, CreateContractEntryRequest request) {
+        if (request.getDataEntryMethod() == ContractDataEntryMethod.MANUAL) return;
+        if (!StringUtils.hasText(request.getDocumentId())) {
+            throw new BusinessValidationException("DOCUMENT_REQUIRED", "A source contract PDF is required.");
+        }
+        RawDocument doc = rawDocumentRepository.findById(request.getDocumentId())
+                .orElseThrow(() -> new BusinessValidationException("DOCUMENT_NOT_FOUND"));
+        if (!String.valueOf(projectId).equals(doc.getProjectId())
+                || !String.valueOf(taskId).equals(doc.getTaskId()) || Boolean.TRUE.equals(doc.getIsHidden())) {
+            throw new BusinessValidationException("Source document does not belong to this contract task.");
+        }
+    }
+
     @Transactional
     public Optional<ContractResearchResponse> getResearch(Long projectId, Long taskId) {
         ContractResearch research = contractResearchRepository.findByTaskId(taskId).orElse(null);
@@ -229,7 +246,9 @@ public class ContractResearchService {
         auditLogService.log(userId, AuditAction.CONTRACT_RESEARCH_CREATED, "CONTRACT_ENTRY", entry.getId(),
                 "Task " + taskId + ": Created contract entry " + entry.getTitle() + " (" + method + ")");
 
-        return toResponse(research);
+        ContractResearchResponse response = toResponse(research);
+        response.setCreatedContractId(entry.getId());
+        return response;
     }
 
     @Transactional
@@ -590,6 +609,7 @@ public class ContractResearchService {
 
     private void executeStage2Extraction(Long taskId, String contractId, ContractType confirmedType,
                                         RawDocument doc, int totalPages, String docText, Long userId) {
+        LocalDateTime runStartedAt = findContractOrThrow(getResearchEntity(taskId), contractId).getExtractionStartedAt();
         updateProgress(taskId, contractId, ContractExtractionStage.EXTRACTING_FIELDS, PROGRESS_EXTRACTING);
         AiContractExtractionCandidate extractionCandidate = extractionService.extractStructuredContract(doc, confirmedType);
 
@@ -600,6 +620,8 @@ public class ContractResearchService {
         ContractEntry entry = findContractOrThrow(research, contractId);
 
         // Focus on Common Contract Data and active Subtype Data
+        if (entry.getExtractionStatus() != ContractExtractionStatus.PROCESSING
+                || !Objects.equals(runStartedAt, entry.getExtractionStartedAt())) return;
         entry.setCooperationAgreementData(null);
         entry.setPartnershipAgreementData(null);
         entry.setJointVentureAgreementData(null);
@@ -1962,6 +1984,7 @@ public class ContractResearchService {
         try {
             ContractResearch research = getResearchEntity(taskId);
             ContractEntry entry = findContractOrThrow(research, contractId);
+            if (entry.getExtractionStatus() != ContractExtractionStatus.PROCESSING) return;
             entry.setExtractionStage(stage);
             entry.setExtractionProgress(progress);
             entry.setUpdatedAt(LocalDateTime.now());
@@ -1975,6 +1998,7 @@ public class ContractResearchService {
         try {
             ContractResearch research = getResearchEntity(taskId);
             ContractEntry entry = findContractOrThrow(research, contractId);
+            if (entry.getExtractionStatus() != ContractExtractionStatus.PROCESSING) return;
             entry.setExtractionStatus(ContractExtractionStatus.FAILED);
             entry.setExtractionErrorCode("EXTRACTION_ERROR");
             entry.setExtractionErrorMessage(errorMessage != null ? errorMessage : "Extraction failed. Please retry.");

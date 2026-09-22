@@ -118,6 +118,7 @@ class ContractResearchServiceTest {
         assertThat(response).isNotNull();
         assertThat(response.getContracts()).hasSize(1);
         ContractEntry created = response.getContracts().get(0);
+        assertThat(response.getCreatedContractId()).isEqualTo(created.getId());
         assertThat(created.getTitle()).isEqualTo("Cooperation Contract 2026");
         assertThat(created.getReviewStatus()).isEqualTo(ContractEntryReviewStatus.DRAFT);
         assertThat(created.getExtractionStatus()).isEqualTo(ContractExtractionStatus.NOT_EXTRACTED);

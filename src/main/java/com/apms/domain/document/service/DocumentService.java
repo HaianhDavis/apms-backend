@@ -191,6 +191,12 @@ public class DocumentService {
 
     @Transactional
     public ImportJobResponse uploadPartnerContractDocument(Long projectId, Long taskId, MultipartFile file, Long uploaderUserId) {
+        validatePartnerContractTaskAccess(projectId, taskId, uploaderUserId, true);
+        if (file == null || file.isEmpty() || file.getSize() > 50L * 1024 * 1024
+                || file.getOriginalFilename() == null
+                || !file.getOriginalFilename().toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")) {
+            throw new BusinessValidationException("A non-empty PDF of at most 50MB is required.");
+        }
         ProjectTask task = projectTaskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + taskId));
 
@@ -610,6 +616,27 @@ public class DocumentService {
     private void validateProjectExists(Long projectId) {
         if (!projectRepository.existsById(projectId)) {
             throw new ResourceNotFoundException("Project not found with id: " + projectId);
+        }
+    }
+
+    public void validatePartnerContractTaskAccess(Long projectId, Long taskId, Long userId, boolean write) {
+        ProjectTask task = projectTaskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
+        if (task.getProject() == null || !projectId.equals(task.getProject().getId())
+                || task.getTaskType() != com.apms.common.enums.TaskType.PARTNER_CONTRACT_COLLECTION) {
+            throw new BusinessValidationException("Task must belong to this project and be PARTNER_CONTRACT_COLLECTION.");
+        }
+        if (!write) return;
+        if (userId == null) throw new AccessDeniedException("Authentication required");
+        if (task.getStatus() != com.apms.common.enums.TaskStatus.IN_PROGRESS
+                && task.getStatus() != com.apms.common.enums.TaskStatus.TODO) {
+            throw new BusinessValidationException("Contract task is not editable.");
+        }
+        var user = accountRepository.findById(userId)
+                .orElseThrow(() -> new AccessDeniedException("Account not found"));
+        boolean manager = user.getRoles().contains(com.apms.common.enums.SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        if (!manager && (task.getAssignedToAccount() == null || !userId.equals(task.getAssignedToAccount().getId()))) {
+            throw new AccessDeniedException("Staff can only modify their assigned contract task.");
         }
     }
 

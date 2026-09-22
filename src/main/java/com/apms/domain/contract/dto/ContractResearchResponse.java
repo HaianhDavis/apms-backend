@@ -17,6 +17,7 @@ import java.util.List;
 @AllArgsConstructor
 public class ContractResearchResponse {
     private String id;
+    private String createdContractId;
     private Long taskId;
     private Long projectId;
     private String companyProfileId;

@@ -23,21 +23,26 @@ public class ContractResearchController {
     private final com.apms.domain.profile.service.CompanyProfileAccessService companyProfileAccessService;
 
     @GetMapping("/projects/{projectId}/tasks/{taskId}/contract-research")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#projectId)")
     public ResponseEntity<ContractResearchResponse> getResearch(
             @PathVariable Long projectId,
             @PathVariable Long taskId) {
+        researchService.validateTaskAccess(projectId, taskId, null, false);
         return researchService.getResearch(projectId, taskId)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#projectId)")
     public ResponseEntity<ContractResearchResponse> createContractEntry(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
             @Valid @RequestBody CreateContractEntryRequest request,
             @AuthenticationPrincipal UserDetailsImpl user) {
         Long userId = user != null ? user.getId() : 1L;
+        researchService.validateTaskAccess(projectId, taskId, user != null ? user.getId() : null, true);
+        researchService.validateSourceDocument(projectId, taskId, request);
         return ResponseEntity.ok(researchService.createContractEntry(taskId, request, userId));
     }
 
@@ -85,32 +90,38 @@ public class ContractResearchController {
     }
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}/extract")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#projectId)")
     public ResponseEntity<ContractResearchResponse> extractContract(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
             @PathVariable String contractId,
             @AuthenticationPrincipal UserDetailsImpl user) {
         Long userId = user != null ? user.getId() : 1L;
+        researchService.validateTaskAccess(projectId, taskId, user != null ? user.getId() : null, true);
         return ResponseEntity.ok(researchService.extractContractEntry(taskId, contractId, userId));
     }
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}/re-extract")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#projectId)")
     public ResponseEntity<ContractResearchResponse> reExtractContract(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
             @PathVariable String contractId,
             @AuthenticationPrincipal UserDetailsImpl user) {
         Long userId = user != null ? user.getId() : 1L;
+        researchService.validateTaskAccess(projectId, taskId, user != null ? user.getId() : null, true);
         return ResponseEntity.ok(researchService.reExtractContractEntry(taskId, contractId, userId));
     }
 
     @PostMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}/cancel-extract")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#projectId)")
     public ResponseEntity<ContractResearchResponse> cancelExtract(
             @PathVariable Long projectId,
             @PathVariable Long taskId,
             @PathVariable String contractId,
             @AuthenticationPrincipal UserDetailsImpl user) {
         Long userId = user != null ? user.getId() : 1L;
+        researchService.validateTaskAccess(projectId, taskId, user != null ? user.getId() : null, true);
         return ResponseEntity.ok(researchService.cancelExtraction(taskId, contractId, userId));
     }
 
