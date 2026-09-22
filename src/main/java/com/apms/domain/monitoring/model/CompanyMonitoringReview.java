@@ -43,9 +43,6 @@ public class CompanyMonitoringReview {
     @Column(name = "update_proposal_id")
     private String updateProposalId;
 
-    @Column(name = "relationship_change_proposal_id")
-    private Long relationshipChangeProposalId;
-
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String note;
 }

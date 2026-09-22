@@ -42,9 +42,12 @@ public class ProfileResponse {
     private Integer revision;
     private String versionLabel;
     private Long responsibleManagerId;
+    private String responsibleManagerName;
     private Boolean canEditProfile;
     private Boolean canManageVisibility;
     private Boolean canPublish;
     private String publishBlockReason;
     private Boolean canAccessRelationshipCloseness;
+    private Boolean canTransferManagement;
+    private Boolean isCurrentResponsibleManager;
 }

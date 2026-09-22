@@ -53,10 +53,70 @@ public class StaffCompanyScopeEvaluator {
     private final OwnerOrganizationService ownerOrganizationService;
     private final CompanyProfileRepository companyProfileRepository;
     private final ProjectRepository projectRepository;
+    private final com.apms.domain.project.repository.sql.ProjectMemberRepository projectMemberRepository;
     private final ImportJobRepository importJobRepository;
     private final CompanyProfileUpdateProposalRepository proposalRepository;
     private final AiExtractionCacheRepository extractionCacheRepository;
     private final com.apms.domain.monitoring.repository.CompanyMonitoringAssignmentRepository monitoringAssignmentRepository;
+
+    /**
+     * Authoritative project-scoped read evaluator.
+     * Evaluates ONLY:
+     * 1. Project exists.
+     * 2. The account is a ProjectMember of that project.
+     * 3. The requested company profile resolves to the target company profile of that project.
+     *
+     * Does NOT check roles (no 'if role != STAFF return true').
+     * Global Manager/Owner/Admin authorization must continue through existing role/access rules.
+     */
+    public boolean canReadCompanyProfileFromProject(Long accountId, Long projectId, String requestedProfileId) {
+        if (accountId == null || projectId == null || !StringUtils.hasText(requestedProfileId)) {
+            return false;
+        }
+
+        // 1. Verify project exists
+        com.apms.domain.project.Project project = projectRepository.findById(projectId).orElse(null);
+        if (project == null) {
+            return false;
+        }
+
+        // 2. Verify account is a ProjectMember of that project
+        boolean isMember = projectMemberRepository.existsByProject_IdAndAccount_Id(projectId, accountId);
+        if (!isMember) {
+            return false;
+        }
+
+        // 3. Verify requested profile is the target company profile of that project
+        String targetCompanyProfileId = project.getTargetCompanyProfileId();
+        if (!StringUtils.hasText(targetCompanyProfileId)) {
+            return false;
+        }
+
+        // Resolve requested profile to canonical entity
+        CompanyProfile requestedProfile = resolveProfile(requestedProfileId);
+        if (requestedProfile == null) {
+            return false;
+        }
+
+        // Resolve project target company profile to canonical entity
+        CompanyProfile targetProfile = resolveProfile(targetCompanyProfileId);
+        if (targetProfile == null) {
+            // Fallback if target company profile cannot be resolved in MongoDB: compare raw identifier
+            return targetCompanyProfileId.equals(requestedProfile.getId())
+                    || targetCompanyProfileId.equals(requestedProfile.getCompanyId())
+                    || targetCompanyProfileId.equals(requestedProfileId);
+        }
+
+        // Canonical comparison: compare canonical identifier (Mongo ID or universal companyId)
+        if (requestedProfile.getId() != null && requestedProfile.getId().equals(targetProfile.getId())) {
+            return true;
+        }
+        if (requestedProfile.getCompanyId() != null && requestedProfile.getCompanyId().equals(targetProfile.getCompanyId())) {
+            return true;
+        }
+
+        return false;
+    }
 
     // ─────────────────────────────────────────────
     // Company-level guards

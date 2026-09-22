@@ -43,7 +43,7 @@ public class OwnerAiAssistantService {
 
         OwnerContextResult result;
         try {
-            result = ownerContextService.buildContext(request.getCompanyProfileId(), request.getQuestion());
+            result = ownerContextService.buildContext(request.getCompanyProfileId(), request.getMentions(), request.getQuestion());
         } catch (ClarificationRequiredException e) {
             return AiChatResponse.builder()
                     .sessionId(sessionId)
@@ -83,6 +83,7 @@ public class OwnerAiAssistantService {
                 .sources(sourceLabels)
                 .suggestedActions(suggestedActions)
                 .navigationActions(navigationActions)
+                .mentions(request.getMentions())
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -96,6 +97,10 @@ public class OwnerAiAssistantService {
                 .suggestedActions(suggestedActions)
                 .navigationActions(navigationActions)
                 .build();
+    }
+
+    public List<com.apms.domain.assistant.dto.CompanyAutocompleteItemDto> autocompleteCompanies(String q, int limit) {
+        return ownerContextService.autocompleteCompanies(q, limit);
     }
 
     private UserDetailsImpl currentUser() {

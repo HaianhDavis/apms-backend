@@ -79,6 +79,16 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
             @Param("companyName") String companyName,
             @Param("excludeId") Long excludeId);
 
+    List<Project> findByTargetCompanyProfileId(String targetCompanyProfileId);
+
+    @Query("""
+            SELECT p FROM Project p
+            WHERE p.targetCompanyTaxCode = :taxCode
+              AND p.status NOT IN (com.apms.common.enums.ProjectStatus.COMPLETED, com.apms.common.enums.ProjectStatus.CLOSED, com.apms.common.enums.ProjectStatus.CANCELLED)
+            ORDER BY p.id DESC
+            """)
+    List<Project> findOpenProjectsByTargetCompanyTaxCode(@Param("taxCode") String taxCode);
+
     @Query("""
             SELECT p FROM Project p
             WHERE p.targetCompanyTaxCode = :taxCode
@@ -104,4 +114,22 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
     boolean existsByTargetCompanyProfileIdInAndIdNot(
             @Param("profileIds") java.util.Collection<String> profileIds,
             @Param("excludeProjectId") Long excludeProjectId);
+
+    boolean existsByTargetCompanyProfileIdAndStatusNotIn(
+            String targetCompanyProfileId,
+            java.util.Collection<ProjectStatus> statuses);
+
+    @Query("""
+            SELECT DISTINCT p FROM Project p
+            LEFT JOIN p.members m
+            WHERE (p.createdByAccount.id = :accountId OR m.account.id = :accountId)
+              AND (:q IS NULL OR :q = ''
+                   OR LOWER(p.projectName) LIKE LOWER(CONCAT('%', :q, '%'))
+                   OR (p.targetCompanyName IS NOT NULL AND LOWER(p.targetCompanyName) LIKE LOWER(CONCAT('%', :q, '%'))))
+            ORDER BY p.id DESC
+            """)
+    List<Project> searchAccessibleProjectsForManager(
+            @Param("accountId") Long accountId,
+            @Param("q") String q,
+            Pageable pageable);
 }

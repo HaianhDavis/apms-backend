@@ -23,5 +23,6 @@ public class AiChatMessageResponse {
     private List<String> sources;
     private List<String> suggestedActions;
     private List<AiNavigationAction> navigationActions;
+    private List<AiMentionDto> mentions;
     private LocalDateTime createdAt;
 }

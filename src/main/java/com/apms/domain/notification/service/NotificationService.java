@@ -5,12 +5,9 @@ import com.apms.common.enums.NotificationType;
 import com.apms.common.enums.SystemRole;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.audit.service.AuditLogService;
-import com.apms.domain.notification.FcmDeviceToken;
 import com.apms.domain.notification.Notification;
 import com.apms.domain.notification.dto.NotificationResponse;
-import com.apms.domain.notification.dto.RegisterFcmTokenRequest;
 import com.apms.domain.notification.dto.SendNotificationRequest;
-import com.apms.domain.notification.repository.sql.FcmDeviceTokenRepository;
 import com.apms.domain.notification.repository.sql.NotificationRepository;
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
@@ -24,12 +21,9 @@ import com.apms.domain.project.ProjectTaskSubmission;
 import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
 import com.apms.security.UserDetailsImpl;
-import com.google.firebase.messaging.FirebaseMessaging;
-import com.google.firebase.messaging.Message;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -52,10 +46,8 @@ import java.util.List;
 public class NotificationService {
 
     private final NotificationRepository notificationRepository;
-    private final FcmDeviceTokenRepository fcmDeviceTokenRepository;
     private final AccountRepository accountRepository;
     private final AuditLogService auditLogService;
-    private final ObjectProvider<FirebaseMessaging> firebaseMessagingProvider;
     private final CompanyProfileRepository companyProfileRepository;
     private final CompanyRelationshipAssessmentRepository assessmentRepository;
 
@@ -212,39 +204,6 @@ public class NotificationService {
         auditLogService.log(currentUser.getId(), AuditAction.NOTIFICATION_SENT, "Notification", String.valueOf(notification.getId()), "Notification sent to user " + recipient.getId());
 
         return toResponse(notification);
-    }
-
-    @Transactional
-    public void registerFcmToken(RegisterFcmTokenRequest request) {
-        UserDetailsImpl currentUser = getCurrentUser();
-        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
-
-        Account account = accountRepository.findById(currentUser.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
-
-        String token = request.getToken().trim();
-        FcmDeviceToken deviceToken = fcmDeviceTokenRepository.findByToken(token)
-                .orElseGet(() -> FcmDeviceToken.builder().token(token).build());
-
-        deviceToken.setAccount(account);
-        deviceToken.setDeviceType(StringUtils.hasText(request.getDeviceType()) ? request.getDeviceType().trim() : "WEB");
-        deviceToken.setIsActive(true);
-        deviceToken.setLastSeenAt(LocalDateTime.now());
-        fcmDeviceTokenRepository.save(deviceToken);
-    }
-
-    @Transactional
-    public void unregisterFcmToken(String token) {
-        UserDetailsImpl currentUser = getCurrentUser();
-        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
-        if (!StringUtils.hasText(token)) return;
-
-        fcmDeviceTokenRepository.findByToken(token.trim()).ifPresent(deviceToken -> {
-            if (deviceToken.getAccount() != null && deviceToken.getAccount().getId().equals(currentUser.getId())) {
-                deviceToken.setIsActive(false);
-                fcmDeviceTokenRepository.save(deviceToken);
-            }
-        });
     }
 
     @Transactional
@@ -887,33 +846,7 @@ public class NotificationService {
     }
 
     private void pushToUser(Long recipientId, String title, String body, java.util.Map<String, String> data) {
-        FirebaseMessaging firebaseMessaging = firebaseMessagingProvider.getIfAvailable();
-        if (firebaseMessaging == null) {
-            log.debug("Firebase is not configured; skipping FCM push for user={}", recipientId);
-            return;
-        }
-
-        List<FcmDeviceToken> tokens = fcmDeviceTokenRepository.findByAccount_IdAndIsActiveTrue(recipientId);
-        if (tokens.isEmpty()) {
-            log.debug("No active FCM tokens for user={}", recipientId);
-            return;
-        }
-
-        for (FcmDeviceToken token : tokens) {
-            try {
-                Message message = Message.builder()
-                        .setToken(token.getToken())
-                        .setNotification(com.google.firebase.messaging.Notification.builder()
-                                .setTitle(title)
-                                .setBody(body)
-                                .build())
-                        .putAllData(data)
-                        .build();
-                firebaseMessaging.send(message);
-            } catch (Exception ex) {
-                log.warn("Failed to send FCM notification to user={}, tokenId={}: {}", recipientId, token.getId(), ex.getMessage());
-            }
-        }
+        // FCM device push removed; in-app notifications only
     }
 
     private void runAfterCommit(Runnable runnable) {

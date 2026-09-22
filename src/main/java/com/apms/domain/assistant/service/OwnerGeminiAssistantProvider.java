@@ -132,8 +132,10 @@ public class OwnerGeminiAssistantProvider implements AssistantProvider {
                 ? context.getCompanyProfile().getIdentity().getLegalName()
                 : "Unknown";
             answer.append("Focusing on specific company: **").append(name).append("**.\n");
-        } else {
+        } else if (context.getProjectId() != null) {
             answer.append("Providing an ecosystem executive summary for project ID: ").append(context.getProjectId()).append(".\n");
+        } else {
+            answer.append("Providing an ecosystem executive summary.\n");
         }
 
         if (context.getFormattedRelationships() != null && !context.getFormattedRelationships().isEmpty()) {

@@ -51,6 +51,11 @@ public class TotpVerificationService {
 
     @Transactional
     public void verifyStepUpCode(Long accountId, String code) {
+        verifyTotp(accountId, code);
+    }
+
+    @Transactional
+    public void verifyTotp(Long accountId, String code) {
         AccountTotpCredential credential = repository.findByAccountIdWithLock(accountId)
                 .orElseThrow(() -> new TotpException("TOTP_NOT_ENROLLED"));
 

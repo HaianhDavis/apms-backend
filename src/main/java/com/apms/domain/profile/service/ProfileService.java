@@ -84,6 +84,9 @@ public class ProfileService {
     private final com.apms.domain.profile.assessment.service.RelationshipClosenessAccessEvaluator relationshipClosenessAccessEvaluator;
     private final NotificationService notificationService;
     private final com.apms.domain.reference.service.IndustryCatalogService industryCatalogService;
+    private final CompanyProfileOfficialEvaluator companyProfileOfficialEvaluator;
+    private final com.apms.domain.profile.repository.mongo.CompanyProfileManagerHistoryRepository historyRepository;
+    private final com.apms.domain.user.repository.sql.UserProfileRepository userProfileRepository;
 
     // ─────────────────────────────────────────────
     // EVENT LISTENER
@@ -545,8 +548,24 @@ public class ProfileService {
      */
     @Transactional(readOnly = true)
     public Page<ProfileResponse> searchCompanyProfiles(String keyword, String industry, String market, String reviewStatus, String relationshipType, boolean excludeOwner, Set<String> allowedCompanyIds, com.apms.common.enums.ProfileVisibility visibility, Long managerId, Pageable pageable) {
+        return searchCompanyProfiles(keyword, industry, market, reviewStatus, relationshipType, excludeOwner, allowedCompanyIds, visibility, managerId, false, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ProfileResponse> searchCompanyProfiles(String keyword, String industry, String market, String reviewStatus, String relationshipType, boolean excludeOwner, Set<String> allowedCompanyIds, com.apms.common.enums.ProfileVisibility visibility, Long managerId, Boolean officialOnly, Pageable pageable) {
+        return searchCompanyProfiles(keyword, industry, market, reviewStatus, relationshipType, excludeOwner, allowedCompanyIds, visibility, managerId, null, officialOnly, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ProfileResponse> searchCompanyProfiles(String keyword, String industry, String market, String reviewStatus, String relationshipType, boolean excludeOwner, Set<String> allowedCompanyIds, com.apms.common.enums.ProfileVisibility visibility, Long managerId, Long managedByManagerId, Boolean officialOnly, Pageable pageable) {
         Pageable effectivePageable = newestFirst(pageable);
         Criteria criteria = Criteria.where("isDeleted").ne(true);
+
+        if (Boolean.TRUE.equals(officialOnly)) {
+            if (!StringUtils.hasText(reviewStatus)) {
+                criteria.and("reviewStatus").ne("UNVERIFIED");
+            }
+        }
 
         if (visibility != null) {
             if (visibility == com.apms.common.enums.ProfileVisibility.HIDDEN) {
@@ -572,7 +591,9 @@ public class ProfileService {
             criteria.and("reviewStatus").is(reviewStatus);
         }
 
-        if (managerId != null) {
+        if (managedByManagerId != null) {
+            criteria.and("responsibleManagerId").is(managedByManagerId);
+        } else if (managerId != null) {
             criteria.orOperator(
                     Criteria.where("metadata.createdBy").is(managerId.toString()),
                     Criteria.where("responsibleManagerId").is(managerId)
@@ -648,6 +669,12 @@ public class ProfileService {
         long total = mongoTemplate.count(query, CompanyProfile.class);
         query.with(effectivePageable);
         java.util.List<CompanyProfile> profiles = mongoTemplate.find(query, CompanyProfile.class);
+
+        if (Boolean.TRUE.equals(officialOnly)) {
+            profiles = profiles.stream()
+                    .filter(companyProfileOfficialEvaluator::isOfficial)
+                    .collect(java.util.stream.Collectors.toList());
+        }
 
         return new PageImpl<>(profiles, effectivePageable, total).map(this::toResponse);
     }
@@ -800,41 +827,107 @@ public class ProfileService {
 
         // Apply Identity
         if (profile.getIdentity() == null) profile.setIdentity(new CompanyProfile.Identity());
-        if (request.getLegalName() != null) profile.getIdentity().setLegalName(request.getLegalName());
-        if (request.getTradeName() != null) profile.getIdentity().setTradeName(request.getTradeName());
-        if (request.getTaxCode() != null) profile.getIdentity().setTaxCode(request.getTaxCode());
-        if (request.getRegistrationNumber() != null) profile.getIdentity().setRegistrationNumber(request.getRegistrationNumber());
+        if (request.getLegalName() != null) profile.getIdentity().setLegalName(CompanyProfileDiffHelper.normalizeOptionalString(request.getLegalName()));
+        if (request.getTradeName() != null) profile.getIdentity().setTradeName(CompanyProfileDiffHelper.normalizeOptionalString(request.getTradeName()));
+        if (request.getTaxCode() != null) profile.getIdentity().setTaxCode(CompanyProfileDiffHelper.normalizeOptionalString(request.getTaxCode()));
+        if (request.getRegistrationNumber() != null) profile.getIdentity().setRegistrationNumber(CompanyProfileDiffHelper.normalizeOptionalString(request.getRegistrationNumber()));
 
         // Apply Contact
         if (profile.getContact() == null) profile.setContact(new CompanyProfile.Contact());
         if (request.getWebsite() != null) profile.getContact().setWebsite(request.getWebsite());
         if (request.getEmails() != null) profile.getContact().setEmails(request.getEmails());
         if (request.getPhones() != null) profile.getContact().setPhones(request.getPhones());
-        if (request.getAddresses() != null) {
-            profile.getContact().setAddresses(CompanyProfile.Contact.toAddressObjects(request.getAddresses()));
+        if (request.getAddressObjects() != null) {
+            profile.getContact().setAddresses(request.getAddressObjects().isEmpty() ? null : request.getAddressObjects());
+        } else if (request.getAddresses() != null) {
+            if (request.getAddresses().isEmpty()) {
+                profile.getContact().setAddresses(null);
+            } else {
+                List<CompanyProfile.Address> existingAddrs = profile.getContact().getAddresses();
+                List<CompanyProfile.Address> mergedAddrs = new java.util.ArrayList<>();
+                for (int i = 0; i < request.getAddresses().size(); i++) {
+                    String fullAddr = request.getAddresses().get(i);
+                    if (fullAddr == null || fullAddr.trim().isEmpty()) continue;
+                    String trimmed = fullAddr.trim();
+                    CompanyProfile.Address match = null;
+                    if (existingAddrs != null) {
+                        for (CompanyProfile.Address ea : existingAddrs) {
+                            if (ea != null && trimmed.equalsIgnoreCase(ea.getFullAddress() != null ? ea.getFullAddress().trim() : "")) {
+                                match = ea;
+                                break;
+                            }
+                        }
+                        if (match == null && i < existingAddrs.size() && existingAddrs.get(i) != null) {
+                            match = existingAddrs.get(i);
+                        }
+                    }
+                    CompanyProfile.Address.AddressBuilder builder = CompanyProfile.Address.builder().fullAddress(trimmed);
+                    if (match != null) {
+                        builder.type(match.getType() != null ? match.getType() : (i == 0 ? "HEADQUARTERS" : "BRANCH"));
+                        builder.city(match.getCity());
+                        builder.country(match.getCountry());
+                    } else {
+                        builder.type(i == 0 ? "HEADQUARTERS" : "BRANCH");
+                    }
+                    mergedAddrs.add(builder.build());
+                }
+                profile.getContact().setAddresses(mergedAddrs.isEmpty() ? null : mergedAddrs);
+            }
         } else if (request.getAddress() != null) {
-            profile.getContact().setAddresses(StringUtils.hasText(request.getAddress())
-                    ? CompanyProfile.Contact.toAddressObjects(java.util.List.of(request.getAddress().trim()))
-                    : java.util.Collections.emptyList());
+            if (StringUtils.hasText(request.getAddress())) {
+                String trimmed = request.getAddress().trim();
+                List<CompanyProfile.Address> existingAddrs = profile.getContact().getAddresses();
+                CompanyProfile.Address match = (existingAddrs != null && !existingAddrs.isEmpty()) ? existingAddrs.get(0) : null;
+                CompanyProfile.Address.AddressBuilder builder = CompanyProfile.Address.builder().fullAddress(trimmed);
+                if (match != null) {
+                    builder.type(match.getType() != null ? match.getType() : "HEADQUARTERS");
+                    builder.city(match.getCity());
+                    builder.country(match.getCountry());
+                } else {
+                    builder.type("HEADQUARTERS");
+                }
+                profile.getContact().setAddresses(java.util.List.of(builder.build()));
+            } else {
+                profile.getContact().setAddresses(null);
+            }
         } else if (request.getHeadOfficeAddress() != null) {
-            CompanyProfile.Address addr = CompanyProfile.Address.builder()
-                    .type("HEADQUARTERS")
-                    .fullAddress(request.getHeadOfficeAddress())
-                    .build();
-            profile.getContact().setAddresses(java.util.List.of(addr));
+            if (StringUtils.hasText(request.getHeadOfficeAddress())) {
+                String trimmed = request.getHeadOfficeAddress().trim();
+                List<CompanyProfile.Address> existingAddrs = profile.getContact().getAddresses();
+                CompanyProfile.Address match = (existingAddrs != null && !existingAddrs.isEmpty()) ? existingAddrs.get(0) : null;
+                CompanyProfile.Address.AddressBuilder builder = CompanyProfile.Address.builder()
+                        .type("HEADQUARTERS")
+                        .fullAddress(trimmed);
+                if (match != null) {
+                    builder.city(match.getCity());
+                    builder.country(match.getCountry());
+                }
+                profile.getContact().setAddresses(java.util.List.of(builder.build()));
+            } else {
+                profile.getContact().setAddresses(null);
+            }
         }
 
         // Apply Company Size
         if (profile.getCompanySize() == null) profile.setCompanySize(new CompanyProfile.CompanySize());
-        if (request.getEmployeeTier() != null) profile.getCompanySize().setEmployeeTier(request.getEmployeeTier());
+        if (request.getEmployeeTier() != null) profile.getCompanySize().setEmployeeTier(CompanyProfileDiffHelper.normalizeOptionalString(request.getEmployeeTier()));
         if (request.getEmployeeCount() != null) profile.getCompanySize().setEmployeeCount(request.getEmployeeCount());
-        if (request.getRevenueTier() != null) profile.getCompanySize().setRevenueTier(request.getRevenueTier());
+        if (request.getRevenueTier() != null) profile.getCompanySize().setRevenueTier(CompanyProfileDiffHelper.normalizeOptionalString(request.getRevenueTier()));
 
         // Apply Business
         if (profile.getBusiness() == null) profile.setBusiness(new CompanyProfile.Business());
-        if (request.getIndustries() != null) profile.getBusiness().setIndustries(request.getIndustries());
-        if (request.getMarkets() != null) profile.getBusiness().setMarkets(request.getMarkets());
-        if (request.getTargetCustomers() != null) profile.getBusiness().setTargetCustomers(request.getTargetCustomers());
+        if (request.getIndustries() != null) {
+            List<String> industries = CompanyProfileDiffHelper.normalizeStringList(request.getIndustries());
+            profile.getBusiness().setIndustries(industries.isEmpty() ? null : industries);
+        }
+        if (request.getMarkets() != null) {
+            List<String> markets = CompanyProfileDiffHelper.normalizeStringList(request.getMarkets());
+            profile.getBusiness().setMarkets(markets.isEmpty() ? null : markets);
+        }
+        if (request.getTargetCustomers() != null) {
+            List<String> targets = CompanyProfileDiffHelper.normalizeStringList(request.getTargetCustomers());
+            profile.getBusiness().setTargetCustomers(targets.isEmpty() ? null : targets);
+        }
         if (request.getProducts() != null) {
             Set<String> seen = new java.util.HashSet<>();
             java.util.List<CompanyProfile.Product> prods = request.getProducts().stream()
@@ -854,7 +947,7 @@ public class ProfileService {
                     .filter(name -> seen.add(name.toLowerCase(java.util.Locale.ROOT)))
                     .map(name -> CompanyProfile.Product.builder().name(name).build())
                     .collect(java.util.stream.Collectors.toList());
-            profile.getBusiness().setProducts(prods);
+            profile.getBusiness().setProducts(prods.isEmpty() ? null : prods);
         }
         if (request.getBusinessModel() != null) profile.getBusiness().setBusinessModel(request.getBusinessModel());
         if (request.getFoundedYear() != null) {
@@ -865,11 +958,27 @@ public class ProfileService {
 
         // Apply Leadership
         if (request.getCompanyMembers() != null) {
-            profile.setCompanyMembers(request.getCompanyMembers());
+            List<CompanyProfile.CompanyMember> members = request.getCompanyMembers().stream()
+                    .filter(CompanyProfileDiffHelper::isMeaningfulMember)
+                    .map(m -> CompanyProfile.CompanyMember.builder()
+                            .fullName(m.getFullName().trim())
+                            .position(CompanyProfileDiffHelper.normalizeOptionalString(m.getPosition()))
+                            .imageUrl(CompanyProfileDiffHelper.normalizeOptionalString(m.getImageUrl()))
+                            .sourceUrl(CompanyProfileDiffHelper.normalizeOptionalString(m.getSourceUrl()))
+                            .notes(CompanyProfileDiffHelper.normalizeOptionalString(m.getNotes()))
+                            .researchedAt(m.getResearchedAt())
+                            .researchedBy(m.getResearchedBy())
+                            .taskId(m.getTaskId())
+                            .build())
+                    .collect(java.util.stream.Collectors.toList());
+            profile.setCompanyMembers(members.isEmpty() ? null : members);
         }
 
         // Apply Tags
-        if (request.getTags() != null) profile.setTags(request.getTags());
+        if (request.getTags() != null) {
+            List<String> tags = CompanyProfileDiffHelper.normalizeStringList(request.getTags());
+            profile.setTags(tags.isEmpty() ? null : tags);
+        }
 
         java.util.Map<String, Object> afterSnapshot = versionService.createSnapshotMap(profile);
 
@@ -890,10 +999,10 @@ public class ProfileService {
         for (String path : potentialPaths) {
             Object bVal = extractValueByPath(beforeSnapshot, path);
             Object aVal = extractValueByPath(afterSnapshot, path);
-            if (!java.util.Objects.equals(bVal, aVal)) {
+            if (!CompanyProfileDiffHelper.areValuesSemanticallyEqual(path, bVal, aVal)) {
                 changedFieldPaths.add(path);
-                beforeValues.put(path, bVal);
-                afterValues.put(path, aVal);
+                beforeValues.put(path, CompanyProfileDiffHelper.normalizeForHistory(path, bVal));
+                afterValues.put(path, CompanyProfileDiffHelper.normalizeForHistory(path, aVal));
             }
         }
 
@@ -1202,14 +1311,7 @@ public class ProfileService {
             Pageable pageable) {
 
         String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
-        List<CompanyProfile> manageable = profileRepository.findAll().stream()
-                .filter(p -> !Boolean.TRUE.equals(p.getIsDeleted()))
-                .filter(p -> !ownerCompanyId.equals(p.getCompanyId()))
-                .filter(p -> {
-                    if (isAdmin) return true;
-                    return managerId != null && managerId.equals(p.getResponsibleManagerId());
-                })
-                .toList();
+        List<CompanyProfile> manageable = resolveManageableProfiles(managerId, isAdmin, ownerCompanyId);
 
         if (StringUtils.hasText(keyword)) {
             String lowerKw = keyword.trim().toLowerCase();
@@ -1266,14 +1368,7 @@ public class ProfileService {
     @Transactional(readOnly = true)
     public com.apms.domain.profile.dto.ProfileVisibilitySummaryDto getVisibilitySummary(Long managerId, boolean isAdmin) {
         String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
-        List<CompanyProfile> manageable = profileRepository.findAll().stream()
-                .filter(p -> !Boolean.TRUE.equals(p.getIsDeleted()))
-                .filter(p -> !ownerCompanyId.equals(p.getCompanyId()))
-                .filter(p -> {
-                    if (isAdmin) return true;
-                    return managerId != null && managerId.equals(p.getResponsibleManagerId());
-                })
-                .toList();
+        List<CompanyProfile> manageable = resolveManageableProfiles(managerId, isAdmin, ownerCompanyId);
 
         long total = manageable.size();
         long published = manageable.stream().filter(p -> !Boolean.TRUE.equals(p.getIsHidden())).count();
@@ -1289,6 +1384,56 @@ public class ProfileService {
                 .hidden(hidden)
                 .blockedFromPublishing(blocked)
                 .build();
+    }
+
+    /**
+     * Resolves the set of CompanyProfiles visible to a manager in Profile Management.
+     * Includes profiles currently managed (responsibleManagerId == managerId) AND
+     * profiles historically managed (appearing in CompanyProfileManagerHistory).
+     * Admin/Owner see all non-deleted, non-owner profiles.
+     */
+    private List<CompanyProfile> resolveManageableProfiles(Long managerId, boolean isAdmin, String ownerCompanyId) {
+        List<CompanyProfile> allProfiles = profileRepository.findAll().stream()
+                .filter(p -> !Boolean.TRUE.equals(p.getIsDeleted()))
+                .filter(p -> !ownerCompanyId.equals(p.getCompanyId()))
+                .toList();
+
+        if (isAdmin) {
+            return allProfiles;
+        }
+
+        if (managerId == null) {
+            return List.of();
+        }
+
+        // 1. Profiles currently managed
+        Set<String> visibleProfileIds = new LinkedHashSet<>();
+        Set<String> visibleCompanyIds = new LinkedHashSet<>();
+        for (CompanyProfile p : allProfiles) {
+            if (managerId.equals(p.getResponsibleManagerId())) {
+                visibleProfileIds.add(p.getId());
+                if (StringUtils.hasText(p.getCompanyId())) {
+                    visibleCompanyIds.add(p.getCompanyId());
+                }
+            }
+        }
+
+        // 2. Profiles historically managed (from transfer history)
+        List<com.apms.domain.profile.CompanyProfileManagerHistory> historyRecords =
+                historyRepository.findByPreviousManagerAccountIdOrNewManagerAccountId(managerId, managerId);
+        for (com.apms.domain.profile.CompanyProfileManagerHistory h : historyRecords) {
+            if (StringUtils.hasText(h.getCompanyProfileId())) {
+                visibleProfileIds.add(h.getCompanyProfileId());
+            }
+            if (StringUtils.hasText(h.getCompanyId())) {
+                visibleCompanyIds.add(h.getCompanyId());
+            }
+        }
+
+        // 3. Filter allProfiles to only those in the visible set
+        return allProfiles.stream()
+                .filter(p -> visibleProfileIds.contains(p.getId()) || (p.getCompanyId() != null && visibleCompanyIds.contains(p.getCompanyId())))
+                .toList();
     }
 
 
@@ -1450,46 +1595,47 @@ public class ProfileService {
 
         // Apply only basic fields
         if (profile.getIdentity() == null) profile.setIdentity(new CompanyProfile.Identity());
-        if (request.getTradeName() != null) profile.getIdentity().setTradeName(request.getTradeName());
-        if (request.getLegalName() != null) profile.getIdentity().setLegalName(request.getLegalName());
-        if (request.getTaxCode() != null) profile.getIdentity().setTaxCode(request.getTaxCode());
+        if (request.getTradeName() != null) profile.getIdentity().setTradeName(CompanyProfileDiffHelper.normalizeOptionalString(request.getTradeName()));
+        if (request.getLegalName() != null) profile.getIdentity().setLegalName(CompanyProfileDiffHelper.normalizeOptionalString(request.getLegalName()));
+        if (request.getTaxCode() != null) profile.getIdentity().setTaxCode(CompanyProfileDiffHelper.normalizeOptionalString(request.getTaxCode()));
 
         if (profile.getContact() == null) profile.setContact(new CompanyProfile.Contact());
-        if (request.getWebsite() != null) profile.getContact().setWebsite(request.getWebsite());
+        if (request.getWebsite() != null) profile.getContact().setWebsite(CompanyProfileDiffHelper.normalizeOptionalString(request.getWebsite()));
 
         if (request.getEmail() != null) {
-            List<String> emails = new ArrayList<>();
-            if (StringUtils.hasText(request.getEmail())) {
-                emails.add(request.getEmail().trim());
-            }
-            profile.getContact().setEmails(emails);
+            String cleanEmail = CompanyProfileDiffHelper.normalizeOptionalString(request.getEmail());
+            profile.getContact().setEmails(cleanEmail != null ? List.of(cleanEmail) : null);
         }
 
         if (request.getPhone() != null) {
-            List<String> phones = new ArrayList<>();
-            if (StringUtils.hasText(request.getPhone())) {
-                phones.add(request.getPhone().trim());
-            }
-            profile.getContact().setPhones(phones);
+            String cleanPhone = CompanyProfileDiffHelper.normalizeOptionalString(request.getPhone());
+            profile.getContact().setPhones(cleanPhone != null ? List.of(cleanPhone) : null);
         }
 
         if (request.getHeadOfficeAddress() != null) {
-            List<CompanyProfile.Address> addresses = new ArrayList<>();
-            if (StringUtils.hasText(request.getHeadOfficeAddress())) {
-                addresses.add(CompanyProfile.Address.builder()
+            String cleanAddr = CompanyProfileDiffHelper.normalizeOptionalString(request.getHeadOfficeAddress());
+            if (cleanAddr != null) {
+                CompanyProfile.Address addr = CompanyProfile.Address.builder()
                         .type("HEADQUARTERS")
-                        .fullAddress(request.getHeadOfficeAddress().trim())
-                        .build());
+                        .fullAddress(cleanAddr)
+                        .build();
+                profile.getContact().setAddresses(List.of(addr));
+            } else {
+                profile.getContact().setAddresses(null);
             }
-            profile.getContact().setAddresses(addresses);
+        } else if (profile.getContact().getAddresses() != null) {
+            List<CompanyProfile.Address> cleanAddrs = profile.getContact().getAddresses().stream()
+                    .filter(CompanyProfileDiffHelper::isMeaningfulAddress)
+                    .collect(java.util.stream.Collectors.toList());
+            profile.getContact().setAddresses(cleanAddrs.isEmpty() ? null : cleanAddrs);
         }
 
         if (profile.getCompanySize() == null) profile.setCompanySize(new CompanyProfile.CompanySize());
         if (request.getEmployeeCount() != null) profile.getCompanySize().setEmployeeCount(request.getEmployeeCount());
-        if (request.getEmployeeTier() != null) profile.getCompanySize().setEmployeeTier(request.getEmployeeTier());
+        if (request.getEmployeeTier() != null) profile.getCompanySize().setEmployeeTier(CompanyProfileDiffHelper.normalizeOptionalString(request.getEmployeeTier()));
 
         if (profile.getBusiness() == null) profile.setBusiness(new CompanyProfile.Business());
-        if (request.getBusinessModel() != null) profile.getBusiness().setBusinessModel(request.getBusinessModel());
+        if (request.getBusinessModel() != null) profile.getBusiness().setBusinessModel(CompanyProfileDiffHelper.normalizeOptionalString(request.getBusinessModel()));
 
         java.util.Map<String, Object> afterSnapshot = versionService.createSnapshotMap(profile);
 
@@ -1508,10 +1654,10 @@ public class ProfileService {
         for (String path : potentialPaths) {
             Object bVal = extractValueByPath(beforeSnapshot, path);
             Object aVal = extractValueByPath(afterSnapshot, path);
-            if (!java.util.Objects.equals(bVal, aVal)) {
+            if (!CompanyProfileDiffHelper.areValuesSemanticallyEqual(path, bVal, aVal)) {
                 changedFieldPaths.add(path);
-                beforeValues.put(path, bVal);
-                afterValues.put(path, aVal);
+                beforeValues.put(path, CompanyProfileDiffHelper.normalizeForHistory(path, bVal));
+                afterValues.put(path, CompanyProfileDiffHelper.normalizeForHistory(path, aVal));
             }
         }
 
@@ -1646,10 +1792,10 @@ public class ProfileService {
         for (String path : potentialPaths) {
             Object bVal = extractValueByPath(beforeSnapshot, path);
             Object aVal = extractValueByPath(afterSnapshot, path);
-            if (!java.util.Objects.equals(bVal, aVal)) {
+            if (!CompanyProfileDiffHelper.areValuesSemanticallyEqual(path, bVal, aVal)) {
                 changedFieldPaths.add(path);
-                beforeValues.put(path, bVal);
-                afterValues.put(path, aVal);
+                beforeValues.put(path, CompanyProfileDiffHelper.normalizeForHistory(path, bVal));
+                afterValues.put(path, CompanyProfileDiffHelper.normalizeForHistory(path, aVal));
             }
         }
 
@@ -1778,10 +1924,10 @@ public class ProfileService {
 
         Object bMembers = extractValueByPath(beforeSnapshot, "companyMembers");
         Object aMembers = extractValueByPath(afterSnapshot, "companyMembers");
-        if (!java.util.Objects.equals(bMembers, aMembers)) {
+        if (!CompanyProfileDiffHelper.areValuesSemanticallyEqual("companyMembers", bMembers, aMembers)) {
             changedFieldPaths.add("companyMembers");
-            beforeValues.put("companyMembers", bMembers);
-            afterValues.put("companyMembers", aMembers);
+            beforeValues.put("companyMembers", CompanyProfileDiffHelper.normalizeForHistory("companyMembers", bMembers));
+            afterValues.put("companyMembers", CompanyProfileDiffHelper.normalizeForHistory("companyMembers", aMembers));
         }
 
         if (changedFieldPaths.isEmpty()) {
@@ -2010,7 +2156,7 @@ public class ProfileService {
     // MAPPERS
     // ─────────────────────────────────────────────
 
-    private ProfileResponse toResponse(CompanyProfile p) {
+    ProfileResponse toResponse(CompanyProfile p) {
         com.apms.common.enums.ProfileVisibility visibility = Boolean.TRUE.equals(p.getIsHidden())
                 ? com.apms.common.enums.ProfileVisibility.HIDDEN
                 : com.apms.common.enums.ProfileVisibility.PUBLISHED;
@@ -2055,18 +2201,30 @@ public class ProfileService {
         boolean canEdit = false;
         boolean canManageVisibility = false;
         boolean canAccessRelationship = false;
+        boolean canTransferManagement = false;
+        boolean isCurrentResponsibleManager = false;
         try {
             org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
             if (auth != null && auth.getPrincipal() instanceof UserDetailsImpl user) {
                 boolean isAdmin = user.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+                boolean isOwner = user.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_OWNER"));
                 boolean isManager = user.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DEVELOPMENT_MANAGER"));
                 boolean isResponsibleManager = isManager && p.getResponsibleManagerId() != null && p.getResponsibleManagerId().equals(user.getId());
+
+                // isCurrentResponsibleManager reflects ownership identity only: authenticated account ID == responsibleManagerId
+                isCurrentResponsibleManager = Objects.equals(p.getResponsibleManagerId(), user.getId());
 
                 if (isAdmin || isResponsibleManager) {
                     canManageVisibility = true;
                     if (!Boolean.TRUE.equals(p.getIsDeleted())) {
                         canEdit = true;
                     }
+                }
+
+                if (isAdmin || isOwner) {
+                    canTransferManagement = true;
+                } else if (isResponsibleManager) {
+                    canTransferManagement = true;
                 }
 
                 canAccessRelationship = relationshipClosenessAccessEvaluator.canAccess(p, user);
@@ -2076,6 +2234,7 @@ public class ProfileService {
         String relType = resolveRelationshipType(p.getCompanyId());
         boolean canPublish = isPublishable(p, relType, canManageVisibility);
         String publishBlockReason = resolvePublishBlockReason(p, canManageVisibility);
+        String responsibleManagerName = resolveDisplayName(p.getResponsibleManagerId());
 
         return ProfileResponse.builder()
                 .id(p.getId())
@@ -2102,46 +2261,191 @@ public class ProfileService {
                 .revision(rev)
                 .versionLabel(versionLabel)
                 .responsibleManagerId(p.getResponsibleManagerId())
+                .responsibleManagerName(responsibleManagerName)
                 .canEditProfile(canEdit)
                 .canManageVisibility(canManageVisibility)
                 .canPublish(canPublish)
                 .publishBlockReason(publishBlockReason)
                 .canAccessRelationshipCloseness(canAccessRelationship)
+                .canTransferManagement(canTransferManagement)
+                .isCurrentResponsibleManager(isCurrentResponsibleManager)
                 .build();
     }
 
-    public void transferResponsibility(String companyId, Long targetManagerId, UserDetailsImpl currentUser) {
-        CompanyProfile profile = findProfileByCompanyIdOrThrow(companyId);
+    public String resolveDisplayName(Long accountId) {
+        if (accountId == null) return null;
+        return userProfileRepository.findByAccountId(accountId)
+                .map(profile -> ((profile.getFirstName() != null ? profile.getFirstName() : "") + " " + (profile.getLastName() != null ? profile.getLastName() : "")).trim())
+                .filter(StringUtils::hasText)
+                .orElseGet(() -> accountRepository.findById(accountId)
+                        .map(com.apms.domain.user.Account::getEmail)
+                        .orElse("Account #" + accountId));
+    }
 
-        com.apms.domain.user.Account target = accountRepository.findById(targetManagerId)
-                .orElseThrow(() -> new ResourceNotFoundException("Target manager not found with id: " + targetManagerId));
-        
+    public CompanyProfile findProfileByProfileIdOrThrow(String companyProfileId) {
+        return profileRepository.findById(companyProfileId)
+                .orElseThrow(() -> new ResourceNotFoundException("Company profile not found with id: " + companyProfileId));
+    }
+
+    public void transferResponsibility(String companyProfileId, com.apms.domain.profile.dto.TransferResponsibilityRequest request, UserDetailsImpl currentUser) {
+        CompanyProfile profile = findProfileByProfileIdOrThrow(companyProfileId);
+
+        // 1. validate actor
+        boolean isAdmin = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+        boolean isOwner = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_OWNER"));
+        if (profile.getResponsibleManagerId() == null) {
+            if (!isAdmin && !isOwner) {
+                throw new org.springframework.security.access.AccessDeniedException("Only SYSTEM_ADMIN or BUSINESS_OWNER can assign responsibility to an unassigned profile");
+            }
+        } else {
+            if (!isAdmin && !isOwner && !currentUser.getId().equals(profile.getResponsibleManagerId())) {
+                throw new org.springframework.security.access.AccessDeniedException("Only the current responsible Manager, BUSINESS_OWNER, or SYSTEM_ADMIN can transfer responsibility");
+            }
+        }
+
+        // 2. validate target manager
+        if (request == null || request.getNewManagerAccountId() == null) {
+            throw new BusinessValidationException("Target manager account ID is required");
+        }
+        com.apms.domain.user.Account target = accountRepository.findById(request.getNewManagerAccountId())
+                .orElseThrow(() -> new ResourceNotFoundException("Target manager not found with id: " + request.getNewManagerAccountId()));
+
         if (!Boolean.TRUE.equals(target.getIsActive()) || 
             !target.getRoles().contains(com.apms.common.enums.SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
             throw new BusinessValidationException("Target account must be an active BUSINESS_DEVELOPMENT_MANAGER");
         }
 
-        if (profile.getResponsibleManagerId() == null) {
-            if (!currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"))) {
-                throw new org.springframework.security.access.AccessDeniedException("Only SYSTEM_ADMIN can assign responsibility to a legacy profile");
-            }
-        } else {
-            if (!currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN")) &&
-                !currentUser.getId().equals(profile.getResponsibleManagerId())) {
-                throw new org.springframework.security.access.AccessDeniedException("Only the current responsible Manager or SYSTEM_ADMIN can transfer responsibility");
+        if (Objects.equals(profile.getResponsibleManagerId(), target.getId())) {
+            throw new BusinessValidationException("Target manager is already the responsible manager for this company profile");
+        }
+
+        if (!StringUtils.hasText(request.getReason())) {
+            throw new BusinessValidationException("Reason for transfer is required");
+        }
+
+        // 3. validate current ownership / concurrency
+        if (request.getExpectedCurrentManagerAccountId() != null) {
+            if (!Objects.equals(request.getExpectedCurrentManagerAccountId(), profile.getResponsibleManagerId())) {
+                throw new com.apms.common.exception.BusinessConflictException(
+                        "Company profile responsible manager has been concurrently updated. Expected: "
+                                + request.getExpectedCurrentManagerAccountId() + ", current: " + profile.getResponsibleManagerId());
             }
         }
 
+        // 3b. block transfer if non-terminal project exists targeting this company profile
+        if (StringUtils.hasText(profile.getCompanyId())) {
+            List<ProjectStatus> terminalStatuses = List.of(
+                    ProjectStatus.COMPLETED, ProjectStatus.CLOSED,
+                    ProjectStatus.CANCELLED, ProjectStatus.ARCHIVED);
+            boolean hasActiveProject = projectRepository.existsByTargetCompanyProfileIdAndStatusNotIn(
+                    profile.getCompanyId().trim(), terminalStatuses);
+            if (hasActiveProject) {
+                throw new com.apms.common.exception.BusinessConflictException(
+                        "Management cannot be transferred while this company has an active project. Close or complete the project first.");
+            }
+        }
+
+        // 4. update CompanyProfile.responsibleManagerId
+        Long previousManagerId = profile.getResponsibleManagerId();
         profile.setResponsibleManagerId(target.getId());
         profileRepository.save(profile);
-        
-        auditLogService.log(
-                currentUser.getId(),
-                com.apms.common.enums.AuditAction.COMPANY_PROFILE_RESPONSIBILITY_TRANSFERRED,
-                "CompanyProfile",
-                profile.getId(),
-                "Responsibility transferred to manager: " + target.getId()
-        );
+
+        // 5. create immutable CompanyProfileManagerHistory
+        String previousManagerName = resolveDisplayName(previousManagerId);
+        String newManagerName = resolveDisplayName(target.getId());
+        String actorName = resolveDisplayName(currentUser.getId());
+
+        com.apms.domain.profile.CompanyProfileManagerHistory history = com.apms.domain.profile.CompanyProfileManagerHistory.builder()
+                .companyProfileId(profile.getId())
+                .companyId(profile.getCompanyId())
+                .previousManagerAccountId(previousManagerId)
+                .previousManagerDisplayName(previousManagerName)
+                .newManagerAccountId(target.getId())
+                .newManagerDisplayName(newManagerName)
+                .transferredByAccountId(currentUser.getId())
+                .transferredByDisplayName(actorName)
+                .reason(request.getReason().trim())
+                .transferredAt(LocalDateTime.now())
+                .build();
+        historyRepository.save(history);
+
+        // 6. write AuditLog
+        try {
+            auditLogService.log(
+                    currentUser.getId(),
+                    com.apms.common.enums.AuditAction.COMPANY_PROFILE_RESPONSIBILITY_TRANSFERRED,
+                    "CompanyProfile",
+                    profile.getId(),
+                    "Responsibility transferred from manager " + (previousManagerId != null ? previousManagerId : "unassigned")
+                            + " to manager " + target.getId() + ". Reason: " + request.getReason().trim()
+            );
+        } catch (Exception e) {
+            log.error("Failed to write audit log for manager transfer: {}", e.getMessage(), e);
+        }
+    }
+
+    public List<com.apms.domain.profile.dto.CompanyProfileManagerHistoryDto> getManagementHistory(String companyProfileId, UserDetailsImpl currentUser) {
+        CompanyProfile profile = findProfileByProfileIdOrThrow(companyProfileId);
+
+        boolean isAdmin = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+        boolean isOwner = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_OWNER"));
+        boolean isManager = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DEVELOPMENT_MANAGER"));
+        if (!isAdmin && !isOwner) {
+            if (!isManager) {
+                throw new org.springframework.security.access.AccessDeniedException("Unauthorized to view management history");
+            }
+            // BD Manager: must be current responsible manager OR a former manager (present in history)
+            boolean isCurrentManager = currentUser.getId().equals(profile.getResponsibleManagerId());
+            if (!isCurrentManager) {
+                List<com.apms.domain.profile.CompanyProfileManagerHistory> historyRecords =
+                        historyRepository.findByCompanyProfileIdOrderByTransferredAtDesc(profile.getId());
+                boolean isFormerManager = historyRecords.stream().anyMatch(h ->
+                        currentUser.getId().equals(h.getPreviousManagerAccountId()) ||
+                        currentUser.getId().equals(h.getNewManagerAccountId()));
+                if (!isFormerManager) {
+                    throw new org.springframework.security.access.AccessDeniedException("Unauthorized to view management history");
+                }
+            }
+        }
+
+        List<com.apms.domain.profile.CompanyProfileManagerHistory> list = historyRepository.findByCompanyProfileIdOrderByTransferredAtDesc(profile.getId());
+        return list.stream().map(h -> com.apms.domain.profile.dto.CompanyProfileManagerHistoryDto.builder()
+                .id(h.getId())
+                .companyProfileId(h.getCompanyProfileId())
+                .companyId(h.getCompanyId())
+                .previousManagerAccountId(h.getPreviousManagerAccountId())
+                .previousManagerDisplayName(h.getPreviousManagerDisplayName())
+                .newManagerAccountId(h.getNewManagerAccountId())
+                .newManagerDisplayName(h.getNewManagerDisplayName())
+                .transferredByAccountId(h.getTransferredByAccountId())
+                .transferredByDisplayName(h.getTransferredByDisplayName())
+                .reason(h.getReason())
+                .transferredAt(h.getTransferredAt())
+                .build()
+        ).collect(java.util.stream.Collectors.toList());
+    }
+
+    public List<com.apms.domain.profile.dto.EligibleManagerDto> getEligibleManagers(String companyProfileId, UserDetailsImpl currentUser) {
+        CompanyProfile profile = findProfileByProfileIdOrThrow(companyProfileId);
+
+        boolean isAdmin = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+        boolean isOwner = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_OWNER"));
+        boolean isResponsibleManager = profile.getResponsibleManagerId() != null && profile.getResponsibleManagerId().equals(currentUser.getId());
+
+        if (!isAdmin && !isOwner && !isResponsibleManager) {
+            throw new org.springframework.security.access.AccessDeniedException("You are not authorized to view eligible managers for this profile");
+        }
+
+        List<com.apms.domain.user.Account> managers = accountRepository.findActiveAccountsByRole(com.apms.common.enums.SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        return managers.stream()
+                .filter(acc -> !Objects.equals(acc.getId(), profile.getResponsibleManagerId()))
+                .map(acc -> com.apms.domain.profile.dto.EligibleManagerDto.builder()
+                        .accountId(acc.getId())
+                        .displayName(resolveDisplayName(acc.getId()))
+                        .email(acc.getEmail())
+                        .build())
+                .sorted(Comparator.comparing(com.apms.domain.profile.dto.EligibleManagerDto::getDisplayName, Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)))
+                .collect(java.util.stream.Collectors.toList());
     }
 
     private CompanyProfile findProfileByCompanyIdOrThrow(String companyId) {
@@ -2297,6 +2601,15 @@ public class ProfileService {
         if (!StringUtils.hasText(taxCode)) {
             return false;
         }
-        return profileRepository.existsByIdentityTaxCode(taxCode.trim());
+        String normTax = taxCode.replaceAll("[\\s\\-]", "").trim();
+        Optional<CompanyProfile> profileOpt = profileRepository.findByIdentityTaxCode(normTax);
+        if (profileOpt.isEmpty()) {
+            return false;
+        }
+        return companyProfileOfficialEvaluator.isOfficial(profileOpt.get());
+    }
+
+    public boolean isOfficialCompanyProfile(CompanyProfile profile) {
+        return companyProfileOfficialEvaluator.isOfficial(profile);
     }
 }

@@ -17,11 +17,21 @@ import com.apms.domain.graph.dto.CompanyRelationshipDto;
 import com.apms.domain.graph.dto.GraphCompanyDto;
 import com.apms.domain.graph.service.GraphService;
 import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.assistant.dto.AiMentionDto;
+import com.apms.domain.assistant.dto.CompanyAutocompleteItemDto;
+import com.apms.domain.crawler.domain.CrawledArticle;
+import com.apms.domain.crawler.repository.CrawledArticleRepository;
+import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.profile.CompanyProfileContract;
+import com.apms.domain.profile.CompanyProfileFinancialRow;
 import com.apms.domain.profile.closeness.CompanyRelationshipClosenessRepository;
+import com.apms.domain.profile.repository.mongo.CompanyProfileContractRepository;
+import com.apms.domain.profile.repository.mongo.CompanyProfileFinancialRowRepository;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.profile.service.OwnerOrganizationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Service;
@@ -45,8 +55,15 @@ public class OwnerAssistantContextService {
     private final GraphService graphService;
     private final CompanyRelationshipClosenessRepository closenessRepository;
     private final ExternalDataRepository externalDataRepository;
+    private final CompanyProfileContractRepository contractRepository;
+    private final CompanyProfileFinancialRowRepository financialRowRepository;
+    private final CrawledArticleRepository crawledArticleRepository;
 
     public OwnerContextResult buildContext(String companyProfileId, String question) {
+        return buildContext(companyProfileId, null, question);
+    }
+
+    public OwnerContextResult buildContext(String companyProfileId, List<AiMentionDto> mentions, String question) {
         OwnerIntent intent = detectOwnerIntent(question);
         
         if (intent == OwnerIntent.INTERNAL_NEWS_PROTECTED) {
@@ -70,8 +87,20 @@ public class OwnerAssistantContextService {
         CompanyProfile pageContextTarget = null;
         if (StringUtils.hasText(companyProfileId)) {
             pageContextTarget = companyProfileRepository.findById(companyProfileId)
-                    .filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()))
+                    .filter(p -> "APPROVED".equals(p.getReviewStatus()))
                     .orElse(null);
+        }
+
+        // Preserve mention order without duplicates
+        List<String> companyMentionIds = new ArrayList<>();
+        if (mentions != null) {
+            for (AiMentionDto m : mentions) {
+                if ("COMPANY".equalsIgnoreCase(m.getType()) && StringUtils.hasText(m.getCompanyProfileId())) {
+                    if (!companyMentionIds.contains(m.getCompanyProfileId())) {
+                        companyMentionIds.add(m.getCompanyProfileId());
+                    }
+                }
+            }
         }
 
         CompanyProfile targetProfile = null;
@@ -80,13 +109,31 @@ public class OwnerAssistantContextService {
         boolean targetOptional = intent == OwnerIntent.RELATIONSHIP_CLOSENESS || intent == OwnerIntent.RISKS || intent == OwnerIntent.OPPORTUNITIES;
         
         if (intent == OwnerIntent.COMPANY_COMPARE) {
-            compareTargets = resolveCompareTargets(question, pageContextTarget);
+            if (companyMentionIds.size() >= 2) {
+                for (String cid : companyMentionIds) {
+                    companyProfileRepository.findById(cid)
+                            .filter(p -> "APPROVED".equals(p.getReviewStatus()))
+                            .ifPresent(compareTargets::add);
+                }
+            }
+            if (compareTargets.size() < 2) {
+                compareTargets = resolveCompareTargets(question, pageContextTarget);
+            }
             if (compareTargets.size() < 2) {
                 throw new ClarificationRequiredException("Please specify two companies to compare (e.g., 'Compare FPT and CMC').");
             }
             return buildCompareContext(compareTargets, sources, ctx, ownerBusinessCompanyId, ownerMongoId);
         } else if (targetRequired || targetOptional) {
-            targetProfile = resolveSingleTarget(question, pageContextTarget, targetRequired);
+            if (!companyMentionIds.isEmpty()) {
+                targetProfile = companyProfileRepository.findById(companyMentionIds.get(0))
+                        .filter(p -> "APPROVED".equals(p.getReviewStatus()))
+                        .orElse(null);
+            } else if (StringUtils.hasText(companyProfileId)) {
+                targetProfile = pageContextTarget;
+            }
+            if (targetProfile == null) {
+                targetProfile = resolveSingleTarget(question, pageContextTarget, targetRequired);
+            }
             if (targetProfile == null && targetRequired) {
                 return OwnerContextResult.builder()
                         .intent(intent)
@@ -228,22 +275,25 @@ public class OwnerAssistantContextService {
             navigationActions.add(buildNavigationAction(targetProfile));
             sources.add(AiSourceReference.builder().type("company_profiles").id(targetProfile.getId()).title(resolveCompanyName(targetProfile)).build());
         } else if (intent == OwnerIntent.COMPANY_PUBLIC_NEWS && targetProfile != null) {
-            var news = externalDataRepository.findByCategoryAndRelatedCompanyId(ExternalDataCategory.NEWS, targetProfile.getCompanyId());
+            Page<CrawledArticle> newsPage = crawledArticleRepository.findByMatchedCompaniesCompanyId(targetProfile.getCompanyId(), PageRequest.of(0, 5));
+            List<CrawledArticle> news = newsPage.getContent();
             if (news.isEmpty()) {
                 directAnswer = "No recent public updates for " + resolveCompanyName(targetProfile) + " are currently stored in APMS.";
             } else {
                 StringBuilder sb = new StringBuilder("Recent Public Updates for " + resolveCompanyName(targetProfile) + "\n\n");
                 int count = 1;
-                for (ExternalDataItem item : news) {
+                for (CrawledArticle item : news) {
                     sb.append(count++).append(". ").append(item.getTitle()).append("\n");
-                    sb.append("Published: ").append(item.getPublishedAt() != null ? item.getPublishedAt().toString() : "Unknown").append("\n");
-                    sb.append("Source: ").append(StringUtils.hasText(item.getUrl()) ? item.getUrl() : "Unknown").append("\n\n");
-                    if (StringUtils.hasText(item.getSummary())) {
+                    sb.append("Published: ").append(item.getPublishedDate() != null ? item.getPublishedDate() : "Unknown").append("\n");
+                    sb.append("Source: ").append(StringUtils.hasText(item.getUrl()) ? item.getUrl() : (StringUtils.hasText(item.getSourceName()) ? item.getSourceName() : "Unknown")).append("\n\n");
+                    if (StringUtils.hasText(item.getAiSummary())) {
+                        sb.append(item.getAiSummary()).append("\n\n");
+                    } else if (StringUtils.hasText(item.getSummary())) {
                         sb.append(item.getSummary()).append("\n\n");
                     }
                 }
                 directAnswer = sb.toString();
-                sources.add(AiSourceReference.builder().type("external_data").id(targetProfile.getId()).title("Public News").build());
+                sources.add(AiSourceReference.builder().type("crawled_articles").id(targetProfile.getId()).title("Public News").build());
             }
             navigationActions.add(buildNavigationAction(targetProfile));
         } else if (intent == OwnerIntent.OUT_OF_SCOPE) {
@@ -1037,18 +1087,123 @@ public class OwnerAssistantContextService {
         StringBuilder sb = new StringBuilder();
         sb.append(resolveCompanyName(profile)).append("\n\n");
         if (profile.getIdentity() != null) {
-            sb.append("Legal Name:\n").append(profile.getIdentity().getLegalName()).append("\n\n");
-        }
-        if (profile.getBusiness() != null && profile.getBusiness().getIndustries() != null && !profile.getBusiness().getIndustries().isEmpty()) {
-            sb.append("Industries:\n");
-            for (String ind : profile.getBusiness().getIndustries()) {
-                sb.append("- ").append(ind).append("\n");
+            sb.append("Identity & Registration:\n");
+            if (StringUtils.hasText(profile.getIdentity().getLegalName())) {
+                sb.append("- Legal Name: ").append(profile.getIdentity().getLegalName()).append("\n");
+            }
+            if (StringUtils.hasText(profile.getIdentity().getTradeName())) {
+                sb.append("- Trade Name: ").append(profile.getIdentity().getTradeName()).append("\n");
+            }
+            if (StringUtils.hasText(profile.getIdentity().getTaxCode())) {
+                sb.append("- Tax Code: ").append(profile.getIdentity().getTaxCode()).append("\n");
+            }
+            if (StringUtils.hasText(profile.getIdentity().getRegistrationNumber())) {
+                sb.append("- Registration Number: ").append(profile.getIdentity().getRegistrationNumber()).append("\n");
+            }
+            if (StringUtils.hasText(profile.getIdentity().getStockTicker())) {
+                sb.append("- Stock Ticker: ").append(profile.getIdentity().getStockTicker())
+                  .append(StringUtils.hasText(profile.getIdentity().getStockExchange()) ? " (" + profile.getIdentity().getStockExchange() + ")" : "")
+                  .append("\n");
             }
             sb.append("\n");
         }
-        if (profile.getBusiness() != null && StringUtils.hasText(profile.getBusiness().getBusinessModel())) {
-            sb.append("Business Model:\n").append(profile.getBusiness().getBusinessModel()).append("\n\n");
+        if (profile.getContact() != null) {
+            sb.append("Contact & Headquarters:\n");
+            List<String> addrs = profile.getContact().getEffectiveAddressStrings();
+            if (addrs != null && !addrs.isEmpty()) {
+                sb.append("- Addresses: ").append(String.join("; ", addrs)).append("\n");
+            }
+            if (StringUtils.hasText(profile.getContact().getWebsite())) {
+                sb.append("- Official Website: ").append(profile.getContact().getWebsite()).append("\n");
+            }
+            if (profile.getContact().getEmails() != null && !profile.getContact().getEmails().isEmpty()) {
+                sb.append("- Email(s): ").append(String.join(", ", profile.getContact().getEmails())).append("\n");
+            }
+            if (profile.getContact().getPhones() != null && !profile.getContact().getPhones().isEmpty()) {
+                sb.append("- Phone(s): ").append(String.join(", ", profile.getContact().getPhones())).append("\n");
+            }
+            sb.append("\n");
         }
+        if (profile.getBusiness() != null) {
+            sb.append("Business & Operations:\n");
+            if (profile.getBusiness().getIndustries() != null && !profile.getBusiness().getIndustries().isEmpty()) {
+                sb.append("- Industries: ").append(String.join(", ", profile.getBusiness().getIndustries())).append("\n");
+            }
+            if (StringUtils.hasText(profile.getBusiness().getBusinessModel())) {
+                sb.append("- Business Model: ").append(profile.getBusiness().getBusinessModel()).append("\n");
+            }
+            if (profile.getBusiness().getProducts() != null && !profile.getBusiness().getProducts().isEmpty()) {
+                List<String> prodNames = profile.getBusiness().getProducts().stream()
+                        .map(CompanyProfile.Product::getName)
+                        .filter(StringUtils::hasText)
+                        .toList();
+                if (!prodNames.isEmpty()) {
+                    sb.append("- Products & Services: ").append(String.join(", ", prodNames)).append("\n");
+                }
+            }
+            if (profile.getBusiness().getTargetCustomers() != null && !profile.getBusiness().getTargetCustomers().isEmpty()) {
+                sb.append("- Target Customers: ").append(String.join(", ", profile.getBusiness().getTargetCustomers())).append("\n");
+            }
+            if (profile.getBusiness().getMarkets() != null && !profile.getBusiness().getMarkets().isEmpty()) {
+                sb.append("- Target Markets: ").append(String.join(", ", profile.getBusiness().getMarkets())).append("\n");
+            }
+            sb.append("\n");
+        }
+        if (profile.getCompanyMembers() != null && !profile.getCompanyMembers().isEmpty()) {
+            sb.append("Leadership & Key Personnel:\n");
+            for (var m : profile.getCompanyMembers()) {
+                sb.append("- ").append(m.getFullName()).append(StringUtils.hasText(m.getPosition()) ? " (" + m.getPosition() + ")" : "").append("\n");
+            }
+            sb.append("\n");
+        }
+        if (profile.getCompanySize() != null) {
+            if (StringUtils.hasText(profile.getCompanySize().getRevenueTier())) {
+                sb.append("- Revenue Tier: ").append(profile.getCompanySize().getRevenueTier()).append("\n");
+            }
+            if (StringUtils.hasText(profile.getCompanySize().getEmployeeTier()) || profile.getCompanySize().getEmployeeCount() != null) {
+                sb.append("- Employees: ").append(profile.getCompanySize().getEmployeeCount() != null ? profile.getCompanySize().getEmployeeCount() : "")
+                  .append(StringUtils.hasText(profile.getCompanySize().getEmployeeTier()) ? " (" + profile.getCompanySize().getEmployeeTier() + ")" : "")
+                  .append("\n");
+            }
+            sb.append("\n");
+        }
+
+        // Canonical Contracts
+        List<CompanyProfileContract> contracts = contractRepository.findByCompanyProfileId(profile.getId());
+        if (!contracts.isEmpty()) {
+            sb.append("Canonical Contracts & Strategic Agreements:\n");
+            int cIdx = 1;
+            for (var c : contracts) {
+                sb.append(cIdx++).append(". Title: ").append(c.getTitle() != null ? c.getTitle() : "Agreement").append("\n");
+                if (c.getContractType() != null) sb.append("   - Type: ").append(c.getContractType()).append("\n");
+                if (c.getDerivedContractStatus() != null) sb.append("   - Derived Status: ").append(c.getDerivedContractStatus()).append("\n");
+                if (c.getCommonData() != null) {
+                    var cd = c.getCommonData();
+                    if (cd.getContractNumber() != null && cd.getContractNumber().getValue() != null) {
+                        sb.append("   - Contract Number: ").append(cd.getContractNumber().getValue()).append("\n");
+                    }
+                    if (cd.getSigningDate() != null && cd.getSigningDate().getValue() != null) {
+                        sb.append("   - Signing Date: ").append(cd.getSigningDate().getValue()).append("\n");
+                    }
+                    if (cd.getEffectiveDate() != null && cd.getEffectiveDate().getValue() != null) {
+                        sb.append("   - Effective Date: ").append(cd.getEffectiveDate().getValue()).append("\n");
+                    }
+                    if (cd.getExpiryDate() != null && cd.getExpiryDate().getValue() != null) {
+                        sb.append("   - Expiry Date: ").append(cd.getExpiryDate().getValue()).append("\n");
+                    }
+                    if (cd.getTerm() != null && cd.getTerm().getValue() != null) {
+                        sb.append("   - Term: ").append(cd.getTerm().getValue()).append("\n");
+                    }
+                    if (cd.getContractValue() != null && cd.getContractValue().getValue() != null) {
+                        var cv = cd.getContractValue().getValue();
+                        sb.append("   - Contract Value: ").append(cv.getAmount() != null ? cv.getAmount().toPlainString() : "N/A")
+                          .append(" ").append(cv.getCurrency() != null ? cv.getCurrency() : "").append("\n");
+                    }
+                }
+                sb.append("\n");
+            }
+        }
+
         if (profile.getInsights() != null) {
             if (profile.getInsights().getStrengths() != null && !profile.getInsights().getStrengths().isEmpty()) {
                 sb.append("Strengths:\n");
@@ -1064,8 +1219,43 @@ public class OwnerAssistantContextService {
                 }
                 sb.append("\n");
             }
+            if (profile.getInsights().getOpportunities() != null && !profile.getInsights().getOpportunities().isEmpty()) {
+                sb.append("Opportunities:\n");
+                for (String o : profile.getInsights().getOpportunities()) {
+                    sb.append("- ").append(o).append("\n");
+                }
+                sb.append("\n");
+            }
+            if (profile.getInsights().getThreats() != null && !profile.getInsights().getThreats().isEmpty()) {
+                sb.append("Threats:\n");
+                for (String t : profile.getInsights().getThreats()) {
+                    sb.append("- ").append(t).append("\n");
+                }
+                sb.append("\n");
+            }
         }
         return sb.toString().trim();
+    }
+
+    public List<CompanyAutocompleteItemDto> autocompleteCompanies(String q, int limit) {
+        int max = Math.min(Math.max(1, limit), 20);
+        Page<CompanyProfile> page;
+        if (StringUtils.hasText(q)) {
+            page = companyProfileRepository.searchByName(q.trim(), PageRequest.of(0, max));
+        } else {
+            page = companyProfileRepository.findAll(PageRequest.of(0, max));
+        }
+        return page.stream()
+                .filter(p -> "APPROVED".equals(p.getReviewStatus()))
+                .filter(p -> p.getIdentity() != null && StringUtils.hasText(p.getIdentity().getLegalName()))
+                .map(p -> CompanyAutocompleteItemDto.builder()
+                        .companyProfileId(p.getId())
+                        .companyId(p.getCompanyId())
+                        .legalName(p.getIdentity().getLegalName())
+                        .tradeName(p.getIdentity().getTradeName())
+                        .taxCode(p.getIdentity().getTaxCode())
+                        .build())
+                .collect(Collectors.toList());
     }
 
     private String formatProfile(CompanyProfile profile) {

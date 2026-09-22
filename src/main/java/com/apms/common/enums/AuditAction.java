@@ -220,5 +220,8 @@ public enum AuditAction {
     // --- Canonical Financial Profile Rows ---
     FINANCIAL_ROW_CREATED,
     FINANCIAL_ROW_UPDATED,
-    FINANCIAL_ROW_DELETED
+    FINANCIAL_ROW_DELETED,
+    // --- Canonical Company Profile Contracts ---
+    COMPANY_PROFILE_CONTRACT_UPDATED,
+    COMPANY_PROFILE_CONTRACTS_BACKFILLED
 }

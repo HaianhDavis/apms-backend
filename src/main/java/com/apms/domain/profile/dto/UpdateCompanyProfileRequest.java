@@ -26,6 +26,7 @@ public class UpdateCompanyProfileRequest {
     private String headOfficeAddress;
     private String address;
     private List<String> addresses;
+    private List<CompanyProfile.Address> addressObjects;
 
     // Company Size
     private String employeeTier;

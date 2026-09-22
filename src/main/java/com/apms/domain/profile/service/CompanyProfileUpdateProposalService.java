@@ -375,10 +375,10 @@ public class CompanyProfileUpdateProposalService {
             for (String path : proposal.getChangedFieldPaths()) {
                 Object bVal = extractValueByPath(beforeSnapshot, path);
                 Object aVal = extractValueByPath(afterSnapshot, path);
-                beforeValues.put(path, bVal);
-                afterValues.put(path, aVal);
-                if (!java.util.Objects.equals(bVal, aVal)) {
+                if (!CompanyProfileDiffHelper.areValuesSemanticallyEqual(path, bVal, aVal)) {
                     dataChanged = true;
+                    beforeValues.put(path, CompanyProfileDiffHelper.normalizeForHistory(path, bVal));
+                    afterValues.put(path, CompanyProfileDiffHelper.normalizeForHistory(path, aVal));
                 }
             }
         } else {

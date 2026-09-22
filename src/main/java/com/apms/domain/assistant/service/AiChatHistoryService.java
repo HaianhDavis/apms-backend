@@ -144,6 +144,7 @@ public class AiChatHistoryService {
                 .sources(message.getSources())
                 .suggestedActions(message.getSuggestedActions())
                 .navigationActions(message.getNavigationActions() == null ? java.util.Collections.emptyList() : message.getNavigationActions())
+                .mentions(message.getMentions() == null ? java.util.Collections.emptyList() : message.getMentions())
                 .createdAt(message.getCreatedAt())
                 .build();
     }

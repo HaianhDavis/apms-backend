@@ -18,4 +18,9 @@ public class OwnerAiChatRequest {
 
     /** Optional: provide an existing sessionId to continue a conversation thread. */
     private String sessionId;
+
+    /**
+     * Structured mentions extracted from question (e.g. Company @ mentions).
+     */
+    private java.util.List<AiMentionDto> mentions;
 }

@@ -6,7 +6,6 @@ import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.document.dto.CompanyDocumentResponse;
 import com.apms.domain.document.service.CompanyDocumentService;
 import com.apms.domain.profile.service.CompanyProfileAccessService;
-import com.apms.domain.security.service.StepUpAuthenticationService;
 import com.apms.security.UserDetailsImpl;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -31,20 +30,21 @@ public class CompanyProfileDocumentController {
 
     private final CompanyDocumentService companyDocumentService;
     private final CompanyProfileAccessService companyProfileAccessService;
-    private final StepUpAuthenticationService stepUpAuthenticationService;
+    private final com.apms.common.security.StaffCompanyScopeEvaluator companyScope;
     private final AuditLogService auditLogService;
 
     @GetMapping("/{companyProfileId}/documents")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyProfileId))")
     public ResponseEntity<PageResponse<CompanyDocumentResponse>> getPublishedDocuments(
             @PathVariable String companyProfileId,
+            @RequestParam(required = false) Long projectId,
             Pageable pageable,
             HttpServletRequest request,
             HttpServletResponse response,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         setNoCacheHeaders(response);
-        validateSecureDocumentAccess(companyProfileId, request, currentUser, null);
+        validateSecureDocumentAccess(companyProfileId, projectId, request, currentUser, null);
         Page<CompanyDocumentResponse> documents = companyDocumentService.getPublishedDocuments(companyProfileId, pageable);
         auditLogService.log(currentUser.getId(), AuditAction.COMPANY_DOCUMENT_LIST_VIEWED, "CompanyProfile", companyProfileId, "Company profile document list viewed");
         return ResponseEntity.ok(PageResponse.of(documents));
@@ -59,7 +59,7 @@ public class CompanyProfileDocumentController {
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         setNoCacheHeaders(response);
-        validateSecureDocumentAccess(companyProfileId, request, currentUser, null);
+        validateSecureDocumentAccess(companyProfileId, null, request, currentUser, null);
         int reconciled = companyDocumentService.reconcilePublishedDocuments(companyProfileId);
         return ResponseEntity.ok(java.util.Map.of(
                 "companyProfileId", companyProfileId,
@@ -68,17 +68,18 @@ public class CompanyProfileDocumentController {
     }
 
     @GetMapping("/{companyProfileId}/documents/{documentId}/download")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyProfileId))")
     public ResponseEntity<Resource> downloadDocument(
             @PathVariable String companyProfileId,
             @PathVariable String documentId,
+            @RequestParam(required = false) Long projectId,
             @RequestParam(defaultValue = "true") boolean download,
             HttpServletRequest request,
             HttpServletResponse response,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
         
         setNoCacheHeaders(response);
-        validateSecureDocumentAccess(companyProfileId, request, currentUser, documentId);
+        validateSecureDocumentAccess(companyProfileId, projectId, request, currentUser, documentId);
         CompanyDocumentService.DocumentDownload file = companyDocumentService.downloadDocument(companyProfileId, documentId);
         ContentDisposition disposition = (download ? ContentDisposition.attachment() : ContentDisposition.inline())
                 .filename(file.fileName())
@@ -99,25 +100,17 @@ public class CompanyProfileDocumentController {
 
     private void validateSecureDocumentAccess(
             String companyProfileId,
+            Long projectId,
             HttpServletRequest request,
             UserDetailsImpl currentUser,
             String documentId) {
 
-        companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile(companyProfileId, currentUser);
-
-        String stepUpToken = request.getHeader("X-Step-Up-Token");
-        if (!StringUtils.hasText(stepUpToken)) {
-            auditLogService.log(currentUser.getId(), AuditAction.COMPANY_DOCUMENT_ACCESS_DENIED, "CompanyProfile", companyProfileId, "Missing documents step-up token");
-            throw new AccessDeniedException("TOTP_STEP_UP_REQUIRED");
-        }
-
-        boolean valid = stepUpAuthenticationService.isOwnerSecureSessionActive(currentUser.getId(), stepUpToken);
-        if (!valid) {
-            auditLogService.log(currentUser.getId(), AuditAction.COMPANY_DOCUMENT_ACCESS_DENIED,
-                    documentId == null ? "CompanyProfile" : "CompanyDocument",
-                    documentId == null ? companyProfileId : documentId,
-                    "Invalid owner secure session for profile " + companyProfileId);
-            throw new AccessDeniedException("TOTP_STEP_UP_REQUIRED");
+        if (currentUser != null && currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DEVELOPMENT_STAFF"))) {
+            if (projectId == null || !companyScope.canReadCompanyProfileFromProject(currentUser.getId(), projectId, companyProfileId)) {
+                throw new AccessDeniedException("STAFF_NOT_AUTHORIZED_FOR_COMPANY_PROFILE");
+            }
+        } else {
+            companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile(companyProfileId, currentUser);
         }
     }
 

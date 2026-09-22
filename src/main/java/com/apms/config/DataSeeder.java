@@ -33,8 +33,12 @@ public class DataSeeder implements CommandLineRunner {
 
         createUserIfNotFound("admin@apms.com", "System", "Admin", SystemRole.SYSTEM_ADMIN);
         createUserIfNotFound("owner@apms.com", "Business", "Owner", SystemRole.BUSINESS_OWNER);
-        createUserIfNotFound("manager@apms.com", "Business", "Manager", SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
-        createUserIfNotFound("staff@apms.com", "Research", "Staff", SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        createUserIfNotFound("manager1@apms.com", "Business", "Manager 1", SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        createUserIfNotFound("manager2@apms.com", "Business", "Manager 2", SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        createUserIfNotFound("manager3@apms.com", "Business", "Manager 3", SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        createUserIfNotFound("staff1@apms.com", "Research", "Staff 1", SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        createUserIfNotFound("staff2@apms.com", "Research", "Staff 2", SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        createUserIfNotFound("staff3@apms.com", "Research", "Staff 3", SystemRole.BUSINESS_DEVELOPMENT_STAFF);
 
         log.info("Development DataSeeder completed.");
     }

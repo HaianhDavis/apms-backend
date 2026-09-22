@@ -1,10 +1,19 @@
 package com.apms.domain.project.service;
 
-import com.apms.common.enums.ProjectRole;
-import com.apms.common.enums.ProjectStatus;
-import com.apms.common.enums.ProjectType;
+import com.apms.common.enums.*;
 import com.apms.common.exception.BusinessValidationException;
 import com.apms.common.exception.ResourceNotFoundException;
+import com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository;
+import com.apms.domain.contract.repository.mongo.ContractResearchRepository;
+import com.apms.domain.financial.repository.FinancialResearchRepository;
+import com.apms.domain.graph.service.GraphService;
+import com.apms.domain.monitoring.repository.CompanyMonitoringAssignmentRepository;
+import com.apms.domain.profile.CompanyProfile;
+import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
+import com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository;
+import com.apms.domain.profile.service.CompanyProfileOfficialEvaluator;
+import com.apms.domain.profile.service.CompanyProfileVersionService;
+import com.apms.domain.profile.service.OwnerOrganizationService;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectMember;
 import com.apms.domain.project.dto.*;
@@ -19,6 +28,7 @@ import com.apms.domain.user.repository.sql.AccountRepository;
 import com.apms.domain.user.repository.sql.UserProfileRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.neo4j.core.Neo4jClient;
@@ -31,16 +41,11 @@ import com.apms.domain.project.repository.sql.ProjectTaskSubmissionRepository;
 import com.apms.domain.document.repository.sql.ImportJobRepository;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.notification.service.NotificationService;
-import com.apms.common.enums.AuditAction;
-import com.apms.common.enums.TaskStatus;
 import com.apms.domain.project.dto.UpdateProjectStatusRequest;
+import com.apms.security.UserDetailsImpl;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Arrays;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -59,31 +64,32 @@ public class ProjectService {
     private final ProjectTaskSubmissionRepository projectTaskSubmissionRepository;
     private final ImportJobRepository importJobRepository;
     private final AuditLogService auditLogService;
-    private final com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
+    private final OwnerOrganizationService ownerOrganizationService;
     private final NotificationService notificationService;
-    private final com.apms.domain.profile.repository.mongo.CompanyProfileRepository companyProfileRepository;
+    private final CompanyProfileRepository companyProfileRepository;
     private final ProjectTargetProfileResolver projectTargetProfileResolver;
+    private final CompanyProfileOfficialEvaluator companyProfileOfficialEvaluator;
 
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository companyCandidateRepository;
+    @Autowired(required = false)
+    private CompanyCandidateRepository companyCandidateRepository;
 
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.apms.domain.financial.repository.FinancialResearchRepository financialResearchRepository;
+    @Autowired(required = false)
+    private FinancialResearchRepository financialResearchRepository;
 
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.apms.domain.contract.repository.mongo.ContractResearchRepository contractResearchRepository;
+    @Autowired(required = false)
+    private ContractResearchRepository contractResearchRepository;
 
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.apms.domain.graph.service.GraphService graphService;
+    @Autowired(required = false)
+    private GraphService graphService;
 
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.apms.domain.profile.service.CompanyProfileVersionService companyProfileVersionService;
+    @Autowired(required = false)
+    private CompanyProfileVersionService companyProfileVersionService;
 
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository companyProfileVersionRepository;
+    @Autowired(required = false)
+    private CompanyProfileVersionRepository companyProfileVersionRepository;
 
-    @org.springframework.beans.factory.annotation.Autowired(required = false)
-    private com.apms.domain.monitoring.repository.CompanyMonitoringAssignmentRepository companyMonitoringAssignmentRepository;
+    @Autowired(required = false)
+    private CompanyMonitoringAssignmentRepository companyMonitoringAssignmentRepository;
 
     // ─────────────────────────────────────────────
     // CREATE
@@ -91,7 +97,7 @@ public class ProjectService {
 
     @Transactional
     public ProjectResponse createProject(CreateProjectRequest request, Long creatorAccountId) {
-        com.apms.common.enums.RelationshipType resolvedRelationshipType = request.getTargetRelationshipType();
+        RelationshipType resolvedRelationshipType = request.getTargetRelationshipType();
 
         if (request.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY && resolvedRelationshipType == null) {
             resolvedRelationshipType = resolveCanonicalRelationship(request.getTargetCompanyProfileId());
@@ -101,13 +107,37 @@ public class ProjectService {
         }
 
         if (request.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY) {
-            com.apms.domain.project.dto.OpenProjectCheckResponse openCheck = checkOpenProjectForCompany(
+            String targetProfileId = request.getTargetCompanyProfileId();
+            if (!StringUtils.hasText(targetProfileId)) {
+                throw new BusinessValidationException("Target company profile ID is required for UPDATE_EXISTING_COMPANY");
+            }
+
+            // Reload CompanyProfile immediately before authorization
+            CompanyProfile profile = companyProfileRepository.findByCompanyId(targetProfileId)
+                    .or(() -> companyProfileRepository.findById(targetProfileId))
+                    .orElseThrow(() -> new ResourceNotFoundException("Target company profile not found: " + targetProfileId));
+
+            Account creator = accountRepository.findById(creatorAccountId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Creator account not found: " + creatorAccountId));
+
+            boolean isAdminOrOwner = creator.getRoles().stream()
+                    .anyMatch(r -> r == SystemRole.SYSTEM_ADMIN || r == SystemRole.BUSINESS_OWNER);
+
+            if (!isAdminOrOwner) {
+                // If responsibleManagerId is null or does not match creator, deny access (403)
+                if (profile.getResponsibleManagerId() == null || !profile.getResponsibleManagerId().equals(creatorAccountId)) {
+                    throw new org.springframework.security.access.AccessDeniedException(
+                            "You are not the responsible manager for this company profile. Only the assigned manager can create projects for it.");
+                }
+            }
+
+            OpenProjectCheckResponse openCheck = checkOpenProjectForCompany(
                     request.getTargetCompanyProfileId(),
                     request.getTargetCompanyTaxCode(),
                     null
             );
             if (openCheck.isHasOpenProject()) {
-                java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
+                Map<String, Object> details = new LinkedHashMap<>();
                 if (openCheck.getProjectId() != null) details.put("conflictingProjectId", openCheck.getProjectId());
                 if (openCheck.getProjectName() != null) details.put("conflictingProjectName", openCheck.getProjectName());
                 if (openCheck.getStatus() != null) details.put("conflictingProjectStatus", openCheck.getStatus());
@@ -120,7 +150,7 @@ public class ProjectService {
         }
 
         if (request.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY) {
-            if (org.springframework.util.StringUtils.hasText(request.getTargetCompanyTaxCode())) {
+            if (StringUtils.hasText(request.getTargetCompanyTaxCode())) {
                 com.apms.domain.project.dto.OpenProjectCheckResponse openCheck = checkOpenProjectForCompany(
                         null,
                         request.getTargetCompanyTaxCode(),
@@ -139,7 +169,21 @@ public class ProjectService {
                 }
                 com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse duplicateCheck = checkDuplicateTaxCode(request.getTargetCompanyTaxCode());
                 if (duplicateCheck.isExists()) {
-                    throw new BusinessValidationException("Duplicate tax code found: " + duplicateCheck.getMatchType());
+                    if (duplicateCheck.isExistingOfficialCompany() || "COMPANY_PROFILE".equals(duplicateCheck.getMatchType())) {
+                        throw new BusinessValidationException("An official company already exists with this tax code. Please select the 'Update existing company' project type.");
+                    } else if (duplicateCheck.isOpenResearchProject() || duplicateCheck.isHasOpenProject() || "OPEN_RESEARCH_PROJECT".equals(duplicateCheck.getMatchType()) || "ACTIVE_PROJECT".equals(duplicateCheck.getMatchType())) {
+                        java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
+                        if (duplicateCheck.getOpenProjectId() != null) details.put("conflictingProjectId", duplicateCheck.getOpenProjectId());
+                        if (duplicateCheck.getOpenProjectName() != null) details.put("conflictingProjectName", duplicateCheck.getOpenProjectName());
+                        if (duplicateCheck.getOpenProjectStatus() != null) details.put("conflictingProjectStatus", duplicateCheck.getOpenProjectStatus());
+                        throw new BusinessValidationException(
+                                "COMPANY_HAS_OPEN_PROJECT",
+                                "A research project already exists for this tax code. Complete or close the existing project before creating another one.",
+                                details
+                        );
+                    } else {
+                        throw new BusinessValidationException("Duplicate tax code found: " + duplicateCheck.getMatchType());
+                    }
                 }
             }
         }
@@ -370,7 +414,17 @@ public class ProjectService {
                         }
                         com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse duplicateCheck = checkDuplicateTaxCode(request.getTargetCompanyTaxCode());
                         if (duplicateCheck.isExists()) {
-                            throw new BusinessValidationException("Duplicate tax code found: " + duplicateCheck.getMatchType());
+                            if (duplicateCheck.isOpenResearchProject() || duplicateCheck.isHasOpenProject()) {
+                                java.util.Map<String, Object> details = new java.util.LinkedHashMap<>();
+                                if (duplicateCheck.getOpenProjectId() != null) details.put("conflictingProjectId", duplicateCheck.getOpenProjectId());
+                                if (duplicateCheck.getOpenProjectName() != null) details.put("conflictingProjectName", duplicateCheck.getOpenProjectName());
+                                if (duplicateCheck.getOpenProjectStatus() != null) details.put("conflictingProjectStatus", duplicateCheck.getOpenProjectStatus());
+                                throw new BusinessValidationException(
+                                        "COMPANY_HAS_OPEN_PROJECT",
+                                        "An unfinished project already exists for this tax code. Complete or close the existing project before creating another one.",
+                                        details
+                                );
+                            }
                         }
                     }
                 }
@@ -906,22 +960,22 @@ public class ProjectService {
      *   - targetCompanyProfileId MUST be null or blank
      *   - targetCompanyName MUST be provided (not blank — used as research scope)
      */
-    private com.apms.common.enums.RelationshipType resolveCanonicalRelationship(String targetCompanyProfileId) {
-        if (!org.springframework.util.StringUtils.hasText(targetCompanyProfileId)) {
+    private RelationshipType resolveCanonicalRelationship(String targetCompanyProfileId) {
+        if (!StringUtils.hasText(targetCompanyProfileId)) {
             return null;
         }
 
         List<String> targetIds = new ArrayList<>();
         targetIds.add(targetCompanyProfileId.trim());
 
-        java.util.Optional<com.apms.domain.profile.CompanyProfile> profileOpt = companyProfileRepository.findByCompanyId(targetCompanyProfileId)
+        Optional<CompanyProfile> profileOpt = companyProfileRepository.findByCompanyId(targetCompanyProfileId)
                 .or(() -> companyProfileRepository.findById(targetCompanyProfileId));
         if (profileOpt.isPresent()) {
-            com.apms.domain.profile.CompanyProfile p = profileOpt.get();
-            if (org.springframework.util.StringUtils.hasText(p.getCompanyId()) && !targetIds.contains(p.getCompanyId().trim())) {
+            CompanyProfile p = profileOpt.get();
+            if (StringUtils.hasText(p.getCompanyId()) && !targetIds.contains(p.getCompanyId().trim())) {
                 targetIds.add(p.getCompanyId().trim());
             }
-            if (org.springframework.util.StringUtils.hasText(p.getId()) && !targetIds.contains(p.getId().trim())) {
+            if (StringUtils.hasText(p.getId()) && !targetIds.contains(p.getId().trim())) {
                 targetIds.add(p.getId().trim());
             }
         }
@@ -1370,6 +1424,10 @@ public class ProjectService {
     }
 
     public com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse checkDuplicateTaxCode(String taxCode) {
+        return checkDuplicateTaxCode(taxCode, null);
+    }
+
+    public com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse checkDuplicateTaxCode(String taxCode, UserDetailsImpl currentUser) {
         if (!org.springframework.util.StringUtils.hasText(taxCode)) {
             return com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse.builder()
                     .exists(false)
@@ -1377,49 +1435,88 @@ public class ProjectService {
         }
         String normalizedTaxCode = taxCode.replaceAll("[\\s\\-]", "").trim();
 
-        // Check Profile
+        // 1. Check if an official CompanyProfile exists
         Optional<com.apms.domain.profile.CompanyProfile> profileOpt = companyProfileRepository.findByIdentityTaxCode(normalizedTaxCode);
-        if (profileOpt.isPresent()) {
-            com.apms.domain.profile.CompanyProfile profile = profileOpt.get();
+        com.apms.domain.profile.CompanyProfile profile = profileOpt.filter(p -> !Boolean.TRUE.equals(p.getIsDeleted())).orElse(null);
+        boolean isOfficial = profile != null && companyProfileOfficialEvaluator.isOfficial(profile);
+
+        // 2. Check for open research projects for this tax code / profile
+        List<Project> openProjects = projectRepository.findOpenProjectsByTargetCompanyTaxCode(normalizedTaxCode);
+        if (openProjects.isEmpty() && profile != null) {
             com.apms.domain.project.dto.OpenProjectCheckResponse openCheck = checkOpenProjectForCompany(
                     profile.getCompanyId() != null ? profile.getCompanyId() : profile.getId(),
                     normalizedTaxCode,
                     null
             );
+            if (openCheck.isHasOpenProject()) {
+                Project openProj = projectRepository.findById(openCheck.getProjectId()).orElse(null);
+                if (openProj != null) {
+                    openProjects = java.util.Collections.singletonList(openProj);
+                }
+            }
+        }
+
+        // CASE C (and Case 4, Case 5): Official company exists
+        if (isOfficial) {
+            boolean hasOpen = !openProjects.isEmpty();
+            Project openProj = hasOpen ? openProjects.get(0) : null;
+            boolean canCurrentManagerManage = false;
+            if (currentUser != null) {
+                boolean isAdmin = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+                boolean isOwner = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_OWNER"));
+                if (isAdmin || isOwner) {
+                    canCurrentManagerManage = true;
+                } else if (profile.getResponsibleManagerId() != null && profile.getResponsibleManagerId().equals(currentUser.getId())) {
+                    canCurrentManagerManage = true;
+                }
+            }
+
             return com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse.builder()
                     .exists(true)
                     .matchType("COMPANY_PROFILE")
+                    .existingOfficialCompany(true)
+                    .canCurrentManagerManage(canCurrentManagerManage)
+                    .openResearchProject(false)
                     .companyProfileId(profile.getCompanyId())
                     .companyName(profile.getIdentity() != null ? profile.getIdentity().getLegalName() : null)
-                    .taxCode(profile.getIdentity() != null ? profile.getIdentity().getTaxCode() : null)
-                    .hasOpenProject(openCheck.isHasOpenProject())
-                    .openProjectId(openCheck.getProjectId())
-                    .openProjectName(openCheck.getProjectName())
-                    .openProjectStatus(openCheck.getStatus())
+                    .taxCode(profile.getIdentity() != null ? profile.getIdentity().getTaxCode() : normalizedTaxCode)
+                    .hasOpenProject(hasOpen)
+                    .openProjectId(openProj != null ? openProj.getId() : null)
+                    .openProjectName(openProj != null ? openProj.getProjectName() : null)
+                    .openProjectStatus(openProj != null ? openProj.getStatus() : null)
                     .build();
         }
 
-        // Check Active Project
-        List<Project> activeProjects = projectRepository.findActiveProjectsByTargetCompanyTaxCode(normalizedTaxCode);
-        if (!activeProjects.isEmpty()) {
-            Project project = activeProjects.get(0);
-            boolean isOpen = project.getStatus() != ProjectStatus.COMPLETED && project.getStatus() != ProjectStatus.CLOSED;
+        // CASE A: An open research project exists for this tax code (no official company yet)
+        if (!openProjects.isEmpty()) {
+            Project openProj = openProjects.get(0);
             return com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse.builder()
                     .exists(true)
-                    .matchType("ACTIVE_PROJECT")
-                    .projectId(project.getId())
-                    .companyName(project.getTargetCompanyName())
-                    .taxCode(project.getTargetCompanyTaxCode())
-                    .hasOpenProject(isOpen)
-                    .openProjectId(isOpen ? project.getId() : null)
-                    .openProjectName(isOpen ? project.getProjectName() : null)
-                    .openProjectStatus(isOpen ? project.getStatus() : null)
+                    .matchType("OPEN_RESEARCH_PROJECT")
+                    .existingOfficialCompany(false)
+                    .openResearchProject(true)
+                    .projectId(openProj.getId())
+                    .companyName(openProj.getTargetCompanyName())
+                    .taxCode(openProj.getTargetCompanyTaxCode())
+                    .hasOpenProject(true)
+                    .openProjectId(openProj.getId())
+                    .openProjectName(openProj.getProjectName())
+                    .openProjectStatus(openProj.getStatus())
                     .build();
         }
 
+        // CASE B: Research was CLOSED without completing, or no record exists.
+        // Tax code is available for a new New Company Research project!
         return com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse.builder()
                 .exists(false)
+                .existingOfficialCompany(false)
+                .openResearchProject(false)
+                .hasOpenProject(false)
                 .build();
+    }
+
+    public boolean isOfficialCompanyProfile(com.apms.domain.profile.CompanyProfile profile) {
+        return companyProfileOfficialEvaluator.isOfficial(profile);
     }
 
     private void syncTargetIdentity(String profileId, String targetTaxCode) {

@@ -21,7 +21,6 @@ public class CompanyMonitoringReviewResponse {
     private LocalDateTime reviewedAt;
     private MonitoringReviewResult result;
     private String updateProposalId;
-    private Long relationshipChangeProposalId;
     private String proposalStatus;
     private String note;
 }

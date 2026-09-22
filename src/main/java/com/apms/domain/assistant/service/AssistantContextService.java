@@ -49,7 +49,9 @@ public class AssistantContextService {
         StringBuilder contextBuilder = new StringBuilder();
 
         contextBuilder.append("APMS Approved Business Intelligence Data\n");
-        contextBuilder.append("Project ID: ").append(projectId).append("\n\n");
+        if (projectId != null) {
+            contextBuilder.append("Project ID: ").append(projectId).append("\n\n");
+        }
 
         CompanyProfile profile = null;
         List<String> formattedRelationships = new ArrayList<>();

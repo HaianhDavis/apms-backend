@@ -13,6 +13,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.apms.domain.assistant.dto.ProjectAutocompleteItemDto;
+import com.apms.security.UserDetailsImpl;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+
+import java.util.List;
+
 /**
  * AI Assistant controller.
  *
@@ -47,5 +55,21 @@ public class AiAssistantController {
 
         AiChatResponse response = aiAssistantService.chat(request);
         return ResponseEntity.ok(ApiResponse.success(response, "Assistant response generated"));
+    }
+
+    /**
+     * GET /api/v1/ai-assistant/projects/autocomplete
+     *
+     * Autocomplete project suggestions for '!' mention trigger scoped strictly to the current Manager.
+     */
+    @GetMapping("/projects/autocomplete")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<List<ProjectAutocompleteItemDto>>> autocompleteProjects(
+            @RequestParam(required = false, defaultValue = "") String q,
+            @RequestParam(required = false, defaultValue = "10") int limit,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        List<ProjectAutocompleteItemDto> results = aiAssistantService.autocompleteProjects(currentUser.getId(), q, limit);
+        return ResponseEntity.ok(ApiResponse.success(results));
     }
 }

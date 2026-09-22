@@ -12,4 +12,6 @@ import java.util.Optional;
 public interface ContractResearchRepository extends MongoRepository<ContractResearch, String> {
     Optional<ContractResearch> findByTaskId(Long taskId);
     List<ContractResearch> findByCompanyProfileIdAndStatus(String companyProfileId, ContractResearchStatus status);
+    List<ContractResearch> findByCompanyProfileIdInAndStatus(java.util.Collection<String> companyProfileIds, ContractResearchStatus status);
+    List<ContractResearch> findByProjectIdAndStatus(Long projectId, ContractResearchStatus status);
 }

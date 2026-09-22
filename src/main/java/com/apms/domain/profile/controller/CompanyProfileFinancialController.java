@@ -28,9 +28,10 @@ public class CompanyProfileFinancialController {
      * Does NOT mutate database state.
      */
     @GetMapping("/{companyProfileId}/financials")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyProfileId)")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyProfileId))")
     public ResponseEntity<ApiResponse<List<CompanyProfileFinancialRowDto>>> getFinancials(
-            @PathVariable String companyProfileId) {
+            @PathVariable String companyProfileId,
+            @RequestParam(required = false) Long projectId) {
         List<CompanyProfileFinancialRowDto> rows = financialService.getFinancials(companyProfileId);
         return ResponseEntity.ok(ApiResponse.success(rows));
     }

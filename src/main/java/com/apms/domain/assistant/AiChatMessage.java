@@ -8,6 +8,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
+import com.apms.domain.assistant.dto.AiMentionDto;
 import com.apms.domain.assistant.dto.AiNavigationAction;
 
 import java.time.LocalDateTime;
@@ -51,6 +52,9 @@ public class AiChatMessage {
 
     /** Structured UI navigation metadata. */
     private List<AiNavigationAction> navigationActions;
+
+    /** Structured mentions associated with this turn. */
+    private List<AiMentionDto> mentions;
 
     private LocalDateTime createdAt;
 }

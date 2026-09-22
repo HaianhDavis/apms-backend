@@ -26,7 +26,6 @@ import java.time.LocalDateTime;
 public class StepUpAuthenticationService {
 
     public static final String SCOPE_COMPANY_INTERNAL_NEWS = "COMPANY_INTERNAL_NEWS";
-    public static final String SCOPE_COMPANY_PROFILE_DOCUMENTS = "COMPANY_PROFILE_DOCUMENTS";
 
     private final StepUpTokenService tokenService;
     private final TotpVerificationService totpVerificationService;
@@ -48,7 +47,7 @@ public class StepUpAuthenticationService {
             throw new AccessDeniedException("User role is not authorized for secure access");
         }
 
-        if (SCOPE_COMPANY_INTERNAL_NEWS.equals(scope) || SCOPE_COMPANY_PROFILE_DOCUMENTS.equals(scope)) {
+        if (SCOPE_COMPANY_INTERNAL_NEWS.equals(scope)) {
             companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile(resourceId, currentUser);
         } else if (scope == null && resourceId == null) {
             if (!isOwner) {
@@ -86,7 +85,7 @@ public class StepUpAuthenticationService {
             throw new AccessDeniedException("User role is not authorized for secure access");
         }
 
-        if (SCOPE_COMPANY_INTERNAL_NEWS.equals(scope) || SCOPE_COMPANY_PROFILE_DOCUMENTS.equals(scope)) {
+        if (SCOPE_COMPANY_INTERNAL_NEWS.equals(scope)) {
             companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile(resourceId, currentUser);
         } else if (scope == null && resourceId == null) {
             if (!isOwner) {
@@ -107,9 +106,6 @@ public class StepUpAuthenticationService {
         StepUpVerifyResponse response = grantOwnerSecureSession(currentUser.getId());
 
         auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_SUCCEEDED, "StepUpAuth", resourceId, "Secure session granted with TOTP");
-        if (SCOPE_COMPANY_PROFILE_DOCUMENTS.equals(scope)) {
-            auditLogService.log(currentUser.getId(), AuditAction.COMPANY_DOCUMENT_ACCESS_VERIFIED, "CompanyProfile", resourceId, "Company document access verified with TOTP");
-        }
 
         return response;
     }

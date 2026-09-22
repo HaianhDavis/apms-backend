@@ -4,6 +4,7 @@ import com.apms.common.response.ApiResponse;
 import com.apms.common.response.PageResponse;
 import com.apms.domain.profile.dto.ProfileResponse;
 import com.apms.domain.profile.dto.ProfileSourcesResponse;
+import com.apms.domain.profile.dto.UpdateCompanyProfileRequest;
 import com.apms.domain.profile.service.ProfileService;
 import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
@@ -28,7 +29,7 @@ public class ProfileController {
     // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<PageResponse<ProfileResponse>>> getAllProfiles(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String industry,
@@ -38,39 +39,46 @@ public class ProfileController {
             @RequestParam(required = false) com.apms.common.enums.ProfileVisibility visibility,
             @RequestParam(defaultValue = "false") boolean excludeOwner,
             @RequestParam(required = false) Boolean createdByMe,
+            @RequestParam(required = false) Boolean managedByMe,
+            @RequestParam(required = false) Boolean officialOnly,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         Set<String> allowedCompanyIds = companyScope.allowedCompanyIds();
         
-        // Enforce PUBLISHED by default; allow published profiles regardless of reviewStatus (e.g. UNVERIFIED)
         String effectiveReviewStatus = reviewStatus;
-        com.apms.common.enums.ProfileVisibility effectiveVisibility = (visibility != null) ? visibility : com.apms.common.enums.ProfileVisibility.PUBLISHED;
+        com.apms.common.enums.ProfileVisibility effectiveVisibility;
+        if (Boolean.TRUE.equals(officialOnly)) {
+            effectiveVisibility = visibility;
+        } else {
+            effectiveVisibility = (visibility != null) ? visibility : com.apms.common.enums.ProfileVisibility.PUBLISHED;
+        }
 
-        Long managerId = (createdByMe != null && createdByMe) ? currentUser.getId() : null;
+        Long managedByManagerId = Boolean.TRUE.equals(managedByMe) ? currentUser.getId() : null;
+        Long managerId = (managedByManagerId == null && Boolean.TRUE.equals(createdByMe)) ? currentUser.getId() : null;
 
         PageResponse<ProfileResponse> response = PageResponse.of(
-                profileService.searchCompanyProfiles(keyword, industry, market, effectiveReviewStatus, relationshipType, excludeOwner, allowedCompanyIds, effectiveVisibility, managerId, PageRequest.of(page, size)));
+                profileService.searchCompanyProfiles(keyword, industry, market, effectiveReviewStatus, relationshipType, excludeOwner, allowedCompanyIds, effectiveVisibility, managerId, managedByManagerId, officialOnly, PageRequest.of(page, size)));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     // ─────────────────────────────────────────────
     // GET /api/v1/company-profiles/industries (or /profiles/industries)
-    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @GetMapping("/industries")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<java.util.List<String>>> getDistinctIndustries() {
         return ResponseEntity.ok(ApiResponse.success(profileService.getDistinctIndustries(), "Distinct industries retrieved"));
     }
 
     // ─────────────────────────────────────────────
     // GET /api/v1/company-profiles/relationship-types (or /profiles/relationship-types)
-    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @GetMapping("/relationship-types")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<java.util.List<String>>> getDistinctRelationshipTypes(
             @RequestParam(defaultValue = "true") boolean excludeOwner,
             @RequestParam(required = false) Boolean createdByMe,
@@ -81,12 +89,13 @@ public class ProfileController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/profiles/{companyId}
-    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF (project-scoped)
     // ─────────────────────────────────────────────
     @GetMapping("/{companyId}")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyId)")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyId))")
     public ResponseEntity<ApiResponse<ProfileResponse>> getProfile(
-            @PathVariable String companyId) {
+            @PathVariable String companyId,
+            @RequestParam(required = false) Long projectId) {
 
         return ResponseEntity.ok(ApiResponse.success(profileService.getProfileByCompanyId(companyId)));
     }
@@ -119,12 +128,13 @@ public class ProfileController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/profiles/{companyId}/sources
-    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
+    // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF (project-scoped)
     // ─────────────────────────────────────────────
     @GetMapping("/{companyId}/sources")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF') and @companyScope.canAccessCompany(#companyId)")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyId))")
     public ResponseEntity<ApiResponse<ProfileSourcesResponse>> getProfileSources(
-            @PathVariable String companyId) {
+            @PathVariable String companyId,
+            @RequestParam(required = false) Long projectId) {
 
         return ResponseEntity.ok(ApiResponse.success(profileService.getProfileSources(companyId)));
     }
@@ -136,7 +146,7 @@ public class ProfileController {
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @companyScope.canManageCompanyProfile(#companyId))")
     public ResponseEntity<ApiResponse<ProfileResponse>> updateProfile(
             @PathVariable String companyId,
-            @RequestBody com.apms.domain.profile.dto.UpdateCompanyProfileRequest request,
+            @RequestBody UpdateCompanyProfileRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         return ResponseEntity.ok(ApiResponse.success(profileService.updateProfile(companyId, request, currentUser), "Profile updated"));
@@ -156,18 +166,44 @@ public class ProfileController {
     }
 
     // ─────────────────────────────────────────────
-    // PUT /api/v1/company-profiles/{companyId}/responsible-manager
-    // Role: SYSTEM_ADMIN, BUSINESS_DEVELOPMENT_MANAGER
+    // PATCH /api/v1/company-profiles/{companyProfileId}/responsible-manager
+    // Role: SYSTEM_ADMIN, BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
-    @PutMapping("/{companyId}/responsible-manager")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PatchMapping("/{companyProfileId}/responsible-manager")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<Void>> transferResponsibility(
-            @PathVariable String companyId,
+            @PathVariable String companyProfileId,
             @jakarta.validation.Valid @RequestBody com.apms.domain.profile.dto.TransferResponsibilityRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
-        profileService.transferResponsibility(companyId, request.getManagerId(), currentUser);
+        profileService.transferResponsibility(companyProfileId, request, currentUser);
         return ResponseEntity.ok(ApiResponse.success(null, "Responsibility transferred successfully"));
+    }
+
+    // ─────────────────────────────────────────────
+    // GET /api/v1/company-profiles/{companyProfileId}/management-history
+    // Role: SYSTEM_ADMIN, BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER
+    // ─────────────────────────────────────────────
+    @GetMapping("/{companyProfileId}/management-history")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<ApiResponse<java.util.List<com.apms.domain.profile.dto.CompanyProfileManagerHistoryDto>>> getManagementHistory(
+            @PathVariable String companyProfileId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        return ResponseEntity.ok(ApiResponse.success(profileService.getManagementHistory(companyProfileId, currentUser)));
+    }
+
+    // ─────────────────────────────────────────────
+    // GET /api/v1/company-profiles/{companyProfileId}/eligible-managers
+    // Role: SYSTEM_ADMIN, BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER
+    // ─────────────────────────────────────────────
+    @GetMapping("/{companyProfileId}/eligible-managers")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    public ResponseEntity<ApiResponse<java.util.List<com.apms.domain.profile.dto.EligibleManagerDto>>> getEligibleManagers(
+            @PathVariable String companyProfileId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        return ResponseEntity.ok(ApiResponse.success(profileService.getEligibleManagers(companyProfileId, currentUser)));
     }
 
     // ─────────────────────────────────────────────
@@ -187,10 +223,10 @@ public class ProfileController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/profiles/visibility-management
-    // Role: SYSTEM_ADMIN, BUSINESS_DEVELOPMENT_MANAGER
+    // Role: SYSTEM_ADMIN, BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @GetMapping("/visibility-management")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<PageResponse<ProfileResponse>>> getVisibilityManagementProfiles(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) com.apms.common.enums.ProfileVisibility visibility,
@@ -200,7 +236,7 @@ public class ProfileController {
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         boolean isAdmin = currentUser != null && currentUser.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+                .anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN") || a.getAuthority().equals("ROLE_BUSINESS_OWNER"));
         Long managerId = currentUser != null ? currentUser.getId() : null;
 
         return ResponseEntity.ok(ApiResponse.success(PageResponse.of(
@@ -211,15 +247,15 @@ public class ProfileController {
 
     // ─────────────────────────────────────────────
     // GET /api/v1/profiles/visibility-management/summary
-    // Role: SYSTEM_ADMIN, BUSINESS_DEVELOPMENT_MANAGER
+    // Role: SYSTEM_ADMIN, BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @GetMapping("/visibility-management/summary")
-    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<com.apms.domain.profile.dto.ProfileVisibilitySummaryDto>> getVisibilityManagementSummary(
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         boolean isAdmin = currentUser != null && currentUser.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
+                .anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN") || a.getAuthority().equals("ROLE_BUSINESS_OWNER"));
         Long managerId = currentUser != null ? currentUser.getId() : null;
 
         return ResponseEntity.ok(ApiResponse.success(

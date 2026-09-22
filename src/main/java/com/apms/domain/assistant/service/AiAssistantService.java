@@ -77,21 +77,26 @@ public class AiAssistantService {
         boolean staffOnly = isStaff(currentUser) && !isManagerOrOwner(currentUser);
         boolean managerOnly = isManager(currentUser) && !isOwner(currentUser);
 
+        // ── 1.5. Derive project ID from structured mentions if present ───────
+        if (request.getMentions() != null) {
+            request.getMentions().stream()
+                    .filter(m -> "PROJECT".equalsIgnoreCase(m.getType()) && m.getProjectId() != null)
+                    .findFirst()
+                    .ifPresent(m -> request.setProjectId(m.getProjectId()));
+        }
+
         // ── 2. Authorisation — project access ─────────────────────────────────
         if (staffOnly) {
             if (!projectSecurity.isMemberOrOwner(request.getProjectId())) {
-                throw new BusinessValidationException(
+                throw new org.springframework.security.access.AccessDeniedException(
                         "Access denied: you do not have access to project " + request.getProjectId());
             }
         }
 
         if (managerOnly) {
-            ManagerIntent managerIntent = detectManagerIntent(request.getQuestion());
-            boolean projectSpecific = managerIntent == ManagerIntent.TASK_OVERVIEW;
-
-            if (projectSpecific && request.getProjectId() != null) {
+            if (request.getProjectId() != null) {
                 if (!projectSecurity.isManager(request.getProjectId())) {
-                    throw new BusinessValidationException(
+                    throw new org.springframework.security.access.AccessDeniedException(
                             "Access denied: you do not manage project " + request.getProjectId());
                 }
             }
@@ -156,8 +161,9 @@ public class AiAssistantService {
                 .sources(sourceLabels)
                 .suggestedActions(suggestedActions)
                 .navigationActions(navigationActions)
-                    .createdAt(LocalDateTime.now())
-                    .build();
+                .mentions(request.getMentions())
+                .createdAt(LocalDateTime.now())
+                .build();
 
             chatMessageRepository.save(message);
             log.info("AI assistant chat saved: sessionId={}, userId={}, projectId={}",
@@ -1084,10 +1090,17 @@ public class AiAssistantService {
                 break;
 
             case PROJECT_PROGRESS:
-                Page<Project> ppProjectsRaw = projectRepository.findByMemberAccountId(currentUser.getId(), PageRequest.of(0, 100));
-                List<Project> ppProjects = ppProjectsRaw.stream()
-                        .filter(p -> projectSecurity.isManager(p.getId()))
-                        .collect(Collectors.toList());
+                List<Project> ppProjects;
+                if (request.getProjectId() != null) {
+                    ppProjects = projectRepository.findById(request.getProjectId())
+                            .filter(p -> projectSecurity.isManager(p.getId()))
+                            .map(List::of).orElse(List.of());
+                } else {
+                    Page<Project> ppProjectsRaw = projectRepository.findByMemberAccountId(currentUser.getId(), PageRequest.of(0, 100));
+                    ppProjects = ppProjectsRaw.stream()
+                            .filter(p -> projectSecurity.isManager(p.getId()))
+                            .collect(Collectors.toList());
+                }
 
                 if (ppProjects.isEmpty()) {
                     ctxText.append("DIRECT_ANSWER: You are not currently managing any projects.\n");
@@ -1199,8 +1212,13 @@ public class AiAssistantService {
 
             case PENDING_REVIEWS:
             case SUBMISSION_REVIEW:
-                Page<Project> prProjects = projectRepository.findByMemberAccountId(currentUser.getId(), PageRequest.of(0, 100));
-                List<Long> prPIds = prProjects.stream().filter(p -> projectSecurity.isManager(p.getId())).map(Project::getId).collect(Collectors.toList());
+                List<Long> prPIds;
+                if (request.getProjectId() != null && projectSecurity.isManager(request.getProjectId())) {
+                    prPIds = List.of(request.getProjectId());
+                } else {
+                    Page<Project> prProjects = projectRepository.findByMemberAccountId(currentUser.getId(), PageRequest.of(0, 100));
+                    prPIds = prProjects.stream().filter(p -> projectSecurity.isManager(p.getId())).map(Project::getId).collect(Collectors.toList());
+                }
                 if (prPIds.isEmpty()) {
                     ctxText.append("You have no pending reviews.\n");
                 } else {
@@ -1465,5 +1483,20 @@ public class AiAssistantService {
 
         actions.add("View approved company profile details");
         return actions;
+    }
+
+    public List<com.apms.domain.assistant.dto.ProjectAutocompleteItemDto> autocompleteProjects(Long accountId, String q, int limit) {
+        int max = Math.min(Math.max(1, limit), 20);
+        List<Project> projects = projectRepository.searchAccessibleProjectsForManager(
+                accountId, StringUtils.hasText(q) ? q.trim() : null, PageRequest.of(0, max));
+        return projects.stream()
+                .map(p -> com.apms.domain.assistant.dto.ProjectAutocompleteItemDto.builder()
+                        .projectId(p.getId())
+                        .projectName(p.getProjectName())
+                        .projectType(p.getProjectType() != null ? p.getProjectType().name() : null)
+                        .status(p.getStatus() != null ? p.getStatus().name() : null)
+                        .targetCompany(p.getTargetCompanyName())
+                        .build())
+                .collect(Collectors.toList());
     }
 }

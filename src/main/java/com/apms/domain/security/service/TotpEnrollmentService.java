@@ -171,4 +171,56 @@ public class TotpEnrollmentService {
         repository.save(cred);
         return stepUpAuthenticationService.grantOwnerSecureSession(accountId);
     }
+
+    @Transactional
+    public void confirmEnrollmentForLogin(Long accountId, UUID enrollmentId, String code) {
+        AccountTotpCredential cred = repository.findByAccountIdWithLock(accountId)
+                .orElseThrow(() -> new TotpException("TOTP_ENROLLMENT_NOT_FOUND"));
+
+        if (cred.isEnabled()) {
+            throw new TotpException("TOTP_ALREADY_ENROLLED");
+        }
+
+        if (cred.getEnrollmentId() == null || !cred.getEnrollmentId().equals(enrollmentId)) {
+            throw new TotpException("TOTP_ENROLLMENT_NOT_FOUND");
+        }
+
+        if (cred.getEnrollmentExpiresAt() != null && cred.getEnrollmentExpiresAt().isBefore(LocalDateTime.now(clock))) {
+            throw new TotpException("TOTP_ENROLLMENT_EXPIRED");
+        }
+
+        if (cred.getLockedUntil() != null && cred.getLockedUntil().isAfter(LocalDateTime.now(clock))) {
+            throw new TotpException("TOTP_ACCOUNT_LOCKED");
+        }
+
+        String secret = encryptionService.decrypt(
+                cred.getEncryptedSecret(),
+                cred.getEncryptionIv(),
+                cred.getEncryptionKeyVersion(),
+                accountId
+        );
+
+        long matchedTimeStep;
+        try {
+            matchedTimeStep = verificationService.verifyAndGetTimeStep(secret, code);
+        } catch (TotpException e) {
+            int fails = cred.getFailedAttempts() + 1;
+            cred.setFailedAttempts(fails);
+            if (fails >= totpProperties.getMaxFailedAttempts()) {
+                cred.setLockedUntil(LocalDateTime.now(clock).plusMinutes(totpProperties.getLockDurationMinutes()));
+            }
+            repository.save(cred);
+            throw e;
+        }
+
+        // Success - enable credential, clear enrollment state, update accepted time step
+        cred.setEnabled(true);
+        cred.setEnrollmentId(null);
+        cred.setEnrollmentExpiresAt(null);
+        cred.setVerifiedAt(LocalDateTime.now(clock));
+        cred.setFailedAttempts(0);
+        cred.setLockedUntil(null);
+        cred.setLastAcceptedTimeStep(matchedTimeStep);
+        repository.save(cred);
+    }
 }

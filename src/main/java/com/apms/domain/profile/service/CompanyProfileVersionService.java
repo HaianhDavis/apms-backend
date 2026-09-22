@@ -22,6 +22,8 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -181,6 +183,33 @@ public class CompanyProfileVersionService {
             } catch (Exception ignored) {}
         }
 
+        List<String> rawPaths = version.getChangedFieldPaths();
+        Map<String, Object> rawBefore = version.getBeforeValues();
+        Map<String, Object> rawAfter = version.getAfterValues();
+
+        List<String> sanitizedPaths = rawPaths;
+        Map<String, Object> sanitizedBefore = rawBefore;
+        Map<String, Object> sanitizedAfter = rawAfter;
+
+        if (rawPaths != null && !rawPaths.isEmpty()) {
+            sanitizedPaths = new ArrayList<>();
+            sanitizedBefore = rawBefore != null ? new HashMap<>(rawBefore) : new HashMap<>();
+            sanitizedAfter = rawAfter != null ? new HashMap<>(rawAfter) : new HashMap<>();
+
+            for (String path : rawPaths) {
+                Object bVal = rawBefore != null ? rawBefore.get(path) : null;
+                Object aVal = rawAfter != null ? rawAfter.get(path) : null;
+                if (!CompanyProfileDiffHelper.areValuesSemanticallyEqual(path, bVal, aVal)) {
+                    sanitizedPaths.add(path);
+                    sanitizedBefore.put(path, CompanyProfileDiffHelper.normalizeForHistory(path, bVal));
+                    sanitizedAfter.put(path, CompanyProfileDiffHelper.normalizeForHistory(path, aVal));
+                } else {
+                    sanitizedBefore.remove(path);
+                    sanitizedAfter.remove(path);
+                }
+            }
+        }
+
         return CompanyProfileVersionResponse.builder()
                 .id(version.getId())
                 .companyProfileId(version.getCompanyProfileId())
@@ -190,9 +219,9 @@ public class CompanyProfileVersionService {
                 .version(version.getVersion() != null ? version.getVersion() : CompanyProfileVersionHelper.formatLegacyVersion(major, rev))
                 .versionLabel(version.getVersionLabel() != null ? version.getVersionLabel() : CompanyProfileVersionHelper.formatVersionLabel(major, rev))
                 .changeSource(version.getChangeSource())
-                .changedFieldPaths(version.getChangedFieldPaths())
-                .beforeValues(version.getBeforeValues())
-                .afterValues(version.getAfterValues())
+                .changedFieldPaths(sanitizedPaths)
+                .beforeValues(sanitizedBefore)
+                .afterValues(sanitizedAfter)
                 .changeNote(version.getChangeNote())
                 .snapshot(version.getSnapshot())
                 .createdFromProposalId(version.getCreatedFromProposalId())

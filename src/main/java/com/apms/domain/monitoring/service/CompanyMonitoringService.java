@@ -12,7 +12,6 @@ import com.apms.domain.monitoring.model.CompanyMonitoringAssignment;
 import com.apms.domain.monitoring.model.CompanyMonitoringReview;
 import com.apms.domain.monitoring.repository.CompanyMonitoringAssignmentRepository;
 import com.apms.domain.monitoring.repository.CompanyMonitoringReviewRepository;
-import com.apms.domain.monitoring.repository.CompanyRelationshipChangeProposalRepository;
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
@@ -49,7 +48,6 @@ public class CompanyMonitoringService {
     private final CompanyProfileRepository companyProfileRepository;
     private final AccountRepository accountRepository;
     private final CompanyProfileUpdateProposalRepository proposalRepository;
-    private final CompanyRelationshipChangeProposalRepository relationshipChangeProposalRepository;
     private final AuditLogService auditLogService;
     private final com.apms.domain.profile.service.CompanyProfileVersionService versionService;
 
@@ -249,8 +247,7 @@ public class CompanyMonitoringService {
         Map<String, String> updateProposalStatuses = StringUtils.hasText(review.getUpdateProposalId()) && submittedUpdateProposalStatus != null
                 ? Map.of(review.getUpdateProposalId(), submittedUpdateProposalStatus)
                 : loadUpdateProposalStatuses(List.of(review));
-        Map<Long, String> relationshipProposalStatuses = loadRelationshipProposalStatuses(List.of(review));
-        return mapReviewToResponse(review, profilesByKey, updateProposalStatuses, relationshipProposalStatuses);
+        return mapReviewToResponse(review, profilesByKey, updateProposalStatuses);
     }
 
     @Transactional(readOnly = true)
@@ -280,13 +277,11 @@ public class CompanyMonitoringService {
 
         Map<String, CompanyProfile> profilesByKey = loadProfilesByReviewCompanyKeys(reviews.getContent());
         Map<String, String> updateProposalStatuses = loadUpdateProposalStatuses(reviews.getContent());
-        Map<Long, String> relationshipProposalStatuses = loadRelationshipProposalStatuses(reviews.getContent());
 
         return reviews.map(review -> mapReviewToResponse(
                 review,
                 profilesByKey,
-                updateProposalStatuses,
-                relationshipProposalStatuses
+                updateProposalStatuses
         ));
     }
 
@@ -394,15 +389,11 @@ public class CompanyMonitoringService {
     private CompanyMonitoringReviewResponse mapReviewToResponse(
             CompanyMonitoringReview review,
             Map<String, CompanyProfile> profilesByKey,
-            Map<String, String> updateProposalStatuses,
-            Map<Long, String> relationshipProposalStatuses) {
+            Map<String, String> updateProposalStatuses) {
         CompanyProfile companyProfile = profilesByKey.get(review.getCompanyProfileId());
-        String proposalStatus = null;
-        if (StringUtils.hasText(review.getUpdateProposalId())) {
-            proposalStatus = updateProposalStatuses.get(review.getUpdateProposalId());
-        } else if (review.getRelationshipChangeProposalId() != null) {
-            proposalStatus = relationshipProposalStatuses.get(review.getRelationshipChangeProposalId());
-        }
+        String proposalStatus = StringUtils.hasText(review.getUpdateProposalId())
+                ? updateProposalStatuses.get(review.getUpdateProposalId())
+                : null;
 
         return CompanyMonitoringReviewResponse.builder()
                 .id(review.getId())
@@ -415,7 +406,6 @@ public class CompanyMonitoringService {
                 .reviewedAt(review.getReviewedAt())
                 .result(review.getResult())
                 .updateProposalId(review.getUpdateProposalId())
-                .relationshipChangeProposalId(review.getRelationshipChangeProposalId())
                 .proposalStatus(proposalStatus)
                 .note(review.getNote())
                 .build();
@@ -487,25 +477,6 @@ public class CompanyMonitoringService {
                 ));
     }
 
-    private Map<Long, String> loadRelationshipProposalStatuses(List<CompanyMonitoringReview> reviews) {
-        List<Long> proposalIds = reviews.stream()
-                .map(CompanyMonitoringReview::getRelationshipChangeProposalId)
-                .filter(Objects::nonNull)
-                .distinct()
-                .toList();
-        if (proposalIds.isEmpty()) {
-            return Map.of();
-        }
-
-        return relationshipChangeProposalRepository.findAllById(proposalIds).stream()
-                .filter(proposal -> proposal.getId() != null)
-                .filter(proposal -> proposal.getStatus() != null)
-                .collect(Collectors.toMap(
-                        proposal -> proposal.getId(),
-                        proposal -> proposal.getStatus().name(),
-                        (left, right) -> left
-                ));
-    }
 
     private String resolveCompanyName(CompanyProfile companyProfile) {
         if (companyProfile != null && companyProfile.getIdentity() != null) {

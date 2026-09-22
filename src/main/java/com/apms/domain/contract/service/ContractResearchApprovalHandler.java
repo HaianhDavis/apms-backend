@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 public class ContractResearchApprovalHandler implements ProjectTaskSubmissionApprovalHandler {
 
     private final ContractResearchRepository contractResearchRepository;
+    private final com.apms.domain.profile.service.CompanyProfileContractService companyProfileContractService;
 
     @Override
     public boolean supports(SubmissionType submissionType) {
@@ -31,7 +32,12 @@ public class ContractResearchApprovalHandler implements ProjectTaskSubmissionApp
                 if (reviewNote != null) {
                     res.setReviewReason(reviewNote);
                 }
-                contractResearchRepository.save(res);
+                var saved = contractResearchRepository.save(res);
+                try {
+                    companyProfileContractService.promoteFromApprovedResearch(saved);
+                } catch (Exception e) {
+                    log.error("Failed to promote approved contracts for research {}: {}", saved.getId(), e.getMessage(), e);
+                }
             });
         }
     }

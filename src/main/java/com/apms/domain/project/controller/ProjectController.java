@@ -87,8 +87,9 @@ public class ProjectController {
     @Operation(summary = "Check for duplicate company by tax code")
     @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
     public ResponseEntity<ApiResponse<com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse>> checkDuplicateTaxCode(
-            @RequestParam("taxCode") String taxCode) {
-        com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse response = projectService.checkDuplicateTaxCode(taxCode);
+            @RequestParam("taxCode") String taxCode,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse response = projectService.checkDuplicateTaxCode(taxCode, currentUser);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
