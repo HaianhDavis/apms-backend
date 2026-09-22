@@ -1,6 +1,7 @@
 package com.apms.domain.contract.service;
 
 import com.apms.common.exception.BusinessValidationException;
+import com.apms.domain.ai.service.provider.GeminiApiKeyManager;
 import com.apms.domain.contract.dto.ai.AiContractClassificationCandidate;
 import com.apms.domain.contract.dto.ai.AiContractExtractionCandidate;
 import com.apms.domain.contract.enums.ContractType;
@@ -37,12 +38,10 @@ public class ContractExtractionService {
 
     private final ObjectMapper objectMapper;
     private final RestClient.Builder restClientBuilder;
+    private final GeminiApiKeyManager geminiApiKeyManager;
 
     @Autowired(required = false)
     private StorageService storageService;
-
-    @Value("${app.ai.gemini.api-key:dummy-key}")
-    private String geminiApiKey;
 
     @Value("${app.ai.gemini.model:gemini-3.6-flash}")
     private String geminiModel;
@@ -462,8 +461,9 @@ public class ContractExtractionService {
     }
 
     private String getCleanApiKey() {
-        if (geminiApiKey == null) return "";
-        return geminiApiKey.trim().replaceAll("^[`'\"\\s]+|[`'\"\\s]+$", "");
+        String key = geminiApiKeyManager.getApiKey();
+        if (key == null || key.isBlank()) return "";
+        return key.trim();
     }
 
     private String callGemini(String fullPrompt) {
@@ -487,7 +487,8 @@ public class ContractExtractionService {
                 )
         );
 
-        RestClient restClient = restClientBuilder.build();
+        RestClient restClient = restClientBuilder.clone()
+                .requestInterceptor(com.apms.domain.ai.service.provider.GeminiCredentialDiagnostics.interceptor("ContractExtractionService")).build();
 
         for (int attempt = 1; attempt <= MAX_GEMINI_RETRIES; attempt++) {
             try {
@@ -566,7 +567,8 @@ public class ContractExtractionService {
                 )
         );
 
-        RestClient restClient = restClientBuilder.build();
+        RestClient restClient = restClientBuilder.clone()
+                .requestInterceptor(com.apms.domain.ai.service.provider.GeminiCredentialDiagnostics.interceptor("ContractMultimodalExtraction")).build();
 
         for (int attempt = 1; attempt <= MAX_GEMINI_RETRIES; attempt++) {
             try {

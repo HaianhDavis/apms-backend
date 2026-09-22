@@ -143,22 +143,6 @@ public class CandidateService {
             }
         }
 
-        // Check whether an active manual DRAFT already exists for this task
-        List<CompanyCandidate> existingManualDrafts = candidateRepository.findByTaskId(taskId).stream()
-                .filter(c -> c.getStatus() == CandidateStatus.DRAFT &&
-                        c.getExtractionSource() != null &&
-                        "MANUAL".equalsIgnoreCase(c.getExtractionSource().getExtractionMethod()))
-                .sorted((a, b) -> {
-                    int seqA = a.getDraftSequence() != null ? a.getDraftSequence() : 0;
-                    int seqB = b.getDraftSequence() != null ? b.getDraftSequence() : 0;
-                    return Integer.compare(seqB, seqA);
-                })
-                .toList();
-
-        if (!existingManualDrafts.isEmpty()) {
-            return toResponse(existingManualDrafts.get(0));
-        }
-
         int nextSeq = getNextDraftSequence(taskId);
         String draftName = "Draft " + nextSeq;
 

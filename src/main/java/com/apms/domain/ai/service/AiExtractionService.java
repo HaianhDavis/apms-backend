@@ -7,6 +7,7 @@ import com.apms.domain.ai.dto.AiExtractionResult;
 import com.apms.domain.ai.dto.ExtractedCompanyData;
 import com.apms.domain.ai.repository.mongo.AiExtractionCacheRepository;
 import com.apms.domain.ai.service.provider.GeminiExtractionProvider;
+import com.apms.domain.ai.service.provider.GeminiApiKeyManager;
 import com.apms.domain.ai.service.provider.MockExtractionProvider;
 import com.apms.domain.ai.service.provider.OpenAiExtractionProvider;
 import com.apms.domain.document.ImportJob;
@@ -45,15 +46,11 @@ public class AiExtractionService {
     private final AiExtractionQualityService qualityService;
     private final ProjectRepository projectRepository;
     private final ObjectMapper objectMapper;
+    private final GeminiApiKeyManager geminiApiKeyManager;
 
     @Value("${app.ai.provider:gemini}")
     private String aiProvider;
 
-    @Value("${app.ai.gemini.api-key:dummy-key}")
-    private String geminiApiKey;
-
-    @Value("${app.ai.gemini.api-keys:}")
-    private String geminiApiKeys;
 
     @Value("${spring.ai.openai.api-key:dummy-key}")
     private String openAiApiKey;
@@ -72,7 +69,8 @@ public class AiExtractionService {
                                OpenAiExtractionProvider openAiProvider,
                                AiExtractionQualityService qualityService,
                                ProjectRepository projectRepository,
-                               ObjectMapper objectMapper) {
+                               ObjectMapper objectMapper,
+                               GeminiApiKeyManager geminiApiKeyManager) {
         this.importJobRepository = importJobRepository;
         this.rawDocumentRepository = rawDocumentRepository;
         this.extractionCacheRepository = extractionCacheRepository;
@@ -82,6 +80,7 @@ public class AiExtractionService {
         this.qualityService = qualityService;
         this.projectRepository = projectRepository;
         this.objectMapper = objectMapper;
+        this.geminiApiKeyManager = geminiApiKeyManager;
     }
 
     // ─────────────────────────────────────────────
@@ -312,12 +311,8 @@ public class AiExtractionService {
     }
 
     private boolean hasRealGeminiCredential() {
-        if (StringUtils.hasText(geminiApiKeys)) {
-            return java.util.Arrays.stream(geminiApiKeys.split(","))
-                    .map(String::trim)
-                    .anyMatch(key -> StringUtils.hasText(key) && !"dummy-key".equals(key));
-        }
-        return StringUtils.hasText(geminiApiKey) && !"dummy-key".equals(geminiApiKey);
+        String key = geminiApiKeyManager.getApiKey();
+        return StringUtils.hasText(key) && !"dummy-key".equals(key);
     }
 
     private void applyProjectControlledIdentity(com.apms.domain.ai.dto.RawExtractionOutput output, Project project) {

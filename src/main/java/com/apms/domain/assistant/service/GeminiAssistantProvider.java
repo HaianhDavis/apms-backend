@@ -1,6 +1,7 @@
 package com.apms.domain.assistant.service;
 
 import com.apms.common.exception.BusinessValidationException;
+import com.apms.domain.ai.service.provider.GeminiApiKeyManager;
 import com.apms.domain.assistant.dto.AssistantContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -54,21 +55,23 @@ public class GeminiAssistantProvider implements AssistantProvider {
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
-    private final String geminiApiKey;
+    private final GeminiApiKeyManager geminiApiKeyManager;
     private final String geminiModel;
 
     public GeminiAssistantProvider(
             ObjectMapper objectMapper,
-            @Value("${app.ai.gemini.api-key:dummy-key}") String geminiApiKey,
+            GeminiApiKeyManager geminiApiKeyManager,
             @Value("${app.ai.gemini.model:gemini-3.6-flash}") String geminiModel) {
-        this.restClient = RestClient.builder().build();
+        this.restClient = RestClient.builder()
+                .requestInterceptor(com.apms.domain.ai.service.provider.GeminiCredentialDiagnostics.interceptor("GeminiAssistantProvider")).build();
         this.objectMapper = objectMapper;
-        this.geminiApiKey = geminiApiKey;
+        this.geminiApiKeyManager = geminiApiKeyManager;
         this.geminiModel = geminiModel;
     }
 
     @Override
     public String answer(String question, AssistantContext context) {
+        String geminiApiKey = geminiApiKeyManager.getApiKey();
         boolean useMock = !StringUtils.hasText(geminiApiKey) || "dummy-key".equals(geminiApiKey);
         if (useMock) {
             log.info("Gemini API key not configured. Using mock assistant response.");

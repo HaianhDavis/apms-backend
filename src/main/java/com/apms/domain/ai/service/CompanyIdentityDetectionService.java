@@ -218,7 +218,8 @@ public class CompanyIdentityDetectionService {
                     """ + excerpt;
 
             // Use a lightweight Gemini call - we construct a minimal request
-            org.springframework.web.client.RestClient restClient = org.springframework.web.client.RestClient.create();
+        org.springframework.web.client.RestClient restClient = org.springframework.web.client.RestClient.builder()
+                    .requestInterceptor(com.apms.domain.ai.service.provider.GeminiCredentialDiagnostics.interceptor("CompanyIdentity")).build();
 
             Map<String, Object> requestBody = Map.of(
                     "contents", List.of(

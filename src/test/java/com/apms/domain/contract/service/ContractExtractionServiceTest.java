@@ -1,6 +1,7 @@
 package com.apms.domain.contract.service;
 
 import com.apms.common.exception.BusinessValidationException;
+import com.apms.domain.ai.service.provider.GeminiApiKeyManager;
 import com.apms.domain.contract.dto.ai.AiContractExtractionCandidate;
 import com.apms.domain.contract.enums.ContractType;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,7 +19,7 @@ class ContractExtractionServiceTest {
 
     @BeforeEach
     void setUp() {
-        extractionService = new ContractExtractionService(new ObjectMapper(), RestClient.builder());
+        extractionService = new ContractExtractionService(new ObjectMapper(), RestClient.builder(), new GeminiApiKeyManager("test-key", ""));
     }
 
     @Test

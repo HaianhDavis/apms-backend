@@ -49,12 +49,53 @@ class CandidateManualWorkflowTest {
     @Mock private com.apms.domain.candidate.repository.mongo.CandidateDraftSequenceRepository draftSequenceRepository;
     @Mock private com.apms.domain.audit.service.AuditLogService auditLogService;
     @Mock private com.apms.domain.financial.service.DocumentCompanyMatcher companyMatcher;
+    @Mock private com.apms.domain.reference.service.IndustryCatalogService industryCatalogService;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
 
     @InjectMocks
     private CandidateService candidateService;
+
+    @Test
+    void createManualAlwaysCreatesANewEmptyDraftWithoutReusingHistory() {
+        Project project = Project.builder().id(10L).targetCompanyName("Project Target").build();
+        var task = com.apms.domain.project.ProjectTask.builder().id(20L).project(project)
+                .status(com.apms.common.enums.TaskStatus.IN_PROGRESS).build();
+        var oldManual = createManualCandidate("old-manual", "DHG", "DHG", "https://dhg.example");
+        var oldAi = createAiCandidate("old-ai");
+        var history = new ArrayList<>(List.of(oldManual, oldAi));
+        when(projectRepository.findById(10L)).thenReturn(Optional.of(project));
+        when(projectTaskRepository.findById(20L)).thenReturn(Optional.of(task));
+        when(candidateRepository.findByTaskId(20L)).thenAnswer(invocation -> new ArrayList<>(history));
+        when(candidateRepository.save(any())).thenAnswer(invocation -> {
+            CompanyCandidate created = invocation.getArgument(0);
+            assertThat(created.getId()).isNull();
+            created.setId("new-" + history.size());
+            history.add(created);
+            return created;
+        });
+
+        CandidateResponse first = candidateService.createManualCandidate(10L, 20L, null);
+        CandidateResponse second = candidateService.createManualCandidate(10L, 20L, null);
+
+        assertThat(first.getId()).isNotEqualTo(second.getId()).isNotEqualTo("old-manual");
+        assertThat(history).hasSize(4).contains(oldManual, oldAi);
+        for (CandidateResponse created : List.of(first, second)) {
+            assertThat(created.getExtractionSource().getExtractionMethod()).isEqualTo("MANUAL");
+            assertThat(created.getIdentity().getTradeName()).isNull();
+            assertThat(created.getContact().getWebsite()).isNull();
+            assertThat(created.getContact().getAddresses()).isEmpty();
+            assertThat(created.getBusiness().getIndustries()).isEmpty();
+            assertThat(created.getBusiness().getProducts()).isEmpty();
+            assertThat(created.getFieldEvidence()).isEmpty();
+            assertThat(created.getQualityMetrics()).isNull();
+            // Project-controlled identity is an existing domain rule, not copied draft data.
+            assertThat(created.getIdentity().getLegalName()).isEqualTo("Project Target");
+        }
+        assertThat(oldManual.getContact().getWebsite()).isEqualTo("https://dhg.example");
+        verify(candidateRepository, never()).delete(any());
+    }
 
     private CompanyCandidate createManualCandidate(String id, String legalName, String tradeName, String website) {
         Map<String, ExtractionFieldResult> fieldResults = new HashMap<>();

@@ -28,7 +28,7 @@ public class GeminiPartnerContractExtractionProviderTest {
     void setup() {
         strictMapper = new ObjectMapper();
         strictMapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true);
-        provider = new GeminiPartnerContractExtractionProvider(strictMapper, "key", "gemini-3.6-flash");
+        provider = new GeminiPartnerContractExtractionProvider(strictMapper, new GeminiApiKeyManager("key", ""), "gemini-3.6-flash");
 
     }
 

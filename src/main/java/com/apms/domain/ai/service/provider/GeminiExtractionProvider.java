@@ -8,11 +8,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
 import java.io.IOException;
+import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -29,16 +32,27 @@ public class GeminiExtractionProvider implements ExtractionProvider {
 
     private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={key}";
 
-    public GeminiExtractionProvider(ObjectMapper objectMapper,
-                                    AiExtractionResponseMapper responseMapper,
-                                    GeminiRequestExecutor requestExecutor,
-                                    @Value("${app.ai.gemini.model:gemini-3.6-flash}") String geminiModel) {
-        this.restClient = RestClient.builder().build();
+    public GeminiExtractionProvider(
+            ObjectMapper objectMapper,
+            AiExtractionResponseMapper responseMapper,
+            GeminiRequestExecutor requestExecutor,
+            @Value("${app.ai.gemini.model:gemini-3.6-flash}") String geminiModel,
+            @Value("${app.ai.gemini.http.connect-timeout-ms:15000}") long connectTimeoutMs,
+            @Value("${app.ai.gemini.http.read-timeout-ms:180000}") long readTimeoutMs) {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(Math.max(1000, connectTimeoutMs)))
+                .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(Duration.ofMillis(Math.max(1000, readTimeoutMs)));
+        this.restClient = RestClient.builder().requestFactory(requestFactory)
+                .requestInterceptor(GeminiCredentialDiagnostics.interceptor("CompanyExtraction")).build();
         this.requestExecutor = requestExecutor;
         this.objectMapper = objectMapper;
         this.responseMapper = responseMapper;
         this.geminiModel = geminiModel != null && geminiModel.startsWith("models/") ? geminiModel.substring(7) : geminiModel;
         this.extractionSystemPrompt = loadPrompt();
+        log.info("GeminiExtractionProvider initialized: model={}, connectTimeout={}ms, readTimeout={}ms",
+                this.geminiModel, connectTimeoutMs, readTimeoutMs);
     }
 
     private String loadPrompt() {
@@ -53,6 +67,12 @@ public class GeminiExtractionProvider implements ExtractionProvider {
 
     @Override
     public RawExtractionOutput extract(String sourceText) {
+        int charCount = sourceText != null ? sourceText.length() : 0;
+        long estimatedInputTokens = Math.round(charCount / 3.5);
+        int promptLen = extractionSystemPrompt != null ? extractionSystemPrompt.length() : 0;
+        log.info("Gemini extraction request metrics: textCharacters={}, estimatedInputTokens={}, promptLength={}",
+                charCount, estimatedInputTokens, promptLen);
+
         String fullPrompt = extractionSystemPrompt + "\n\nText:\n" + sourceText;
 
         Map<String, Object> requestPayload = Map.of(
@@ -83,6 +103,17 @@ public class GeminiExtractionProvider implements ExtractionProvider {
 
                 // Parse the Gemini JSON structure to extract the text
                 JsonNode rootNode = objectMapper.readTree(responseBody);
+
+                // Log actual token usage if provided by Gemini
+                JsonNode usageNode = rootNode.path("usageMetadata");
+                if (!usageNode.isMissingNode() && !usageNode.isNull()) {
+                    int promptTokens = usageNode.path("promptTokenCount").asInt(0);
+                    int candidateTokens = usageNode.path("candidatesTokenCount").asInt(0);
+                    int totalTokens = usageNode.path("totalTokenCount").asInt(0);
+                    log.info("Gemini extraction actual token usage: promptTokenCount={}, candidateTokenCount={}, totalTokenCount={}",
+                            promptTokens, candidateTokens, totalTokens);
+                }
+
                 rawAiOutput = rootNode.path("candidates")
                         .get(0)
                         .path("content")
