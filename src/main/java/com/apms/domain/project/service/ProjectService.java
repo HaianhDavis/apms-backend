@@ -762,6 +762,16 @@ public class ProjectService {
             throw new BusinessValidationException("Account is disabled: " + account.getEmail());
         }
 
+        boolean isEligibleStaff = account.getRoles() != null &&
+                account.getRoles().contains(SystemRole.BUSINESS_DEVELOPMENT_STAFF) &&
+                !account.getRoles().contains(SystemRole.SYSTEM_ADMIN) &&
+                !account.getRoles().contains(SystemRole.BUSINESS_OWNER) &&
+                !account.getRoles().contains(SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+
+        if (!isEligibleStaff) {
+            throw new BusinessValidationException("Only accounts with role BUSINESS_DEVELOPMENT_STAFF can be added as project members: " + account.getEmail());
+        }
+
         if (projectMemberRepository.existsByProject_IdAndAccount_Id(projectId, accountId)) {
             throw new BusinessValidationException("Account " + accountId + " is already a member of project " + projectId);
         }

@@ -15,6 +15,7 @@ public class GraphCompanyDto {
     private java.util.List<String> industries;
     private ZonedDateTime createdAt;
     private ZonedDateTime updatedAt;
+    private Boolean isOwner;
 
     private List<CompanyRelationshipDto> relationships;
 }

@@ -26,4 +26,7 @@ public interface CompanyProfileRepository extends MongoRepository<CompanyProfile
     java.util.List<CompanyProfile> findByProjectId(String projectId);
 
     Optional<CompanyProfile> findByIdentityTaxCode(String taxCode);
+
+    Optional<CompanyProfile> findFirstByIsOwnerEnterpriseTrue();
+    boolean existsByIsOwnerEnterpriseTrue();
 }

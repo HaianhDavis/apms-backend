@@ -22,6 +22,20 @@ public class GraphController {
     private final GraphService graphService;
     private final com.apms.domain.graph.service.GraphRelationshipRepairService graphRelationshipRepairService;
 
+    @PostMapping("/reconcile")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Integer>> reconcile() {
+        int count = graphRelationshipRepairService.reconcileAllOfficialCompanyProfiles();
+        return ResponseEntity.ok(ApiResponse.success(count, "Successfully reconciled official company profiles with Neo4j"));
+    }
+
+    @PostMapping("/repair-relationships")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Integer>> repairRelationships() {
+        int count = graphRelationshipRepairService.reconcileAllOfficialCompanyProfiles();
+        return ResponseEntity.ok(ApiResponse.success(count, "Successfully repaired and reconciled relationships with Neo4j"));
+    }
+
     @PostMapping("/repair-completed-projects")
     @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<Integer>> repairCompletedProjects() {

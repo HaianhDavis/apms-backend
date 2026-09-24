@@ -190,4 +190,68 @@ class CandidateServiceManagerReviewTest {
         assertThat(tradeNameResult.getPreviousManagerReviewComment()).isEqualTo("sửa lại");
         assertThat(tradeNameResult.getResubmittedInCurrentRound()).isTrue();
     }
+
+    @Test
+    void round2ManagerReviewPreservesPreviousSubmittedValueFromRound1AndShowsRevisedValueInCurrent() {
+        // Round 1 submitted value: old@email.com
+        // Manager requested changes in Round 1: "Please correct the email"
+        // In Round 2, Staff revised value to: new@email.com
+        com.apms.domain.ai.dto.ExtractionFieldResult initialFieldResult = new com.apms.domain.ai.dto.ExtractionFieldResult();
+        initialFieldResult.setFieldName("contact.emails");
+        initialFieldResult.setValue(List.of("old@email.com"));
+        initialFieldResult.setPreviousSubmittedValue(List.of("old@email.com"));
+
+        CompanyCandidate candidate = CompanyCandidate.builder()
+                .id("cand-email-r2")
+                .projectId("10")
+                .revisionNumber(2)
+                .companyMatchStatus(com.apms.domain.financial.DocumentCompanyValidationStatus.MATCH)
+                .companyMatchConfirmed(true)
+                .extractionSource(CompanyCandidate.ExtractionSource.builder().extractionMethod("MANUAL").build())
+                .status(CandidateStatus.REVISION_REQUIRED)
+                .identity(CompanyCandidate.Identity.builder().legalName("Test Corp").build())
+                .contact(CompanyCandidate.Contact.builder()
+                        .emails(List.of("new@email.com"))
+                        .build())
+                .fieldApprovals(new ArrayList<>(List.of(
+                        FieldApprovalRecord.builder()
+                                .fieldPath("contact.emails")
+                                .status(FieldApprovalStatus.REVISION_REQUIRED)
+                                .comment("Please correct the email")
+                                .reviewedRevision(1)
+                                .reviewedByAccountId(99L)
+                                .pendingValue(List.of("old@email.com"))
+                                .previousSubmittedValue(List.of("old@email.com"))
+                                .build()
+                )))
+                .fieldResults(new java.util.HashMap<>(Map.of(
+                        com.apms.domain.ai.service.FieldKeyCodec.encode("contact.emails"),
+                        initialFieldResult
+                )))
+                .build();
+
+        when(candidateRepository.findById("cand-email-r2")).thenReturn(Optional.of(candidate));
+        when(candidateRepository.save(any(CompanyCandidate.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // Staff submits Round 2
+        com.apms.domain.candidate.dto.CandidateResponse response = candidateService.submitCandidate("cand-email-r2", 88L);
+
+        assertThat(response.getCurrentReviewRound()).isEqualTo(2);
+        com.apms.domain.ai.dto.ExtractionFieldResult emailResult = response.getFieldResults().get("contact.emails");
+        assertThat(emailResult).isNotNull();
+
+        // Current round (Round 2) submitted value is the newly revised value: new@email.com
+        assertThat(emailResult.getCurrentDecision()).isNotNull();
+        assertThat(emailResult.getCurrentDecision().getRoundNumber()).isEqualTo(2);
+        assertThat(emailResult.getCurrentDecision().getStatus()).isEqualTo(ExtractionReviewStatus.PENDING);
+        assertThat(emailResult.getCurrentDecision().getSubmittedValue()).isEqualTo(List.of("new@email.com"));
+
+        // Previous round (Round 1) submitted value MUST be old@email.com, NOT new@email.com
+        assertThat(emailResult.getPreviousDecision()).isNotNull();
+        assertThat(emailResult.getPreviousDecision().getRoundNumber()).isEqualTo(1);
+        assertThat(emailResult.getPreviousDecision().getStatus()).isEqualTo(ExtractionReviewStatus.NEEDS_REVIEW);
+        assertThat(emailResult.getPreviousDecision().getComment()).isEqualTo("Please correct the email");
+        assertThat(emailResult.getPreviousDecision().getSubmittedValue()).isEqualTo(List.of("old@email.com"));
+        assertThat(emailResult.getPreviousSubmittedValue()).isEqualTo(List.of("old@email.com"));
+    }
 }

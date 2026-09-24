@@ -17,6 +17,7 @@ import com.apms.domain.profile.dto.ProfileSourcesResponse;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.profile.dto.UpdateCompanyProfileRequest;
 import com.apms.domain.profile.dto.UpdateOwnerCompanyProfileRequest;
+import com.apms.domain.profile.validation.CompanyProfileFieldValidator;
 import com.apms.domain.profile.dto.AdminUpdateEnterpriseBasicInfoRequest;
 import com.apms.domain.profile.dto.AdminUpdateEnterpriseBusinessFieldsRequest;
 import com.apms.domain.profile.dto.AdminUpdateEnterpriseLeadershipRequest;
@@ -470,7 +471,8 @@ public class ProfileService {
 
     @Transactional(readOnly = true)
     public ProfileResponse getApprovedProfileResponse(String companyProfileId) {
-        CompanyProfile profile = profileRepository.findById(companyProfileId)
+        CompanyProfile profile = profileRepository.findByCompanyId(companyProfileId)
+                .or(() -> profileRepository.findById(companyProfileId))
                 .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for ID: " + companyProfileId));
 
         if (Boolean.TRUE.equals(profile.getIsDeleted())) {
@@ -784,6 +786,9 @@ public class ProfileService {
         } else {
             throw new AccessDeniedException("You are not responsible for this company profile.");
         }
+
+        // Validate Website, Email, and Phone
+        CompanyProfileFieldValidator.validateContact(request.getWebsite(), request.getEmails(), request.getPhones());
 
         // Verification status (APPROVED vs UNVERIFIED) does not block authorized Manager direct profile editing
 
@@ -1624,6 +1629,10 @@ public class ProfileService {
     public ProfileResponse updateOwnerCompanyProfile(UpdateOwnerCompanyProfileRequest request) {
         CompanyProfile profile = ownerOrganizationService.getRequiredOwnerCompanyProfile();
 
+        CompanyProfileFieldValidator.validateWebsite(request.getWebsite());
+        CompanyProfileFieldValidator.validateEmail(request.getEmail());
+        CompanyProfileFieldValidator.validatePhone(request.getPhone());
+
         if (profile.getIdentity() == null) profile.setIdentity(new CompanyProfile.Identity());
         if (StringUtils.hasText(request.getLegalName())) profile.getIdentity().setLegalName(request.getLegalName());
         if (StringUtils.hasText(request.getTradeName())) profile.getIdentity().setTradeName(request.getTradeName());
@@ -1803,6 +1812,13 @@ public class ProfileService {
 
         if (profile.getBusiness() == null) profile.setBusiness(new CompanyProfile.Business());
         if (request.getBusinessModel() != null) profile.getBusiness().setBusinessModel(CompanyProfileDiffHelper.normalizeOptionalString(request.getBusinessModel()));
+        if (request.getFoundedYear() != null) {
+            com.apms.domain.candidate.service.CandidateService.validateFoundedYear(request.getFoundedYear());
+            profile.getBusiness().setFoundedYear(request.getFoundedYear());
+        }
+        if (request.getCompanyDescription() != null) {
+            profile.getBusiness().setCompanyDescription(CompanyProfileDiffHelper.normalizeOptionalString(request.getCompanyDescription()));
+        }
 
         java.util.Map<String, Object> afterSnapshot = versionService.createSnapshotMap(profile);
 
@@ -1815,7 +1831,7 @@ public class ProfileService {
                 "identity.legalName", "identity.tradeName", "identity.taxCode",
                 "contact.website", "contact.emails", "contact.phones", "contact.addresses",
                 "companySize.employeeCount", "companySize.employeeTier",
-                "business.businessModel"
+                "business.businessModel", "business.foundedYear", "business.companyDescription"
         };
 
         for (String path : potentialPaths) {
@@ -2323,7 +2339,7 @@ public class ProfileService {
     // MAPPERS
     // ─────────────────────────────────────────────
 
-    ProfileResponse toResponse(CompanyProfile p) {
+    public ProfileResponse toResponse(CompanyProfile p) {
         com.apms.common.enums.ProfileVisibility visibility = Boolean.TRUE.equals(p.getIsHidden())
                 ? com.apms.common.enums.ProfileVisibility.HIDDEN
                 : com.apms.common.enums.ProfileVisibility.PUBLISHED;
@@ -2370,6 +2386,7 @@ public class ProfileService {
         boolean canAccessRelationship = false;
         boolean canTransferManagement = false;
         boolean isCurrentResponsibleManager = false;
+        boolean canViewSensitiveResearch = false;
         try {
             org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
             if (auth != null && auth.getPrincipal() instanceof UserDetailsImpl user) {
@@ -2392,6 +2409,14 @@ public class ProfileService {
                     canTransferManagement = true;
                 } else if (isResponsibleManager) {
                     canTransferManagement = true;
+                }
+
+                if (isAdmin || isOwner) {
+                    canViewSensitiveResearch = true;
+                } else if (isManager) {
+                    canViewSensitiveResearch = isResponsibleManager;
+                } else {
+                    canViewSensitiveResearch = true;
                 }
 
                 canAccessRelationship = relationshipClosenessAccessEvaluator.canAccess(p, user);
@@ -2436,7 +2461,61 @@ public class ProfileService {
                 .canAccessRelationshipCloseness(canAccessRelationship)
                 .canTransferManagement(canTransferManagement)
                 .isCurrentResponsibleManager(isCurrentResponsibleManager)
+                .canViewSensitiveResearch(canViewSensitiveResearch)
+                .canViewFinancials(canViewSensitiveResearch)
+                .canViewContracts(canViewSensitiveResearch)
                 .build();
+    }
+
+    private static final List<com.apms.common.enums.ProjectStatus> ALL_PROJECT_STATUSES = List.of(com.apms.common.enums.ProjectStatus.values());
+
+    public boolean canManagerAccessCompanyResearch(CompanyProfile profile, Long managerId) {
+        if (profile == null || managerId == null) {
+            return false;
+        }
+
+        String profileId = profile.getId();
+        String companyId = profile.getCompanyId();
+
+        // 1. Check targetCompanyProfileId matching profileId or companyId where manager is creator or member
+        if (StringUtils.hasText(profileId)) {
+            if (projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(profileId, managerId, ALL_PROJECT_STATUSES)
+                    || projectRepository.existsByTargetCompanyProfileIdAndCreatedByAccountId(profileId, managerId)) {
+                return true;
+            }
+        }
+
+        if (StringUtils.hasText(companyId)) {
+            if (projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(companyId, managerId, ALL_PROJECT_STATUSES)
+                    || projectRepository.existsByTargetCompanyProfileIdAndCreatedByAccountId(companyId, managerId)) {
+                return true;
+            }
+        }
+
+        // 2. Check sourceRefs.projectIds where manager is creator or member
+        if (profile.getSourceRefs() != null && profile.getSourceRefs().getProjectIds() != null) {
+            for (String pidStr : profile.getSourceRefs().getProjectIds()) {
+                try {
+                    Long pid = Long.parseLong(pidStr.trim());
+                    if (projectRepository.existsByIdAndMembersAccountId(pid, managerId)
+                            || projectRepository.existsByIdAndCreatedByAccountId(pid, managerId)) {
+                        return true;
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+
+        // 3. Fallback: match by company legal/trade name for projects targeting the company
+        String legalName = profile.getIdentity() != null ? profile.getIdentity().getLegalName() : null;
+        String tradeName = profile.getIdentity() != null ? profile.getIdentity().getTradeName() : null;
+        if (StringUtils.hasText(legalName) && projectRepository.existsByTargetCompanyNameIgnoreCaseAndManager(managerId, legalName.trim())) {
+            return true;
+        }
+        if (StringUtils.hasText(tradeName) && projectRepository.existsByTargetCompanyNameIgnoreCaseAndManager(managerId, tradeName.trim())) {
+            return true;
+        }
+
+        return false;
     }
 
     public String resolveDisplayName(Long accountId) {

@@ -108,14 +108,12 @@ class RelationshipClosenessAccessEvaluatorTest {
     }
 
     @Test
-    @DisplayName("Manager + Supplier in project scope -> canAccess is true")
-    void testManager_Supplier_InProjectScope_CanAccess() {
+    @DisplayName("Manager + Supplier not responsible manager -> canAccess is false")
+    void testManager_Supplier_NotResponsibleManager_CannotAccess() {
         CompanyProfile supplier = createProfile("sup-1", "uuid-sup-1", null);
         doReturn("SUPPLIER").when(evaluator).resolveRelationshipType("uuid-sup-1");
-        when(projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(
-                eq("sup-1"), eq(10L), anyList())).thenReturn(true);
 
-        assertTrue(evaluator.canAccess(supplier, managerUser));
+        assertFalse(evaluator.canAccess(supplier, managerUser));
     }
 
     @Test
@@ -133,21 +131,17 @@ class RelationshipClosenessAccessEvaluatorTest {
         // CTX Holdings: SUPPLIER, responsibleManagerId = null, no project managed by 10L
         CompanyProfile ctxHoldings = createProfile("6a31a0000000000000000037", "6a31a0000000000000000037", null);
         doReturn("SUPPLIER").when(evaluator).resolveRelationshipType("6a31a0000000000000000037");
-        when(projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(
-                eq("6a31a0000000000000000037"), eq(10L), anyList())).thenReturn(false);
 
         assertFalse(evaluator.canAccess(ctxHoldings, managerUser));
     }
 
     @Test
-    @DisplayName("Manager + Customer in project scope -> canAccess is true")
-    void testManager_Customer_InProjectScope_CanAccess() {
+    @DisplayName("Manager + Customer not responsible manager -> canAccess is false")
+    void testManager_Customer_NotResponsibleManager_CannotAccess() {
         CompanyProfile customer = createProfile("cust-1", "uuid-cust-1", null);
         doReturn("CUSTOMER").when(evaluator).resolveRelationshipType("uuid-cust-1");
-        when(projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(
-                eq("cust-1"), eq(10L), anyList())).thenReturn(true);
 
-        assertTrue(evaluator.canAccess(customer, managerUser));
+        assertFalse(evaluator.canAccess(customer, managerUser));
     }
 
     @Test
@@ -237,8 +231,6 @@ class RelationshipClosenessAccessEvaluatorTest {
         CompanyProfile profile = createProfile("target-1", "uuid-1", null);
         when(companyProfileRepository.findById("target-1")).thenReturn(Optional.of(profile));
         doReturn("SUPPLIER").when(evaluator).resolveRelationshipType("uuid-1");
-        when(projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(
-                eq("target-1"), eq(10L), anyList())).thenReturn(false);
 
         assertThrows(AccessDeniedException.class, () ->
                 evaluator.validateAssessmentAccess("target-1", managerUser, false));

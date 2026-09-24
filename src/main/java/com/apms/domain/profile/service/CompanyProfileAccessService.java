@@ -89,57 +89,8 @@ public class CompanyProfileAccessService {
             return true;
         }
 
-        // 2. Creator of the profile (người tạo hồ sơ doanh nghiệp)
-        if (profile.getMetadata() != null && String.valueOf(managerId).equals(profile.getMetadata().getCreatedBy())) {
-            return true;
-        }
-
-        // 3. Công ty mà Manager trực thuộc (Doanh nghiệp chủ quản - My Enterprise / FPT)
+        // 2. Doanh nghiệp chủ quản - My Enterprise / FPT (global owner company)
         if (ownerOrganizationService.isOwnerCompany(profile.getId()) || ownerOrganizationService.isOwnerCompany(profile.getCompanyId())) {
-            return true;
-        }
-
-        // 4. Monitoring assignment check (quản lý phân công nhiệm vụ giám sát định kỳ)
-        String profileId = profile.getId();
-        String companyId = profile.getCompanyId();
-
-        if (StringUtils.hasText(profileId)) {
-            var opt = monitoringAssignmentRepository.findByCompanyProfileId(profileId);
-            if (opt.isPresent() && opt.get().getAssignedByManager() != null && managerId.equals(opt.get().getAssignedByManager().getId())) {
-                return true;
-            }
-        }
-
-        if (StringUtils.hasText(companyId)) {
-            var opt = monitoringAssignmentRepository.findByCompanyProfileId(companyId);
-            if (opt.isPresent() && opt.get().getAssignedByManager() != null && managerId.equals(opt.get().getAssignedByManager().getId())) {
-                return true;
-            }
-        }
-
-        // 5. Dự án nghiên cứu/thẩm định nhắm mục tiêu vào công ty này do Manager tạo hoặc tham gia
-        if (StringUtils.hasText(profileId)) {
-            if (projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(profileId, managerId, ALL_PROJECT_STATUSES)
-                    || projectRepository.existsByTargetCompanyProfileIdAndCreatedByAccountId(profileId, managerId)) {
-                return true;
-            }
-        }
-
-        if (StringUtils.hasText(companyId)) {
-            if (projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(companyId, managerId, ALL_PROJECT_STATUSES)
-                    || projectRepository.existsByTargetCompanyProfileIdAndCreatedByAccountId(companyId, managerId)) {
-                return true;
-            }
-        }
-
-        // 6. Trường hợp dự án thẩm định theo tên chính xác chưa gắn mã hồ sơ
-        String legalName = profile.getIdentity() != null ? profile.getIdentity().getLegalName() : null;
-        String tradeName = profile.getIdentity() != null ? profile.getIdentity().getTradeName() : null;
-
-        if (StringUtils.hasText(legalName) && projectRepository.existsByTargetCompanyNameIgnoreCaseAndManager(managerId, legalName.trim())) {
-            return true;
-        }
-        if (StringUtils.hasText(tradeName) && projectRepository.existsByTargetCompanyNameIgnoreCaseAndManager(managerId, tradeName.trim())) {
             return true;
         }
 

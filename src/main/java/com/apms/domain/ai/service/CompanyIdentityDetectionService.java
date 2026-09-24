@@ -40,7 +40,7 @@ public class CompanyIdentityDetectionService {
     @Value("${app.storage.upload-dir:uploads/}")
     private String uploadDir;
 
-    @Value("${app.ai.gemini.model:gemini-3.6-flash}")
+    @Value("${app.ai.gemini.model:gemini-3.8-flash}")
     private String geminiModel;
 
     // Vietnamese tax code pattern: 10 digits, optionally followed by dash and 3 more digits

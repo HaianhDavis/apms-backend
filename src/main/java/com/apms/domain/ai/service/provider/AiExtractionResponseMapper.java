@@ -457,9 +457,7 @@ public class AiExtractionResponseMapper {
     );
 
     private static final Set<String> ALLOWED_FIELDS = Set.of(
-            "legalName",
             "tradeName",
-            "taxCode",
             "industries",
             "businessModel",
             "products",

@@ -43,7 +43,7 @@ public class ContractExtractionService {
     @Autowired(required = false)
     private StorageService storageService;
 
-    @Value("${app.ai.gemini.model:gemini-3.6-flash}")
+    @Value("${app.ai.gemini.model:gemini-3.8-flash}")
     private String geminiModel;
 
     @Value("${app.ai.gemini.max-output-tokens:32768}")

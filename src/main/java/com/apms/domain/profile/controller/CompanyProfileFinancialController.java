@@ -28,7 +28,7 @@ public class CompanyProfileFinancialController {
      * Does NOT mutate database state.
      */
     @GetMapping("/{companyProfileId}/financials")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyProfileId))")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_OWNER') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @companyScope.canManageCompanyProfile(#companyProfileId)) or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyProfileId))")
     public ResponseEntity<ApiResponse<List<CompanyProfileFinancialRowDto>>> getFinancials(
             @PathVariable String companyProfileId,
             @RequestParam(required = false) Long projectId) {

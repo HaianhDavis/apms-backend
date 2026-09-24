@@ -34,7 +34,7 @@ public class GeminiPartnerContractExtractionProvider implements PartnerContractE
 
     public GeminiPartnerContractExtractionProvider(ObjectMapper objectMapper,
                                                    GeminiApiKeyManager geminiApiKeyManager,
-                                                   @Value("${app.ai.gemini.model:gemini-3.6-flash}") String geminiModel) {
+                                                   @Value("${app.ai.gemini.model:gemini-3.8-flash}") String geminiModel) {
         this.restClient = RestClient.builder()
                 .requestInterceptor(GeminiCredentialDiagnostics.interceptor("PartnerContractExtraction")).build();
         this.objectMapper = objectMapper.copy().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true);

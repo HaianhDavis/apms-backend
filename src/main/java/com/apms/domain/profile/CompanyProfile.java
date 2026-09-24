@@ -118,6 +118,9 @@ public class CompanyProfile {
     @Builder.Default
     private Boolean isHidden = false;
 
+    @Builder.Default
+    private Boolean isOwnerEnterprise = false;
+
     private Metadata metadata;
 
     private Integer majorVersion;

@@ -36,6 +36,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -1816,13 +1817,6 @@ public class FinancialResearchService {
                 if (report.getExtractionStatus() != ExtractionStatus.EXTRACTED && report.getExtractionStatus() != ExtractionStatus.NEEDS_REVIEW) {
                     throw new BusinessValidationException("Cannot approve report that has not been extracted.");
                 }
-                boolean hasUnverified = research.getMetrics() != null && research.getMetrics().stream()
-                        .filter(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()))
-                        .filter(m -> m.getInputMethod() != MetricInputMethod.MANUAL)
-                        .anyMatch(m -> m.getQualityStatus() == MetricQualityStatus.NEEDS_REVIEW && m.getVerificationStatus() == MetricVerificationStatus.UNVERIFIED);
-                if (hasUnverified) {
-                    throw new BusinessValidationException("Cannot approve report with unverified metrics that need review.");
-                }
             }
         } else if (request.getStatus() == FinancialReportReviewStatus.CHANGES_REQUESTED) {
             if (!org.springframework.util.StringUtils.hasText(request.getReason())) {
@@ -2081,13 +2075,8 @@ public class FinancialResearchService {
     public FinancialMetric mapToMetric(AiFinancialMetricCandidate candidate, RawDocument doc, FinancialReportEntry report) {
         NormalizedValue normalized = normalizeValue(candidate.getRawValue(), candidate.getRawUnit());
         
-        MetricQualityStatus quality = MetricQualityStatus.VALID;
-        if (candidate.getConfidence() == null || candidate.getConfidence() < 0.7) {
-            quality = MetricQualityStatus.NEEDS_REVIEW;
-        }
-        if (normalized.unit == null || normalized.unit.equals(candidate.getRawUnit()) && !isStandardUnit(normalized.unit)) {
-            quality = MetricQualityStatus.NEEDS_REVIEW;
-        }
+        // Successfully parsed AI metrics are VALID; unparseable/null values retain legacy NEEDS_REVIEW
+        MetricQualityStatus quality = normalized.value != null ? MetricQualityStatus.VALID : MetricQualityStatus.NEEDS_REVIEW;
 
         // ReportingPeriod normalization: report.reportingPeriod is the authoritative SOURCE OF TRUTH
         ReportingPeriod reportPeriod = report != null ? report.getReportingPeriod() : null;
@@ -2156,9 +2145,19 @@ public class FinancialResearchService {
         NormalizedValue(BigDecimal v, String u) { this.value = v; this.unit = u; }
     }
 
+    private static String stripDiacritics(String str) {
+        if (str == null) return "";
+        return Normalizer.normalize(str, Normalizer.Form.NFD)
+                .replaceAll("\\p{InCombiningDiacriticalMarks}+", "")
+                .replace("đ", "d")
+                .replace("Đ", "D")
+                .trim()
+                .toUpperCase(Locale.ROOT);
+    }
+
     private boolean isStandardUnit(String unit) {
         if (unit == null) return false;
-        String upper = unit.toUpperCase();
+        String upper = unit.toUpperCase(Locale.ROOT);
         return upper.equals("VND") || upper.equals("USD") || upper.equals("PERCENT") || upper.equals("TIMES") || upper.equals("RATIO");
     }
 
@@ -2185,23 +2184,48 @@ public class FinancialResearchService {
             return new NormalizedValue(bd, null);
         }
 
-        String unitUpper = rawUnit.toUpperCase();
-        if (unitUpper.contains("MILLION_VND") || unitUpper.contains("TRI\u1EC7U \u0110\u1ED3NG")) {
-            return new NormalizedValue(bd.multiply(new BigDecimal("1000000")), "VND");
-        } else if (unitUpper.contains("BILLION_VND") || unitUpper.contains("T\u1EF7 \u0110\u1ED3NG")) {
-            return new NormalizedValue(bd.multiply(new BigDecimal("1000000000")), "VND");
-        } else if (unitUpper.contains("THOUSAND_VND") || unitUpper.contains("NGH\u00CCN \u0110\u1ED3NG")) {
-            return new NormalizedValue(bd.multiply(new BigDecimal("1000")), "VND");
-        } else if (unitUpper.contains("MILLION_USD")) {
+        String stripped = stripDiacritics(rawUnit);
+
+        // 1. Million USD
+        if (stripped.contains("MILLION_USD") || (stripped.contains("TRIEU") && stripped.contains("USD"))) {
             return new NormalizedValue(bd.multiply(new BigDecimal("1000000")), "USD");
-        } else if (unitUpper.contains("PERCENT") || unitUpper.contains("%")) {
+        }
+
+        // 2. Million VND: MILLION_VND, TRIỆU ĐỒNG, TRIỆU VND, TRIỆU VNĐ, TRIEU VND
+        if (stripped.contains("MILLION_VND") || stripped.contains("TRIEU DONG") || stripped.contains("TRIEU VND") || stripped.contains("TRIEU")) {
+            return new NormalizedValue(bd.multiply(new BigDecimal("1000000")), "VND");
+        }
+
+        // 3. Billion VND: BILLION_VND, TỶ ĐỒNG, TỶ VND, TỶ VNĐ, TY VND
+        if (stripped.contains("BILLION_VND") || stripped.contains("TY DONG") || stripped.contains("TY VND") || stripped.contains("TY")) {
+            return new NormalizedValue(bd.multiply(new BigDecimal("1000000000")), "VND");
+        }
+
+        // 4. Thousand VND: THOUSAND_VND, NGHÌN ĐỒNG, NGHÌN VND, NGHIN VND, NGHIN DONG
+        if (stripped.contains("THOUSAND_VND") || stripped.contains("NGHIN DONG") || stripped.contains("NGHIN VND") || stripped.contains("NGHIN")) {
+            return new NormalizedValue(bd.multiply(new BigDecimal("1000")), "VND");
+        }
+
+        // 5. Base currency without scale (prevent double-multiplying)
+        if (stripped.equals("VND") || stripped.equals("DONG")) {
+            return new NormalizedValue(bd, "VND");
+        }
+        if (stripped.equals("USD")) {
+            return new NormalizedValue(bd, "USD");
+        }
+
+        // 6. Non-monetary standard units
+        if (stripped.contains("PERCENT") || stripped.contains("%") || stripped.contains("PHAN TRAM")) {
             return new NormalizedValue(bd, "PERCENT");
-        } else if (unitUpper.contains("TIMES") || unitUpper.contains("L\u1EA6N")) {
+        }
+        if (stripped.contains("TIMES") || stripped.contains("LAN")) {
             return new NormalizedValue(bd, "TIMES");
-        } else if (unitUpper.contains("RATIO") || unitUpper.contains("T\u1EF6 L\u1EC6")) {
+        }
+        if (stripped.contains("RATIO") || stripped.contains("TY LE")) {
             return new NormalizedValue(bd, "RATIO");
         }
 
+        // Unknown unit: preserve raw unit and value without guessing multiplier
         return new NormalizedValue(bd, rawUnit);
     }
 

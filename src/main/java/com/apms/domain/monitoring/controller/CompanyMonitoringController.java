@@ -73,8 +73,10 @@ public class CompanyMonitoringController {
 
     @GetMapping
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
-    public ResponseEntity<Page<CompanyMonitoringAssignmentResponse>> getAllAssignments(Pageable pageable) {
-        return ResponseEntity.ok(service.getAllAssignments(pageable));
+    public ResponseEntity<Page<CompanyMonitoringAssignmentResponse>> getAllAssignments(
+            @AuthenticationPrincipal UserDetailsImpl currentUser,
+            Pageable pageable) {
+        return ResponseEntity.ok(service.getAllAssignments(currentUser.getId(), pageable));
     }
 
     @GetMapping("/my")
@@ -87,8 +89,10 @@ public class CompanyMonitoringController {
 
     @GetMapping("/due")
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
-    public ResponseEntity<Page<CompanyMonitoringAssignmentResponse>> getDueOrOverdueAssignments(Pageable pageable) {
-        return ResponseEntity.ok(service.getDueOrOverdueAssignments(pageable));
+    public ResponseEntity<Page<CompanyMonitoringAssignmentResponse>> getDueOrOverdueAssignments(
+            @AuthenticationPrincipal UserDetailsImpl currentUser,
+            Pageable pageable) {
+        return ResponseEntity.ok(service.getDueOrOverdueAssignments(currentUser.getId(), pageable));
     }
 
     @GetMapping("/{id}")

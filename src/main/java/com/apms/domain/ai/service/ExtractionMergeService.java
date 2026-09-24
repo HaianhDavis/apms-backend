@@ -273,7 +273,7 @@ public class ExtractionMergeService {
     // ─────────────────────────────────────────────
 
     private static final Set<String> STAFF_REVIEWABLE_FIELDS = Set.of(
-            "identity.legalName", "identity.tradeName", "identity.taxCode",
+            "identity.tradeName",
             "contact.addresses", "contact.website", "contact.emails", "contact.phones",
             "business.businessModel", "business.industries", "business.foundedYear", "business.companyDescription",
             "business.markets", "business.targetCustomers", "business.products",

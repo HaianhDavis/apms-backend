@@ -40,3 +40,5 @@ uploads/
 
 .idea/
 .DS_Store
+
+.env

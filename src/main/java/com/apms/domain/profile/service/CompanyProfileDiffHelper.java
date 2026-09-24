@@ -181,6 +181,7 @@ public final class CompanyProfileDiffHelper {
                 List<String> aList = normalizeStringList(afterVal);
                 return Objects.equals(bList, aList);
             }
+            case "business.foundedYear":
             case "companySize.employeeCount": {
                 Integer bNum = parseInteger(beforeVal);
                 Integer aNum = parseInteger(afterVal);
@@ -228,6 +229,7 @@ public final class CompanyProfileDiffHelper {
                 List<String> list = normalizeStringList(val);
                 return list.isEmpty() ? null : list;
             }
+            case "business.foundedYear":
             case "companySize.employeeCount":
                 return parseInteger(val);
             default:

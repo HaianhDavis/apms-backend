@@ -31,6 +31,10 @@ public class UserProfile {
     private String department;
     private String position;
     private String avatarUrl;
+    private String address;
+
+    @Column(columnDefinition = "NVARCHAR(MAX)")
+    private String bio;
 
     @CreationTimestamp
     @Column(updatable = false)

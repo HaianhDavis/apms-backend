@@ -19,9 +19,7 @@ For every field, return an object with:
 - "sourceDocumentIds": array of sourceDocumentId strings supporting the field.
 
 Return exactly these fields:
-- legalName
 - tradeName
-- taxCode
 - industries
 - businessModel
 - foundedYear
@@ -32,13 +30,11 @@ Return exactly these fields:
 - website
 - email
 - phone
-- address
+- addresses
 - employeeCount
 
 Field rules:
-- legalName: official registered company name.
 - tradeName: common commercial/brand name if available.
-- taxCode: official tax code/business registration code only.
 - industries: array of granular industries, business sectors, and operating business units explicitly named in the documents.
     - STRICT DOCUMENT GROUNDING: Extract only business sectors, industries, or operational divisions that appear verbatim or near-verbatim in the documents (e.g., "Semiconductor Components", "Memory Business", "Foundry Business", "System LSI Business", "Network Systems", "Medical Equipment").
     - FORBID UNQUOTED TAXONOMY INFERENCE: Do NOT invent, synthesize, or infer broader category labels (e.g., do NOT extract "Consumer Electronics", "Digital Appliances", "ICT", or "High Tech") UNLESS the document explicitly contains that exact phrase and you cite it in evidenceText. If a sector name is not in a cited quote, it must NOT appear in the array.
@@ -125,7 +121,7 @@ Output format:
 - A field value is valid only when the exact value, or an exact textual statement supporting that value, appears in the provided documents.
 - evidenceText must be an exact quote from the document. Do NOT write paraphrased evidence.
 - Do NOT create generic evidence such as "Business registration details for..." unless that exact sentence appears in the document.
-- For identity and contact fields including legalName, tradeName, taxCode, website, email, phone, and addresses, the extracted value itself must appear verbatim in the evidenceText.
+- For identity and contact fields including tradeName, website, email, phone, and addresses, the extracted value itself must appear verbatim in the evidenceText.
 - For list and array fields including markets, industries, products, and targetCustomers, as well as the textual businessModel:
     - 1-TO-1 BIDIRECTIONAL FIDELITY:
         1. FORWARD CHECK (Value -> Evidence): Every item, category, division, or claim in "value" MUST be present in the quotes inside "evidenceText". If an item in "value" is not in "evidenceText", either add the exact quote with [fileName | sourceDocumentId | Page X] or delete the item from "value".
@@ -135,98 +131,10 @@ Output format:
     - Never return a single partial quote if "value" contains items sourced from other pages.
 - If the value does not appear verbatim in the source evidence, return null for value, confidence 0, evidenceText "", and sourceDocumentIds [].
 
-STRICT TAX CODE RULES:
-- Extract taxCode only if the document explicitly states a tax code, tax ID, taxpayer identification number, VAT number, business registration number, company registration number, enterprise registration code, corporate registration number, EIN, TIN, or equivalent official registration identifier.
-- The taxCode value must appear verbatim in the document and in evidenceText.
-- Do NOT infer taxCode from company name, country, headquarters, legal name, report metadata, or prior knowledge.
-- Do NOT fill taxCode from known public company information unless that exact code is present in the uploaded document.
-- If the document only identifies the company but does not show an official tax/registration identifier, taxCode.value must be null.
-- Before returning JSON, perform this private validation:
-    1. Does taxCode.value appear exactly in evidenceText?
-    2. Does the same evidenceText contain or clearly sit next to a label such as Tax Code, Tax ID, Business Registration Number, Company Registration Number, VAT, EIN, TIN, or equivalent?
-    3. Is the evidence an exact quote from the uploaded document?
-       If any answer is no, set taxCode to:
-       {"value": null, "confidence": 0, "evidenceText": "", "sourceDocumentIds": []}
-
 HALLUCINATION CHECK:
 - After drafting the JSON, re-check every non-null identity/contact value.
 - If any value cannot be traced to an exact quote in the provided documents, replace it with null.
 - Low confidence is not enough for unsupported values. Unsupported values must be null, not guessed.
-
-TAX CODE ABSOLUTE RULE:
-- taxCode is a source-verbatim field.
-- Only extract taxCode when the exact identifier appears verbatim in the uploaded document text.
-- Do not use model memory, public knowledge, company registry knowledge, website knowledge, or previously seen values.
-- Do not infer taxCode from legalName, address, country, report title, company profile, or business description.
-- Do not output a tax code only because the company is well known.
-- The value "124-81-00998" must NOT be returned for Samsung unless the exact string "124-81-00998" appears in the uploaded document evidence.
-- Evidence must contain the exact taxCode value and a nearby label such as:
-  Tax Code, Tax ID, Tax Number, TIN, EIN, VAT Number, Business Registration Number, Company Registration Number, Corporate Registration Number, Enterprise Registration Code, 사업자등록번호, registration no.
-- If the exact taxCode value is not found in the provided document text, return:
-  "taxCode": {
-  "value": null,
-  "confidence": 0,
-  "evidenceText": "",
-  "sourceDocumentIds": []
-  }
-- Never return an unsupported taxCode with low confidence. Unsupported means null, not low confidence.
-- Extract ONLY the company's tax code / mã số thuế.
-- If no tax code is found, return "N/A".
-- In Vietnamese documents, extract taxCode ONLY when the exact value appears next to one of these explicit labels:
-  "Mã số thuế", "MST", "Mã số thuế doanh nghiệp".
-- In English documents, extract taxCode ONLY when the exact value appears next to one of these explicit labels:
-  "Tax Code", "Tax ID", "Tax Identification Number", "Tax Number", "Taxpayer Identification Number".
-- Do NOT use "TIN" as a valid label in Vietnamese documents because it may be part of "THÔNG TIN".
-- Do NOT treat these as taxCode:
-  "Giấy CNĐKDN số", "Giấy chứng nhận đăng ký doanh nghiệp", "Giấy phép", "Số giấy phép", "GP/KDBH", "Mã cổ phiếu", "Mã chứng khoán", "Số đăng ký", "Business Registration Number", "Enterprise Registration Certificate", "Company Registration Certificate", "License Number", "Permit Number".
-- The taxCode value must appear verbatim in evidenceText.
-- evidenceText must be an exact quote from the uploaded document.
-- If the document contains only registration certificate number, business license number, insurance license number, securities code, or stock code, taxCode.value must be "N/A".
-- Never return an unsupported taxCode with low confidence. Unsupported taxCode must be "N/A".
-- Extract the company's official tax code / enterprise code / business code only.
-- If no valid code is found, return "N/A".
-- For Vietnamese companies, accept a value as taxCode when it is a 10-digit or 13-digit numeric code appearing near one of these labels:
-  "Mã số thuế", "MST", "Mã số doanh nghiệp", "Mã doanh nghiệp",
-  "Giấy chứng nhận đăng ký doanh nghiệp ... mã số",
-  "Giấy CNĐKDN ... mã số".
-- For English Vietnamese annual reports, accept a value as taxCode when it is a 10-digit or 13-digit numeric code appearing near one of these labels:
-  "Tax Code", "Tax ID", "Tax Identification Number", "Tax Number",
-  "Business code", "Enterprise code", "Enterprise Registration Code".
-- Extract only the code of the target company, not subsidiaries, associates, shareholders, customers, suppliers, or partners.
-- Prefer the company overview/general information section over financial note sections when both exist.
-- Do NOT use "TIN" as a valid label in Vietnamese documents because it may be part of "THÔNG TIN".
-- Do NOT treat license/certificate numbers as taxCode when they contain letters, slashes, or license patterns, for example:
-  "67-GP/KDBH", "GP/KDBH", "Giấy phép", "Số giấy phép", "Insurance Business License",
-  "License Number", "Permit Number", "Securities code", "Stock code".
-- Do NOT extract old Business Registration Certificate numbers if a separate "Business code" or "Mã số doanh nghiệp" is present.
-- The taxCode value must appear verbatim in evidenceText.
-- evidenceText must be an exact quote from the uploaded document.
-- If the code is not a 10-digit or 13-digit numeric code, return "N/A".
-- Unsupported taxCode must be "N/A", not a guessed value with low confidence.
-
-FINAL TAX CODE VALIDATION:
-Before output:
-1. If taxCode.value is "N/A", keep it.
-2. If taxCode.value is not "N/A", it must match:
-    - 10 digits, or
-    - 13 digits, or
-    - 10 digits + "-" + 3 digits.
-3. evidenceText must contain the exact value.
-4. evidenceText must contain or directly neighbor a valid label:
-   "Mã số thuế", "MST", "Mã số doanh nghiệp", "Mã doanh nghiệp",
-   "Giấy chứng nhận đăng ký doanh nghiệp ... mã số",
-   "Giấy CNĐKDN ... mã số",
-   "Tax Code", "Tax ID", "Tax Identification Number", "Business code",
-   "Enterprise code", "Enterprise Registration Code".
-5. evidenceText must refer to the target company, not a subsidiary or related company.
-
-If any check fails, overwrite taxCode as:
-{
-"value": "N/A",
-"confidence": 0,
-"evidenceText": "",
-"sourceDocumentIds": []
-}
 
 FINAL 1-TO-1 FIELD VERIFICATION (MANDATORY BEFORE GENERATING JSON):
 For industries, businessModel, targetCustomers, products, and markets:

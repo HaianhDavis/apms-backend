@@ -68,7 +68,7 @@ public class TaskExtractionOrchestrator {
     @Value("${app.storage.upload-dir:uploads/}")
     private String uploadDir;
 
-    @Value("${app.ai.gemini.model:gemini-3.6-flash}")
+    @Value("${app.ai.gemini.model:gemini-3.8-flash}")
     private String geminiModel;
 
     @Transactional
@@ -581,27 +581,12 @@ public class TaskExtractionOrchestrator {
         output.getExtractedData().setLegalName(project.getTargetCompanyName());
         output.getExtractedData().setTaxCode(project.getTargetCompanyTaxCode());
 
-        if (output.getFieldResults() == null) {
-            output.setFieldResults(new java.util.HashMap<>());
+        if (output.getFieldResults() != null) {
+            output.getFieldResults().remove("legalName");
+            output.getFieldResults().remove("taxCode");
+            output.getFieldResults().remove("identity.legalName");
+            output.getFieldResults().remove("identity.taxCode");
         }
-        output.getFieldResults().put("legalName",
-                projectControlledField("legalName", project.getTargetCompanyName()));
-        output.getFieldResults().put("taxCode",
-                projectControlledField("taxCode", project.getTargetCompanyTaxCode()));
-    }
-
-    private com.apms.domain.ai.dto.ExtractionFieldResult projectControlledField(String fieldName, Object value) {
-        return com.apms.domain.ai.dto.ExtractionFieldResult.builder()
-                .fieldName(fieldName)
-                .value(value)
-                .normalizedValue(value)
-                .confidence(1.0)
-                .validationStatus(com.apms.domain.ai.dto.ExtractionValidationStatus.PASS)
-                .validationMessages("Provided by manager at project creation.")
-                .staffReviewStatus(com.apms.domain.ai.dto.StaffFieldReviewStatus.CONFIRMED)
-                .staffReviewedValue(value)
-                .managerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED)
-                .build();
     }
 
     private void removeAnalysisExtractionFields(RawExtractionOutput output) {

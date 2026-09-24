@@ -11,6 +11,7 @@ import com.apms.domain.ai.AiExtractionCache;
 import com.apms.domain.ai.dto.AiExtractionResult;
 import com.apms.domain.ai.dto.ExtractedCompanyData;
 import com.apms.domain.ai.dto.ExtractionFieldResult;
+import com.apms.domain.ai.dto.ExtractionQualityMetrics;
 import com.apms.domain.ai.service.AiExtractionService;
 import com.apms.domain.candidate.CompanyCandidate;
 import com.apms.domain.candidate.dto.ApproveCandidateRequest;
@@ -67,6 +68,7 @@ public class CandidateService {
     private final com.apms.domain.audit.service.AuditLogService auditLogService;
     private final DocumentCompanyMatcher companyMatcher;
     private final com.apms.domain.reference.service.IndustryCatalogService industryCatalogService;
+    private final com.apms.domain.ai.service.AiExtractionQualityService qualityService;
 
     // ─────────────────────────────────────────────
     // CREATE (from AI)
@@ -637,12 +639,21 @@ public class CandidateService {
                     boolean isChanged = changedSet.contains(path);
 
                     if (isReturned || isChanged) {
-                        if (record.getPendingValue() == null) {
-                            com.apms.domain.ai.dto.ExtractionFieldResult existingFr = candidate.getFieldResults() != null
-                                    ? candidate.getFieldResults().get(com.apms.domain.ai.service.FieldKeyCodec.encode(path))
-                                    : null;
-                            record.setPendingValue(resolveCurrentFieldValue(existingFr, candidate, path));
+                        com.apms.domain.ai.dto.ExtractionFieldResult existingFr = candidate.getFieldResults() != null
+                                ? candidate.getFieldResults().get(com.apms.domain.ai.service.FieldKeyCodec.encode(path))
+                                : null;
+
+                        Object prevVal = record.getPreviousSubmittedValue() != null
+                                ? record.getPreviousSubmittedValue()
+                                : (existingFr != null ? existingFr.getPreviousSubmittedValue() : null);
+
+                        if (prevVal == null && (isReturned || record.getStatus() != com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW)) {
+                            prevVal = record.getPendingValue();
                         }
+
+                        Object currentVal = resolveCurrentFieldValue(existingFr, candidate, path);
+                        record.setPendingValue(currentVal);
+
                         if (record.getStatus() != com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW) {
                             record.setPreviousStatus(record.getStatus());
                             record.setPreviousComment(record.getComment());
@@ -650,6 +661,10 @@ public class CandidateService {
                                 record.setPreviousReviewedRevision(record.getReviewedRevision());
                             }
                         }
+                        if (prevVal != null) {
+                            record.setPreviousSubmittedValue(prevVal);
+                        }
+
                         record.setStatus(com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW);
                         record.setComment(null);
                         record.setReviewedRevision(null);
@@ -666,7 +681,7 @@ public class CandidateService {
                                     fr.setPreviousManagerReviewStatus(toExtractionReviewStatus(record.getPreviousStatus()));
                                     fr.setPreviousManagerReviewComment(record.getPreviousComment());
                                     fr.setPreviousReviewedRevision(record.getPreviousReviewedRevision());
-                                    fr.setPreviousSubmittedValue(record.getPendingValue());
+                                    fr.setPreviousSubmittedValue(record.getPreviousSubmittedValue() != null ? record.getPreviousSubmittedValue() : prevVal);
                                 }
                                 fr.setManagerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING);
                                 fr.setManagerReviewComment(null);
@@ -828,6 +843,8 @@ public class CandidateService {
                         .comment(v.getComment())
                         .previousComment(v.getPreviousComment())
                         .previousStatus(v.getPreviousStatus())
+                        .previousReviewedRevision(v.getPreviousReviewedRevision())
+                        .previousSubmittedValue(v.getPreviousSubmittedValue())
                         .changedInRevision(v.getChangedInRevision())
                         .staleReason(v.getStaleReason())
                         .pendingValue(v.getPendingValue())
@@ -1248,6 +1265,8 @@ public class CandidateService {
             }
             record.setPreviousStatus(record.getStatus());
             record.setPreviousComment(record.getComment());
+            record.setPreviousReviewedRevision(record.getReviewedRevision());
+            record.setPreviousSubmittedValue(record.getPendingValue());
 
             fieldResult.setPreviousManagerReviewStatus(toExtractionReviewStatus(record.getStatus()));
             fieldResult.setPreviousManagerReviewComment(record.getComment());
@@ -1301,23 +1320,39 @@ public class CandidateService {
 
         com.apms.domain.ai.dto.ExtractionReviewStatus previousStatus = fieldResult.getPreviousManagerReviewStatus();
         String previousComment = fieldResult.getPreviousManagerReviewComment();
-        Object previousSubmittedValue = fieldResult.getPreviousSubmittedValue();
-        Integer previousReviewedRevision = fieldResult.getPreviousReviewedRevision();
+        Object previousSubmittedValue = approval.getPreviousSubmittedValue() != null
+                ? approval.getPreviousSubmittedValue()
+                : fieldResult.getPreviousSubmittedValue();
+        Integer previousReviewedRevision = approval.getPreviousReviewedRevision() != null
+                ? approval.getPreviousReviewedRevision()
+                : fieldResult.getPreviousReviewedRevision();
 
         if (isReturnedApprovalStatus(approval.getStatus())) {
             previousStatus = toExtractionReviewStatus(approval.getStatus());
             previousComment = approval.getComment();
-            previousSubmittedValue = approval.getPendingValue() != null
-                    ? approval.getPendingValue()
-                    : resolveCurrentFieldValue(fieldResult, candidate, fieldPath);
-            previousReviewedRevision = approval.getReviewedRevision();
+            if (previousSubmittedValue == null) {
+                previousSubmittedValue = approval.getPendingValue() != null
+                        ? approval.getPendingValue()
+                        : resolveCurrentFieldValue(fieldResult, candidate, fieldPath);
+            }
+            if (previousReviewedRevision == null) {
+                previousReviewedRevision = approval.getReviewedRevision();
+            }
             approval.setPreviousStatus(approval.getStatus());
             approval.setPreviousComment(approval.getComment());
+            approval.setPreviousReviewedRevision(previousReviewedRevision);
+            approval.setPreviousSubmittedValue(previousSubmittedValue);
         } else if (fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.REJECTED
                 || fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW) {
             previousStatus = fieldResult.getManagerReviewStatus();
             previousComment = fieldResult.getManagerReviewComment();
-            previousSubmittedValue = resolveCurrentFieldValue(fieldResult, candidate, fieldPath);
+            if (previousSubmittedValue == null) {
+                previousSubmittedValue = resolveCurrentFieldValue(fieldResult, candidate, fieldPath);
+            }
+            approval.setPreviousStatus(toFieldApprovalStatus(previousStatus));
+            approval.setPreviousComment(previousComment);
+            approval.setPreviousReviewedRevision(previousReviewedRevision);
+            approval.setPreviousSubmittedValue(previousSubmittedValue);
         }
 
         approval.setStatus(com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW);
@@ -1344,10 +1379,14 @@ public class CandidateService {
         if (fieldResult != null && fieldResult.getStaffReviewedValue() != null) {
             return fieldResult.getStaffReviewedValue();
         }
+        Object embedded = readEmbeddedField(candidate, fieldPath);
+        if (isMeaningfulValue(embedded)) {
+            return embedded;
+        }
         if (fieldResult != null && fieldResult.getValue() != null) {
             return fieldResult.getValue();
         }
-        return readEmbeddedField(candidate, fieldPath);
+        return embedded;
     }
 
     private com.apms.domain.ai.dto.ExtractionReviewStatus toExtractionReviewStatus(com.apms.common.enums.FieldApprovalStatus status) {
@@ -1359,6 +1398,18 @@ public class CandidateService {
             case REJECTED -> com.apms.domain.ai.dto.ExtractionReviewStatus.REJECTED;
             case REVISION_REQUIRED -> com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW;
             case PENDING_REVIEW, STALE -> com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING;
+        };
+    }
+
+    private com.apms.common.enums.FieldApprovalStatus toFieldApprovalStatus(com.apms.domain.ai.dto.ExtractionReviewStatus status) {
+        if (status == null) {
+            return com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW;
+        }
+        return switch (status) {
+            case ACCEPTED -> com.apms.common.enums.FieldApprovalStatus.APPROVED;
+            case REJECTED -> com.apms.common.enums.FieldApprovalStatus.REJECTED;
+            case NEEDS_REVIEW -> com.apms.common.enums.FieldApprovalStatus.REVISION_REQUIRED;
+            case EDITED, PENDING -> com.apms.common.enums.FieldApprovalStatus.PENDING_REVIEW;
         };
     }
 
@@ -1783,6 +1834,11 @@ public class CandidateService {
         decodedFieldResults = applyFieldApprovalsToDecodedResults(c, decodedFieldResults);
         applyProjectControlledIdentityToResponse(c, decodedFieldResults);
 
+        ExtractionQualityMetrics resolvedMetrics = c.getQualityMetrics();
+        if (qualityService != null && decodedFieldResults != null && !decodedFieldResults.isEmpty()) {
+            resolvedMetrics = qualityService.computeMetrics(decodedFieldResults);
+        }
+
         DocumentCompanyValidationStatus resolvedStatus = resolveCompanyMatchStatus(c);
         Boolean isConfirmed = (resolvedStatus == DocumentCompanyValidationStatus.MATCH)
                 ? Boolean.TRUE
@@ -1827,7 +1883,7 @@ public class CandidateService {
                 .fieldResults(decodedFieldResults)
                 .fieldApprovals(c.getFieldApprovals())
                 .qualityStatus(c.getQualityStatus())
-                .qualityMetrics(c.getQualityMetrics())
+                .qualityMetrics(resolvedMetrics)
                 .rawAiOutput(c.getRawAiOutput())
                 .scorePreview(c.getScorePreview())
                 .aiMetadata(c.getAiMetadata())
@@ -1843,7 +1899,7 @@ public class CandidateService {
     private void applyProjectControlledIdentityToResponse(
             CompanyCandidate candidate,
             java.util.Map<String, com.apms.domain.ai.dto.ExtractionFieldResult> decodedFieldResults) {
-        if (candidate == null || candidate.getProjectId() == null || decodedFieldResults == null) {
+        if (candidate == null || candidate.getProjectId() == null) {
             return;
         }
         try {
@@ -1854,21 +1910,16 @@ public class CandidateService {
                 }
                 candidate.getIdentity().setLegalName(project.getTargetCompanyName());
                 candidate.getIdentity().setTaxCode(project.getTargetCompanyTaxCode());
-
-                applyProjectControlledFieldDefaults(
-                        decodedFieldResults.computeIfAbsent("identity.legalName", key -> ExtractionFieldResult.builder()
-                                .fieldName("identity.legalName")
-                                .build()),
-                        project.getTargetCompanyName());
-                applyProjectControlledFieldDefaults(
-                        decodedFieldResults.computeIfAbsent("identity.taxCode", key -> ExtractionFieldResult.builder()
-                                .fieldName("identity.taxCode")
-                                .build()),
-                        project.getTargetCompanyTaxCode());
             });
         } catch (NumberFormatException ex) {
             log.warn("Cannot resolve project-controlled identity for candidateId={}, projectId={}",
                     candidate.getId(), candidate.getProjectId());
+        }
+        if (decodedFieldResults != null) {
+            decodedFieldResults.remove("identity.legalName");
+            decodedFieldResults.remove("identity.taxCode");
+            decodedFieldResults.remove("legalName");
+            decodedFieldResults.remove("taxCode");
         }
     }
 
@@ -1937,7 +1988,9 @@ public class CandidateService {
                 fieldResult.setReviewedRevision(record.getReviewedRevision());
 
                 // Canonical current round review context
-                Object currentSubmittedVal = resolveCurrentFieldValue(fieldResult, candidate, record.getFieldPath());
+                Object currentSubmittedVal = record.getPendingValue() != null
+                        ? record.getPendingValue()
+                        : resolveCurrentFieldValue(fieldResult, candidate, record.getFieldPath());
                 com.apms.domain.ai.dto.FieldReviewDecision currentDecision = com.apms.domain.ai.dto.FieldReviewDecision.builder()
                         .roundNumber(currentRound)
                         .status(currentStatus)
@@ -1959,9 +2012,15 @@ public class CandidateService {
                     if (prevRev == null || prevRev >= currentRound) {
                         prevRev = currentRound - 1;
                     }
-                    Object prevSubmittedVal = record.getPendingValue() != null
-                            ? record.getPendingValue()
+                    Object prevSubmittedVal = record.getPreviousSubmittedValue() != null
+                            ? record.getPreviousSubmittedValue()
                             : fieldResult.getPreviousSubmittedValue();
+
+                    if ((prevSubmittedVal == null || java.util.Objects.equals(prevSubmittedVal, currentSubmittedVal))
+                            && fieldResult.getValue() != null
+                            && !java.util.Objects.equals(fieldResult.getValue(), currentSubmittedVal)) {
+                        prevSubmittedVal = fieldResult.getValue();
+                    }
 
                     com.apms.domain.ai.dto.FieldReviewDecision previousDecision = com.apms.domain.ai.dto.FieldReviewDecision.builder()
                             .roundNumber(prevRev)

@@ -30,12 +30,22 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @PatchMapping({"/users/me/profile", "/users/me"})
+    public ResponseEntity<ApiResponse<UserProfileResponse>> updateMyProfile(
+            @Valid @RequestBody UpdateMyProfileRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        UserProfileResponse response = userService.updateMyProfile(currentUser.getId(), request);
+        return ResponseEntity.ok(ApiResponse.success(response, "Profile updated successfully"));
+    }
+
     @GetMapping("/users/search")
     @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<List<UserProfileResponse>>> searchUsers(
-            @RequestParam(required = false) String email) {
+            @RequestParam(required = false) String email,
+            @RequestParam(required = false) SystemRole role) {
 
-        return ResponseEntity.ok(ApiResponse.success(userService.searchActiveUsersByEmail(email)));
+        return ResponseEntity.ok(ApiResponse.success(userService.searchActiveUsers(email, role)));
     }
 
     @PostMapping("/users")

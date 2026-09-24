@@ -2,15 +2,19 @@ package com.apms.domain.graph.service;
 
 import com.apms.common.enums.ProjectStatus;
 import com.apms.common.enums.RelationshipType;
+import com.apms.common.event.OwnerEnterpriseCreatedEvent;
 import com.apms.domain.profile.CompanyProfile;
 import com.apms.domain.profile.CompanyProfileVersion;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.profile.repository.mongo.CompanyProfileVersionRepository;
+import com.apms.domain.profile.service.CompanyProfileOfficialEvaluator;
 import com.apms.domain.profile.service.OwnerOrganizationService;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.data.neo4j.core.Neo4jClient;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -29,6 +33,7 @@ public class GraphRelationshipRepairService {
     private final OwnerOrganizationService ownerOrganizationService;
     private final Neo4jClient neo4jClient;
     private final GraphService graphService;
+    private final CompanyProfileOfficialEvaluator companyProfileOfficialEvaluator;
 
     /**
      * Comparator ordering completed projects newest-first:
@@ -101,102 +106,185 @@ public class GraphRelationshipRepairService {
     }
 
     /**
-     * Repairs Neo4j relationships for all target companies with completed relationship-change projects.
-     * Each target company is repaired exactly once using ONLY its latest authoritative completed project.
-     * Older historical projects are never allowed to overwrite newer ones.
-     * Does NOT create CompanyProfileVersion records.
+     * Reconciles all official company profiles with Neo4j.
+     * 1. Dynamically resolves My Enterprise as the owner.
+     * 2. Iterates all official company profiles in the system (excluding My Enterprise itself).
+     * 3. For each profile:
+     *    - Determine its authoritative relationship
+     *    - Ensure the company node exists in Neo4j
+     *    - Ensure the owner node exists in Neo4j
+     *    - Create or update the relationship edge between owner and company
+     *    - If relationship is NONE, remove any relationship edge between owner and company
+     *    - Never create a self-relationship
+     * 4. Startup execution: runs on ApplicationReadyEvent, safely checking if My Enterprise exists.
      */
+    @EventListener(ApplicationReadyEvent.class)
+    public int reconcileAllOfficialCompanyProfiles() {
+        try {
+            Optional<CompanyProfile> ownerOpt = ownerOrganizationService.findOwnerCompanyProfile();
+            if (ownerOpt.isEmpty()) {
+                log.info("Graph reconciliation skipped: No owner enterprise configured yet.");
+                return 0;
+            }
+
+            CompanyProfile owner = ownerOpt.get();
+            String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+            if (!StringUtils.hasText(ownerCompanyId)) {
+                log.warn("Graph reconciliation skipped: Owner enterprise has no universal companyId.");
+                return 0;
+            }
+
+            // Ensure owner node exists in Neo4j
+            graphService.mergeCompanyNode(owner);
+
+            List<CompanyProfile> allProfiles = profileRepository.findAll();
+            List<Project> allProjects = projectRepository.findAll();
+            int reconciledCount = 0;
+
+            for (CompanyProfile profile : allProfiles) {
+                if (profile == null || Boolean.TRUE.equals(profile.getIsDeleted())) {
+                    continue;
+                }
+
+                // Exclude owner enterprise
+                if (Objects.equals(profile.getId(), owner.getId()) ||
+                    (StringUtils.hasText(profile.getCompanyId()) && Objects.equals(profile.getCompanyId().trim(), ownerCompanyId.trim()))) {
+                    continue;
+                }
+
+                // Check if profile is official
+                if (companyProfileOfficialEvaluator != null && !companyProfileOfficialEvaluator.isOfficial(profile)) {
+                    continue;
+                }
+
+                String targetCompanyId = resolveCanonicalId(profile.getId(), profile);
+                if (!StringUtils.hasText(targetCompanyId)) {
+                    continue;
+                }
+
+                // Ensure target company node exists in Neo4j
+                graphService.mergeCompanyNode(profile);
+
+                // Determine authoritative relationship
+                RelationshipType relType = resolveAuthoritativeRelationship(profile, allProjects);
+                if (relType != null) {
+                    graphService.replaceRelationship(ownerCompanyId, targetCompanyId, relType.name(), "SYSTEM_RECONCILE");
+                    reconciledCount++;
+                } else {
+                    // Relationship is NONE -> remove any existing relationship between owner and target
+                    graphService.deleteRelationshipBetween(ownerCompanyId, targetCompanyId);
+                }
+            }
+
+            log.info("Reconciled {} official company profile relationship(s) with Neo4j for owner enterprise {}", reconciledCount, ownerCompanyId);
+            return reconciledCount;
+        } catch (Exception e) {
+            log.error("Error during graph reconciliation: {}", e.getMessage(), e);
+            return 0;
+        }
+    }
+
+    @EventListener(OwnerEnterpriseCreatedEvent.class)
+    public void handleOwnerEnterpriseCreatedEvent(OwnerEnterpriseCreatedEvent event) {
+        log.info("Handling OwnerEnterpriseCreatedEvent for owner companyId={}", event.getCompanyId());
+        reconcileAllOfficialCompanyProfiles();
+    }
+
     public int repairAllCompletedProjectRelationships() {
-        int repairedCount = 0;
+        return reconcileAllOfficialCompanyProfiles();
+    }
 
-        // Load all profiles to resolve aliases and sourceRefs
-        List<CompanyProfile> allProfiles = profileRepository.findAll();
-        Map<String, CompanyProfile> profileByAnyId = new HashMap<>();
-        for (CompanyProfile profile : allProfiles) {
-            if (StringUtils.hasText(profile.getId())) {
-                profileByAnyId.put(profile.getId().trim(), profile);
-            }
-            if (StringUtils.hasText(profile.getCompanyId())) {
-                profileByAnyId.put(profile.getCompanyId().trim(), profile);
-            }
-        }
+    public RelationshipType resolveAuthoritativeRelationship(CompanyProfile profile) {
+        return resolveAuthoritativeRelationship(profile, projectRepository.findAll());
+    }
 
-        // Load all projects
-        List<Project> allProjects = projectRepository.findAll();
-        List<Project> completedProjects = allProjects.stream()
-                .filter(p -> p.getStatus() == ProjectStatus.COMPLETED && p.getTargetRelationshipType() != null)
-                .toList();
+    public RelationshipType resolveAuthoritativeRelationship(CompanyProfile profile, List<Project> allProjects) {
+        if (profile == null) return null;
 
-        // Group completed relationship projects by canonical target company
-        Map<String, List<Project>> companyProjectsMap = new LinkedHashMap<>();
+        String pId = profile.getId() != null ? profile.getId().trim() : "";
+        String cId = profile.getCompanyId() != null ? profile.getCompanyId().trim() : "";
 
-        // 1. Group by project's targetCompanyProfileId
-        for (Project project : completedProjects) {
-            String targetRef = project.getTargetCompanyProfileId();
-            if (!StringUtils.hasText(targetRef)) {
-                continue;
-            }
-            String cleanTargetRef = targetRef.trim();
-            CompanyProfile profile = profileByAnyId.get(cleanTargetRef);
-            String canonicalCompanyId = resolveCanonicalId(cleanTargetRef, profile);
-
-            List<Project> list = companyProjectsMap.computeIfAbsent(canonicalCompanyId, k -> new ArrayList<>());
-            if (list.stream().noneMatch(existing -> existing.getId().equals(project.getId()))) {
-                list.add(project);
-            }
-        }
-
-        // 2. Also associate projects referenced in profile.sourceRefs.projectIds
-        for (CompanyProfile profile : allProfiles) {
-            String canonicalCompanyId = resolveCanonicalId(profile.getId(), profile);
-            if (profile.getSourceRefs() != null && profile.getSourceRefs().getProjectIds() != null) {
-                for (String pidStr : profile.getSourceRefs().getProjectIds()) {
-                    try {
-                        Long pid = Long.parseLong(pidStr.trim());
-                        allProjects.stream()
-                                .filter(p -> p.getId().equals(pid) && p.getStatus() == ProjectStatus.COMPLETED && p.getTargetRelationshipType() != null)
-                                .findFirst()
-                                .ifPresent(p -> {
-                                    List<Project> list = companyProjectsMap.computeIfAbsent(canonicalCompanyId, k -> new ArrayList<>());
-                                    if (list.stream().noneMatch(existing -> existing.getId().equals(p.getId()))) {
-                                        list.add(p);
-                                    }
-                                });
-                    } catch (Exception ignored) {}
+        // 1. Check completed relationship projects
+        List<Project> matchingProjects = new ArrayList<>();
+        if (allProjects != null) {
+            for (Project p : allProjects) {
+                if (p.getStatus() != ProjectStatus.COMPLETED || p.getTargetRelationshipType() == null) {
+                    continue;
+                }
+                String targetRef = p.getTargetCompanyProfileId();
+                boolean matches = false;
+                if (StringUtils.hasText(targetRef)) {
+                    String clean = targetRef.trim();
+                    if (clean.equals(pId) || clean.equals(cId)) {
+                        matches = true;
+                    }
+                }
+                if (!matches && profile.getSourceRefs() != null && profile.getSourceRefs().getProjectIds() != null) {
+                    String pidStr = String.valueOf(p.getId());
+                    if (profile.getSourceRefs().getProjectIds().contains(pidStr)) {
+                        matches = true;
+                    }
+                }
+                if (matches) {
+                    matchingProjects.add(p);
                 }
             }
         }
 
-        // 3. For each company with completed projects, sort and apply ONLY the latest authoritative project
-        for (Map.Entry<String, List<Project>> entry : companyProjectsMap.entrySet()) {
-            String canonicalCompanyId = entry.getKey();
-            List<Project> projects = entry.getValue();
-            if (projects.isEmpty()) continue;
-
-            projects.sort(LATEST_COMPLETED_PROJECT_FIRST);
-            Project latestProject = projects.get(0);
-            CompanyProfile profile = profileByAnyId.get(canonicalCompanyId);
-
-            log.info("Company {} has {} completed relationship project(s). Selected latest authoritative project ID={} (closedAt={}, updatedAt={}, targetRel={})",
-                    canonicalCompanyId, projects.size(), latestProject.getId(), latestProject.getClosedAt(), latestProject.getUpdatedAt(), latestProject.getTargetRelationshipType());
-
-            if (repairProjectForCompany(canonicalCompanyId, profile, latestProject)) {
-                repairedCount++;
-            }
+        if (!matchingProjects.isEmpty()) {
+            matchingProjects.sort(LATEST_COMPLETED_PROJECT_FIRST);
+            return matchingProjects.get(0).getTargetRelationshipType();
         }
 
-        // 4. For profiles without SQL completed projects, fallback to version history
-        for (CompanyProfile profile : allProfiles) {
-            String canonicalCompanyId = resolveCanonicalId(profile.getId(), profile);
-            if (!companyProjectsMap.containsKey(canonicalCompanyId)) {
-                if (repairFromProfileVersions(profile)) {
-                    repairedCount++;
+        // 2. Check profile versions
+        if (versionRepository != null) {
+            try {
+                List<CompanyProfileVersion> versions = versionRepository.findByCompanyProfileIdOrCompanyIdOrderByCreatedAtDesc(
+                        profile.getId(), profile.getCompanyId() != null ? profile.getCompanyId() : profile.getId());
+                for (CompanyProfileVersion ver : versions) {
+                    if (ver.getAfterValues() != null && ver.getAfterValues().containsKey("relationship")) {
+                        Object relObj = ver.getAfterValues().get("relationship");
+                        if (relObj != null && StringUtils.hasText(relObj.toString())) {
+                            String norm = GraphService.normalizeRelationshipType(relObj.toString());
+                            if (norm != null) {
+                                return RelationshipType.valueOf(norm);
+                            }
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+
+        // 3. Fallback: check if existing Neo4j relationship exists between owner and target
+        try {
+            String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+            if (StringUtils.hasText(ownerCompanyId) && (StringUtils.hasText(cId) || StringUtils.hasText(pId))) {
+                List<String> targetIds = new ArrayList<>();
+                if (StringUtils.hasText(cId)) targetIds.add(cId);
+                if (StringUtils.hasText(pId)) targetIds.add(pId);
+
+                String cypher = """
+                    MATCH (:Company {companyId: $ownerCompanyId})-[r:PARTNER_WITH|COMPETITOR_OF|POTENTIAL_PARTNER_OF|SUPPLIER_OF|CUSTOMER_OF]->(c:Company)
+                    WHERE c.companyId IN $targetIds
+                    RETURN type(r) AS relType
+                    LIMIT 1
+                    """;
+                List<String> types = neo4jClient.query(cypher)
+                        .bind(ownerCompanyId).to("ownerCompanyId")
+                        .bind(targetIds).to("targetIds")
+                        .fetchAs(String.class)
+                        .mappedBy((ts, rec) -> rec.get("relType").asString())
+                        .all().stream().toList();
+                if (!types.isEmpty()) {
+                    String norm = GraphService.normalizeRelationshipType(types.get(0));
+                    if (norm != null) {
+                        return RelationshipType.valueOf(norm);
+                    }
                 }
             }
-        }
+        } catch (Exception ignored) {}
 
-        log.info("Repaired Neo4j relationships for {} companies using their latest authoritative completed projects", repairedCount);
-        return repairedCount;
+        return null;
     }
 
     /**
