@@ -1,0 +1,593 @@
+Created At: 2026-08-29T10:28:21+07:00
+Completed At: 2026-08-29T10:28:21+07:00
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\FinancialResearch.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\FinancialResearchStatus.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\controller\\FinancialResearchController.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\FinancialResearchResponse.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\repository\\FinancialResearchRepository.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\service\\FinancialResearchApprovalHandler.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\service\\FinancialResearchService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\project\\dto\\ProjectTaskWorkbenchResponse.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\project\\service\\ProjectTaskService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\project\\service\\ProjectTaskSubmissionService.java"}
+
+=========================
+
+Created At: 2026-08-29T10:28:21+07:00
+Completed At: 2026-08-29T10:28:22+07:00
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\FinancialReportEntry.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\FinancialResearch.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\controller\\FinancialResearchController.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\CreateFinancialReportRequest.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\FinancialResearchResponse.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\service\\FinancialResearchService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\profile\\CompanyProfile.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\profile\\controller\\AdminOwnerCompanyProfileController.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\profile\\dto\\FinancialReportRequest.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\profile\\service\\ProfileService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\test\\java\\com\\apms\\domain\\profile\\controller\\AdminOwnerCompanyProfileControllerSecurityTest.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\test\\java\\com\\apms\\domain\\profile\\service\\ProfileServiceOwnerFinancialTest.java"}
+
+=========================
+
+Created At: 2026-08-29T10:28:21+07:00
+Completed At: 2026-08-29T10:28:22+07:00
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\FinancialMetric.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\FinancialResearch.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\controller\\FinancialResearchController.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\AiFinancialMetricCandidate.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\CreateFinancialMetricRequest.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\FinancialDocumentExtractionResult.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\FinancialMetricResponse.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\FinancialResearchResponse.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\UpdateFinancialMetricRequest.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\service\\FinancialResearchService.java"}
+
+=========================
+
+Created At: 2026-08-29T10:28:21+07:00
+Completed At: 2026-08-29T10:28:22+07:00
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\FinancialExtractionResponse.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\service\\FinancialExtractionService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\service\\FinancialResearchService.java"}
+
+=========================
+
+Created At: 2026-08-29T10:28:25+07:00
+Completed At: 2026-08-29T10:28:26+07:00
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\ai\\AiExtractionCache.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\ai\\controller\\TaskExtractionController.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\ai\\dto\\AiExtractionResult.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\ai\\dto\\DocumentCompanyIdentity.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\ai\\service\\AiExtractionService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\ai\\service\\CompanyIdentityDetectionService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\ai\\service\\DocumentCompanyConsistencyValidator.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\ai\\service\\ExtractionMergeService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\ai\\service\\TaskExtractionOrchestrator.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\candidate\\CompanyCandidate.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\candidate\\dto\\CandidateResponse.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\candidate\\service\\CandidateService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\dto\\ContractDocumentSegment.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\dto\\CreatePartnerContractRequest.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\dto\\PartnerContractMapper.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\dto\\PartnerContractResponse.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\dto\\PartnerContractVersionResponse.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\dto\\SubmitPartnerContractCollectionRequest.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\dto\\UpdatePartnerContractRequest.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\entity\\PartnerContract.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\entity\\PartnerContractClauseVersion.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\entity\\PartnerContractCollectionSubmissionPayload.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\entity\\PartnerContractExtractionDraft.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\entity\\PartnerContractVersion.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\repository\\sql\\PartnerContractRepository.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\service\\PartnerContractCollectionApprovalHandler.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\service\\PartnerContractCollectionSubmissionService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\service\\PartnerContractExtractionService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\contract\\service\\PartnerContractService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\crawler\\integration\\ArticlePublisher.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\document\\ImportJob.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\document\\RawDocument.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\document\\controller\\DocumentController.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\document\\controller\\PartnerContractTaskDocumentController.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\document\\dto\\ImportJobResponse.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\document\\dto\\RawDocumentResponse.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\document\\repository\\mongo\\RawDocumentRepository.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\document\\repository\\sql\\ImportJobRepository.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\document\\service\\CompanyDocumentPublisher.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\document\\service\\CompanyDocumentService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\document\\service\\DocumentService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\document\\service\\DocumentTextExtractionService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\service\\FinancialExtractionService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\service\\FinancialResearchService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\profile\\CompanyProfile.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\profile\\dto\\ProfileSourcesResponse.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\profile\\service\\CompanyProfileUpdateProposalService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\profile\\service\\ProfileService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\profile\\service\\ReferenceCompanyContextService.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\project\\dto\\WorkbenchDocumentResponse.java"}
+(...2 more results not shown)
+
+=========================
+
+Created At: 2026-08-29T10:28:26+07:00
+Completed At: 2026-08-29T10:28:26+07:00
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\ExtractionStatus.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\FinancialReportEntry.java"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\service\\FinancialResearchService.java"}
+
+=========================
+
+Created At: 2026-08-29T10:28:34+07:00
+Completed At: 2026-08-29T10:28:34+07:00
+File Path: `file:///d:/APMS/apms-backend/src/main/java/com/apms/domain/financial/service/FinancialResearchService.java`
+Total Lines: 433
+Total Bytes: 21450
+Showing lines 1 to 433
+The following code has been modified to include a line number before every line, in the format: <line_number>: <original_line>. Please note that any changes targeting the original code should remove the line number, colon, and leading space.
+1: package com.apms.domain.financial.service;
+2: 
+3: import com.apms.common.enums.AuditAction;
+4: import com.apms.common.exception.BusinessValidationException;
+5: import com.apms.domain.audit.service.AuditLogService;
+6: import com.apms.domain.document.RawDocument;
+7: import com.apms.domain.document.repository.mongo.RawDocumentRepository;
+8: import com.apms.domain.financial.*;
+9: import com.apms.domain.financial.dto.*;
+10: import com.apms.domain.financial.repository.FinancialResearchRepository;
+11: import com.apms.domain.project.repository.sql.ProjectTaskRepository;
+12: import lombok.RequiredArgsConstructor;
+13: import lombok.extern.slf4j.Slf4j;
+14: import org.springframework.security.core.context.SecurityContextHolder;
+15: import org.springframework.security.core.userdetails.UserDetails;
+16: import org.springframework.stereotype.Service;
+17: import org.springframework.util.StringUtils;
+18: 
+19: import java.math.BigDecimal;
+20: import java.text.Normalizer;
+21: import java.time.LocalDateTime;
+22: import java.util.ArrayList;
+23: import java.util.List;
+24: import java.util.Optional;
+25: import java.util.UUID;
+26: import java.util.stream.Collectors;
+27: 
+28: @Slf4j
+29: @Service
+30: @RequiredArgsConstructor
+31: public class FinancialResearchService {
+32: 
+33:     private final FinancialResearchRepository researchRepository;
+34:     private final RawDocumentRepository documentRepository;
+35:     private final ProjectTaskRepository projectTaskRepository;
+36:     private final FinancialExtractionService extractionService;
+37:     private final AuditLogService auditLogService;
+38: 
+39:     public Optional<FinancialResearchResponse> getResearch(Long taskId) {
+40:         return researchRepository.findByTaskId(taskId).map(this::toResponse);
+41:     }
+42: 
+43:     public FinancialResearchResponse addReport(Long projectId, Long taskId, CreateFinancialReportRequest request) {
+44:         FinancialResearch research = researchRepository.findByTaskId(taskId)
+45:                 .orElseThrow(() -> new BusinessValidationException("Research not found"));
+46:         
+47:         if (research.getStatus() != FinancialResearchStatus.DRAFT && research.getStatus() != FinancialResearchStatus.CHANGES_REQUESTED) {
+48:             throw new BusinessValidationException("Cannot add report to submitted or approved research");
+49:         }
+50: 
+51:         FinancialReportEntry entry = FinancialReportEntry.builder()
+52:                 .id(UUID.randomUUID().toString())
+53:                 .documentId(request.getDocumentId())
+54:                 .title(request.getTitle())
+55:                 .publicationDate(request.getPublicationDate())
+56:                 .reportingPeriod(request.getReportingPeriod())
+57:                 .reportType(request.getReportType())
+58:                 .statementScope(request.getStatementScope())
+59:                 .extractionStatus(ExtractionStatus.NOT_EXTRACTED)
+60:                 .createdAt(LocalDateTime.now())
+61:                 .updatedAt(LocalDateTime.now())
+62:                 .build();
+63: 
+64:         if (research.getReports() == null) {
+65:             research.setReports(new ArrayList<>());
+66:         }
+67:         research.getReports().add(entry);
+68:         research = researchRepository.save(research);
+69: 
+70:         auditLogService.log(getCurrentUserId(), AuditAction.FINANCIAL_RESEARCH_CREATED, "ProjectTask", taskId.toString(), "Added financial report");
+71:         
+72:         return toResponse(research);
+73:     }
+74: 
+75:     public FinancialResearchResponse removeReport(Long projectId, Long taskId, String reportId) {
+76:         FinancialResearch research = researchRepository.findByTaskId(taskId)
+77:                 .orElseThrow(() -> new BusinessValidationException("Research not found"));
+78:                 
+79:         if (research.getStatus() != FinancialResearchStatus.DRAFT && research.getStatus() != FinancialResearchStatus.CHANGES_REQUESTED) {
+80:             throw new BusinessValidationException("Cannot remove report from submitted or approved research");
+81:         }
+82: 
+83:         research.getReports().removeIf(r -> r.getId().equals(reportId));
+84:         research.getMetrics().removeIf(m -> m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()));
+85:         
+86:         research = researchRepository.save(research);
+87:         return toResponse(research);
+88:     }
+89: 
+90:     public FinancialResearchResponse extractReport(Long projectId, Long taskId, String reportId) {
+91:         FinancialResearch research = researchRepository.findByTaskId(taskId)
+92:                 .orElseThrow(() -> new BusinessValidationException("Research not found"));
+93:                 
+94:         FinancialReportEntry report = research.getReports().stream()
+95:                 .filter(r -> r.getId().equals(reportId)).findFirst()
+96:                 .orElseThrow(() -> new BusinessValidationException("Report not found"));
+97: 
+98:         report.setExtractionStatus(ExtractionStatus.EXTRACTING);
+99:         researchRepository.save(research); // Save extracting state
+100: 
+101:         try {
+102:             RawDocument doc = documentRepository.findById(report.getDocumentId())
+103:                     .orElseThrow(() -> new BusinessValidationException("Document not found"));
+104: 
+105:             Optional<FinancialDocumentExtractionResult> resultOpt = extractionService.extractDocument(doc);
+106:             
+107:             if (resultOpt.isEmpty()) {
+108:                 report.setExtractionStatus(ExtractionStatus.FAILED);
+109:                 return toResponse(researchRepository.save(research));
+110:             }
+111: 
+112:             FinancialDocumentExtractionResult docResult = resultOpt.get();
+113:             
+114:             String targetCompanyName = projectTaskRepository.findById(taskId)
+115:                     .map(t -> t.getProject().getTargetCompanyName())
+116:                     .orElse("Unknown");
+117: 
+118:             DocumentContext context = mapToDocumentContext(docResult.getDocumentContextCandidate(), doc, targetCompanyName, report.getReportingPeriod());
+119:             report.setDocumentContext(context);
+120:             
+121:             if (docResult.getMetricCandidates() != null) {
+122:                 for (AiFinancialMetricCandidate candidate : docResult.getMetricCandidates()) {
+123:                     FinancialMetric metric = mapToMetric(candidate, doc, report.getId());
+124:                     research.getMetrics().add(metric);
+125:                 }
+126:             }
+127:             
+128:             report.setExtractionStatus(ExtractionStatus.EXTRACTED);
+129:             
+130:         } catch (Exception e) {
+131:             log.error("Extraction failed for report {}", reportId, e);
+132:             report.setExtractionStatus(ExtractionStatus.FAILED);
+133:         }
+134:         
+135:         research = researchRepository.save(research);
+136:         auditLogService.log(getCurrentUserId(), AuditAction.FINANCIAL_AI_EXTRACTION_RUN, "ProjectTask", taskId.toString(), "Ran AI extraction for report " + reportId);
+137:         return toResponse(research);
+138:     }
+139: 
+140:     public FinancialResearchResponse reExtractReport(Long projectId, Long taskId, String reportId) {
+141:         FinancialResearch research = researchRepository.findByTaskId(taskId)
+142:                 .orElseThrow(() -> new BusinessValidationException("Research not found"));
+143:                 
+144:         // Keep verified and manual metrics for this report, remove unverified AI metrics
+145:         research.getMetrics().removeIf(m -> 
+146:                 m.getSource() != null && reportId.equals(m.getSource().getReportEntryId()) &&
+147:                 m.getInputMethod() == MetricInputMethod.AI_EXTRACTED &&
+148:                 m.getVerificationStatus() == MetricVerificationStatus.UNVERIFIED);
+149:                 
+150:         research = researchRepository.save(research);
+151:         return extractReport(projectId, taskId, reportId);
+152:     }
+153: 
+154:     public FinancialResearchResponse addManualMetric(Long projectId, Long taskId, CreateFinancialMetricRequest request) {
+155:         FinancialResearch research = researchRepository.findByTaskId(taskId).orElseThrow();
+156:         
+157:         FinancialMetric metric = FinancialMetric.builder()
+158:                 .id(UUID.randomUUID().toString())
+159:                 .label(request.getLabel())
+160:                 .normalizedKey(generateNormalizedKey(request.getLabel()))
+161:                 .rawValue(request.getRawValue())
+162:                 .rawUnit(request.getRawUnit())
+163:                 .inputMethod(MetricInputMethod.MANUAL)
+164:                 .period(request.getPeriod())
+165:                 .source(MetricSource.builder()
+166:                         .reportEntryId(request.getReportEntryId())
+167:                         .documentId(request.getSourceDocumentId())
+168:                         .page(request.getSourcePage())
+169:                         .build())
+170:                 .qualityStatus(MetricQualityStatus.VALID)
+171:                 .verificationStatus(MetricVerificationStatus.VERIFIED)
+172:                 .build();
+173: 
+174:         NormalizedValue norm = normalizeValue(request.getRawValue(), request.getRawUnit());
+175:         metric.setNormalizedValue(norm.value);
+176:         metric.setNormalizedUnit(norm.unit);
+177: 
+178:         research.getMetrics().add(metric);
+179:         research = researchRepository.save(research);
+180:         return toResponse(research);
+181:     }
+182: 
+183:     public FinancialResearchResponse updateMetric(Long projectId, Long taskId, String metricId, UpdateFinancialMetricRequest request) {
+184:         FinancialResearch research = researchRepository.findByTaskId(taskId).orElseThrow();
+185:         FinancialMetric metric = research.getMetrics().stream().filter(m -> m.getId().equals(metricId)).findFirst().orElseThrow();
+186:         
+187:         metric.setLabel(request.getLabel());
+188:         metric.setRawValue(request.getRawValue());
+189:         metric.setRawUnit(request.getRawUnit());
+190:         metric.setPeriod(request.getPeriod());
+191:         
+192:         NormalizedValue norm = normalizeValue(request.getRawValue(), request.getRawUnit());
+193:         metric.setNormalizedValue(norm.value);
+194:         metric.setNormalizedUnit(norm.unit);
+195:         
+196:         metric.setVerificationStatus(MetricVerificationStatus.VERIFIED);
+197:         
+198:         research = researchRepository.save(research);
+199:         return toResponse(research);
+200:     }
+201: 
+202:     public FinancialResearchResponse removeMetric(Long projectId, Long taskId, String metricId) {
+203:         FinancialResearch research = researchRepository.findByTaskId(taskId).orElseThrow();
+204:         research.getMetrics().removeIf(m -> m.getId().equals(metricId));
+205:         research = researchRepository.save(research);
+206:         return toResponse(research);
+207:     }
+208: 
+209:     public FinancialResearchResponse verifyMetric(Long projectId, Long taskId, String metricId) {
+210:         FinancialResearch research = researchRepository.findByTaskId(taskId).orElseThrow();
+211:         FinancialMetric metric = research.getMetrics().stream().filter(m -> m.getId().equals(metricId)).findFirst().orElseThrow();
+212:         metric.setVerificationStatus(MetricVerificationStatus.VERIFIED);
+213:         research = researchRepository.save(research);
+214:         return toResponse(research);
+215:     }
+216: 
+217:     public FinancialResearchResponse submitForReview(Long projectId, Long taskId, Long submitterId) {
+218:         FinancialResearch research = researchRepository.findByTaskId(taskId)
+219:                 .orElseThrow(() -> new BusinessValidationException("Research not found"));
+220:                 
+221:         if (research.getStatus() != FinancialResearchStatus.DRAFT && research.getStatus() != FinancialResearchStatus.CHANGES_REQUESTED) {
+222:             throw new BusinessValidationException("Research is already submitted or approved.");
+223:         }
+224:         
+225:         if (research.getReports().isEmpty()) {
+226:             throw new BusinessValidationException("Cannot submit an empty research package. Please add at least one report.");
+227:         }
+228:         
+229:         boolean hasUnverified = research.getMetrics().stream().anyMatch(m -> m.getQualityStatus() == MetricQualityStatus.NEEDS_REVIEW && m.getVerificationStatus() == MetricVerificationStatus.UNVERIFIED);
+230:         if (hasUnverified) {
+231:             throw new BusinessValidationException("Cannot submit research with unverified metrics that need review.");
+232:         }
+233: 
+234:         research.setStatus(FinancialResearchStatus.SUBMITTED);
+235:         research.setSubmittedAt(LocalDateTime.now());
+236:         research = researchRepository.save(research);
+237:         
+238:         return toResponse(research);
+239:     }
+240: 
+241:     public List<FinancialResearchResponse> getApprovedFinancials(String companyProfileId) {
+242:         return researchRepository.findByCompanyProfileIdAndStatus(companyProfileId, FinancialResearchStatus.APPROVED)
+243:                 .stream().map(this::toResponse).collect(Collectors.toList());
+244:     }
+245: 
+246:     // --- Private mapping logic ---
+247: 
+248:     private DocumentContext mapToDocumentContext(AiFinancialDocumentContextCandidate candidate, RawDocument doc, String targetCompanyName, ReportingPeriod targetPeriod) {
+249:         if (candidate == null) {
+250:             candidate = new AiFinancialDocumentContextCandidate();
+251:         }
+252:         DocumentCompanyValidationStatus companyValidation = DocumentCompanyValidationStatus.UNKNOWN;
+253:         if (targetCompanyName != null && candidate.getCompanyName() != null) {
+254:             if (candidate.getCompanyName().equalsIgnoreCase(targetCompanyName)) {
+255:                 companyValidation = DocumentCompanyValidationStatus.MATCH;
+256:             } else if (candidate.getCompanyName().toLowerCase().contains(targetCompanyName.toLowerCase()) ||
+257:                        targetCompanyName.toLowerCase().contains(candidate.getCompanyName().toLowerCase())) {
+258:                 companyValidation = DocumentCompanyValidationStatus.POSSIBLE_MATCH;
+259:             } else {
+260:                 companyValidation = DocumentCompanyValidationStatus.MISMATCH;
+261:             }
+262:         }
+263:         
+264:         DocumentPeriodValidationStatus periodValidation = DocumentPeriodValidationStatus.UNKNOWN;
+265:         if (targetPeriod != null && candidate.getYear() != null && candidate.getPeriodType() != null) {
+266:             if (candidate.getYear().equals(targetPeriod.getYear()) && candidate.getPeriodType() == targetPeriod.getPeriodType()) {
+267:                 periodValidation = DocumentPeriodValidationStatus.MATCH;
+268:             } else {
+269:                 periodValidation = DocumentPeriodValidationStatus.MISMATCH;
+270:             }
+271:         }
+272: 
+273:         return DocumentContext.builder()
+274:                 .documentId(doc.getId())
+275:                 .documentName(doc.getSource() != null ? doc.getSource().getFileName() : "Unknown")
+276:                 .companyName(candidate.getCompanyName())
+277:                 .reportType(candidate.getReportType())
+278:                 .year(candidate.getYear())
+279:                 .periodType(candidate.getPeriodType())
+280:                 .period(candidate.getPeriod())
+281:                 .asOfDate(candidate.getAsOfDate())
+282:                 .currency(candidate.getCurrency())
+283:                 .scale(candidate.getScale())
+284:                 .statementScope(candidate.getStatementScope())
+285:                 .industryContext(candidate.getIndustryContext())
+286:                 .companyValidation(companyValidation)
+287:                 .periodValidation(periodValidation)
+288:                 .build();
+289:     }
+290: 
+291:     private FinancialMetric mapToMetric(AiFinancialMetricCandidate candidate, RawDocument doc, String reportEntryId) {
+292:         NormalizedValue normalized = normalizeValue(candidate.getRawValue(), candidate.getRawUnit());
+293:         
+294:         MetricQualityStatus quality = MetricQualityStatus.VALID;
+295:         if (candidate.getConfidence() == null || candidate.getConfidence() < 0.7) {
+296:             quality = MetricQualityStatus.NEEDS_REVIEW;
+297:         }
+298:         if (normalized.unit == null || normalized.unit.equals(candidate.getRawUnit()) && !isStandardUnit(normalized.unit)) {
+299:             quality = MetricQualityStatus.NEEDS_REVIEW;
+300:         }
+301: 
+302:         return FinancialMetric.builder()
+303:                 .id(UUID.randomUUID().toString())
+304:                 .label(candidate.getLabel())
+305:                 .normalizedKey(generateNormalizedKey(candidate.getLabel()))
+306:                 .rawValue(candidate.getRawValue())
+307:                 .rawUnit(candidate.getRawUnit())
+308:                 .normalizedValue(normalized.value)
+309:                 .normalizedUnit(normalized.unit)
+310:                 .inputMethod(MetricInputMethod.AI_EXTRACTED)
+311:                 .period(candidate.getPeriod())
+312:                 .source(MetricSource.builder()
+313:                         .reportEntryId(reportEntryId)
+314:                         .documentId(doc.getId())
+315:                         .documentName(doc.getSource() != null ? doc.getSource().getFileName() : "Unknown")
+316:                         .page(candidate.getSourcePage())
+317:                         .build())
+318:                 .evidence(candidate.getEvidence())
+319:                 .confidence(candidate.getConfidence())
+320:                 .qualityStatus(quality)
+321:                 .verificationStatus(MetricVerificationStatus.UNVERIFIED)
+322:                 .build();
+323:     }
+324: 
+325:     private String generateNormalizedKey(String label) {
+326:         if (!StringUtils.hasText(label)) return "";
+327:         String normalized = Normalizer.normalize(label, Normalizer.Form.NFD)
+328:                 .replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
+329:         return normalized.toLowerCase()
+330:                 .replaceAll("[^a-z0-9]", "_")
+331:                 .replaceAll("_+", "_")
+332:                 .replaceAll("^_|_$", "");
+333:     }
+334: 
+335:     private static class NormalizedValue {
+336:         BigDecimal value;
+337:         String unit;
+338:         NormalizedValue(BigDecimal v, String u) { this.value = v; this.unit = u; }
+339:     }
+340: 
+341:     private boolean isStandardUnit(String unit) {
+342:         if (unit == null) return false;
+343:         String upper = unit.toUpperCase();
+344:         return upper.equals("VND") || upper.equals("USD") || upper.equals("PERCENT") || upper.equals("TIMES") || upper.equals("RATIO");
+345:     }
+346: 
+347:     private NormalizedValue normalizeValue(String rawValue, String rawUnit) {
+348:         if (!StringUtils.hasText(rawValue)) {
+349:             return new NormalizedValue(null, rawUnit);
+350:         }
+351: 
+352:         try {
+353:             String cleanVal = rawValue.replaceAll("[^0-9.-]", "");
+354:             BigDecimal bd = new BigDecimal(cleanVal);
+355:             
+356:             if (!StringUtils.hasText(rawUnit)) {
+357:                 return new NormalizedValue(bd, null);
+358:             }
+359: 
+360:             String unitUpper = rawUnit.toUpperCase();
+361:             if (unitUpper.contains("MILLION_VND") || unitUpper.contains("TRI+U ?'NG")) {
+362:                 return new NormalizedValue(bd.multiply(new BigDecimal("1000000")), "VND");
+363:             } else if (unitUpper.contains("BILLION_VND") || unitUpper.contains("T  ?'NG")) {
+364:                 return new NormalizedValue(bd.multiply(new BigDecimal("1000000000")), "VND");
+365:             } else if (unitUpper.contains("THOUSAND_VND") || unitUpper.contains("NGHAON ?'NG")) {
+366:                 return new NormalizedValue(bd.multiply(new BigDecimal("1000")), "VND");
+367:             } else if (unitUpper.contains("MILLION_USD")) {
+368:                 return new NormalizedValue(bd.multiply(new BigDecimal("1000000")), "USD");
+369:             } else if (unitUpper.contains("PERCENT") || unitUpper.contains("%")) {
+370:                 return new NormalizedValue(bd, "PERCENT");
+371:             } else if (unitUpper.contains("TIMES") || unitUpper.contains("LN")) {
+372:                 return new NormalizedValue(bd, "TIMES");
+373:             } else if (unitUpper.contains("RATIO") || unitUpper.contains("T  L+")) {
+374:                 return new NormalizedValue(bd, "RATIO");
+375:             }
+376: 
+377:             return new NormalizedValue(bd, rawUnit);
+378:         } catch (Exception e) {
+379:             log.warn("Failed to parse value: {}", rawValue);
+380:             return new NormalizedValue(null, rawUnit);
+381:         }
+382:     }
+383: 
+384:     private FinancialResearchResponse toResponse(FinancialResearch domain) {
+385:         List<FinancialMetricResponse> metricResponses = domain.getMetrics().stream().map(m -> FinancialMetricResponse.builder()
+386:                 .id(m.getId())
+387:                 .label(m.getLabel())
+388:                 .normalizedKey(m.getNormalizedKey())
+389:                 .rawValue(m.getRawValue())
+390:                 .rawUnit(m.getRawUnit())
+391:                 .normalizedValue(m.getNormalizedValue() != null ? m.getNormalizedValue().toString() : null)
+392:                 .normalizedUnit(m.getNormalizedUnit())
+393:                 .inputMethod(m.getInputMethod())
+394:                 .period(m.getPeriod())
+395:                 .source(m.getSource())
+396:                 .evidence(m.getEvidence())
+397:                 .confidence(m.getConfidence())
+398:                 .qualityStatus(m.getQualityStatus())
+399:                 .verificationStatus(m.getVerificationStatus())
+400:                 .build()).collect(Collectors.toList());
+401: 
+402:         return FinancialResearchResponse.builder()
+403:                 .id(domain.getId())
+404:                 .taskId(domain.getTaskId())
+405:                 .projectId(domain.getProjectId())
+406:                 .companyProfileId(domain.getCompanyProfileId())
+407:                 .targetResearchPeriod(domain.getTargetResearchPeriod())
+408:                 .reports(domain.getReports())
+409:                 .metrics(metricResponses)
+410:                 .status(domain.getStatus())
+411:                 .submittedAt(domain.getSubmittedAt())
+412:                 .reviewedBy(domain.getReviewedBy())
+413:                 .reviewedAt(domain.getReviewedAt())
+414:                 .reviewReason(domain.getReviewReason())
+415:                 .createdAt(domain.getCreatedAt())
+416:                 .updatedAt(domain.getUpdatedAt())
+417:                 .build();
+418:     }
+419: 
+420:     private Long getCurrentUserId() {
+421:         Object principal = SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+422:         if (principal instanceof UserDetails) {
+423:             try {
+424:                 java.lang.reflect.Method getIdMethod = principal.getClass().getMethod("getId");
+425:                 return (Long) getIdMethod.invoke(principal);
+426:             } catch (Exception e) {
+427:                 log.warn("Could not extract user id", e);
+428:             }
+429:         }
+430:         return 1L; // fallback
+431:     }
+432: }
+433: 
+The above content shows the entire, complete file contents of the requested file.
+
+
+=========================
+
+Created At: 2026-08-29T10:28:46+07:00
+Completed At: 2026-08-29T10:28:46+07:00
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\DocumentContext.java","LineNumber":20,"LineContent":"    private ReportingPeriodType periodType;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\FinancialMetric.java","LineNumber":29,"LineContent":"    private ReportingPeriod period;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\FinancialReportEntry.java","LineNumber":19,"LineContent":"    private ReportingPeriod reportingPeriod;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\FinancialResearch.java","LineNumber":32,"LineContent":"    private ReportingPeriod targetResearchPeriod;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\ReportingPeriod.java","LineNumber":12,"LineContent":"public class ReportingPeriod {"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\ReportingPeriod.java","LineNumber":14,"LineContent":"    private ReportingPeriodType periodType;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\ReportingPeriodType.java","LineNumber":3,"LineContent":"public enum ReportingPeriodType {"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\AiFinancialDocumentContextCandidate.java","LineNumber":3,"LineContent":"import com.apms.domain.financial.ReportingPeriodType;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\AiFinancialDocumentContextCandidate.java","LineNumber":17,"LineContent":"    private ReportingPeriodType periodType;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\AiFinancialMetricCandidate.java","LineNumber":3,"LineContent":"import com.apms.domain.financial.ReportingPeriod;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\AiFinancialMetricCandidate.java","LineNumber":17,"LineContent":"    private ReportingPeriod period;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\CreateFinancialMetricRequest.java","LineNumber":3,"LineContent":"import com.apms.domain.financial.ReportingPeriod;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\CreateFinancialMetricRequest.java","LineNumber":11,"LineContent":"    private ReportingPeriod period;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\CreateFinancialReportRequest.java","LineNumber":4,"LineContent":"import com.apms.domain.financial.ReportingPeriod;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\CreateFinancialReportRequest.java","LineNumber":14,"LineContent":"    private ReportingPeriod reportingPeriod;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\DocumentContextResponse.java","LineNumber":19,"LineContent":"    private ReportingPeriodType periodType;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\FinancialMetricResponse.java","LineNumber":22,"LineContent":"    private ReportingPeriod period;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\FinancialResearchResponse.java","LineNumber":5,"LineContent":"import com.apms.domain.financial.ReportingPeriod;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\FinancialResearchResponse.java","LineNumber":23,"LineContent":"    private ReportingPeriod targetResearchPeriod;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\UpdateFinancialMetricRequest.java","LineNumber":3,"LineContent":"import com.apms.domain.financial.ReportingPeriod;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\dto\\UpdateFinancialMetricRequest.java","LineNumber":11,"LineContent":"    private ReportingPeriod period;"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\service\\FinancialResearchService.java","LineNumber":56,"LineContent":"                .reportingPeriod(request.getReportingPeriod())"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\service\\FinancialResearchService.java","LineNumber":118,"LineContent":"            DocumentContext context = mapToDocumentContext(docResult.getDocumentContextCandidate(), doc, targetCompanyName, report.getReportingPeriod());"}
+{"File":"d:\\APMS\\apms-backend\\src\\main\\java\\com\\apms\\domain\\financial\\service\\FinancialResearchService.java","LineNumber":248,"LineContent":"    private DocumentContext mapToDocumentContext(AiFinancialDocumentContextCandidate candidate, RawDocument doc, String targetCompanyName, ReportingPeriod targetPeriod) {"}
+
+=========================
+

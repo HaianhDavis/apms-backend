@@ -1,0 +1,391 @@
+package com.apms.domain.ai.service.provider;
+
+import com.apms.common.exception.BusinessValidationException;
+import com.apms.domain.ai.dto.RawExtractionOutput;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.MediaType;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestClient;
+
+import java.io.IOException;
+import java.net.http.HttpClient;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+
+@Slf4j
+@Component
+public class GeminiExtractionProvider implements ExtractionProvider {
+
+    private final RestClient restClient;
+    private final GeminiRequestExecutor requestExecutor;
+    private final ObjectMapper objectMapper;
+    private final AiExtractionResponseMapper responseMapper;
+    private final String geminiModel;
+    private final String extractionSystemPrompt;
+
+    private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={key}";
+
+    public GeminiExtractionProvider(
+            ObjectMapper objectMapper,
+            AiExtractionResponseMapper responseMapper,
+            GeminiRequestExecutor requestExecutor,
+            @Value("${app.ai.gemini.model:gemini-3.6-flash}") String geminiModel,
+            @Value("${app.ai.gemini.http.connect-timeout-ms:15000}") long connectTimeoutMs,
+            @Value("${app.ai.gemini.http.read-timeout-ms:180000}") long readTimeoutMs) {
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(Math.max(1000, connectTimeoutMs)))
+                .build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(Duration.ofMillis(Math.max(1000, readTimeoutMs)));
+        this.restClient = RestClient.builder().requestFactory(requestFactory)
+                .requestInterceptor(GeminiCredentialDiagnostics.interceptor("CompanyExtraction")).build();
+        this.requestExecutor = requestExecutor;
+        this.objectMapper = objectMapper;
+        this.responseMapper = responseMapper;
+        this.geminiModel = geminiModel != null && geminiModel.startsWith("models/") ? geminiModel.substring(7) : geminiModel;
+        this.extractionSystemPrompt = loadPrompt();
+        log.info("GeminiExtractionProvider initialized: model={}, connectTimeout={}ms, readTimeout={}ms",
+                this.geminiModel, connectTimeoutMs, readTimeoutMs);
+    }
+
+    private String loadPrompt() {
+        try {
+            ClassPathResource resource = new ClassPathResource("ai-prompts/company-extraction.prompt.md");
+            return new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            log.error("Failed to load Gemini extraction prompt", e);
+            throw new RuntimeException("Failed to load prompt", e);
+        }
+    }
+
+    @Override
+    public RawExtractionOutput extract(String sourceText) {
+        int charCount = sourceText != null ? sourceText.length() : 0;
+        long estimatedInputTokens = Math.round(charCount / 3.5);
+        int promptLen = extractionSystemPrompt != null ? extractionSystemPrompt.length() : 0;
+        log.info("Gemini extraction request metrics: textCharacters={}, estimatedInputTokens={}, promptLength={}",
+                charCount, estimatedInputTokens, promptLen);
+
+        String fullPrompt = extractionSystemPrompt + "\n\nText:\n" + sourceText;
+
+        Map<String, Object> requestPayload = Map.of(
+                "contents", List.of(
+                        Map.of("parts", List.of(
+                                Map.of("text", fullPrompt)
+                        ))
+                ),
+                "generationConfig", Map.of(
+                        "responseMimeType", "application/json",
+                        "responseSchema", buildResponseSchema()
+                )
+        );
+
+        String rawAiOutput = "";
+        int maxRetries = 3;
+        int attempt = 0;
+
+        while (attempt < maxRetries) {
+            try {
+                attempt++;
+                String responseBody = requestExecutor.execute(apiKey -> restClient.post()
+                        .uri(GEMINI_API_URL, geminiModel, apiKey)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(requestPayload)
+                        .retrieve()
+                        .body(String.class));
+
+                // Parse the Gemini JSON structure to extract the text
+                JsonNode rootNode = objectMapper.readTree(responseBody);
+
+                // Log actual token usage if provided by Gemini
+                JsonNode usageNode = rootNode.path("usageMetadata");
+                if (!usageNode.isMissingNode() && !usageNode.isNull()) {
+                    int promptTokens = usageNode.path("promptTokenCount").asInt(0);
+                    int candidateTokens = usageNode.path("candidatesTokenCount").asInt(0);
+                    int totalTokens = usageNode.path("totalTokenCount").asInt(0);
+                    log.info("Gemini extraction actual token usage: promptTokenCount={}, candidateTokenCount={}, totalTokenCount={}",
+                            promptTokens, candidateTokens, totalTokens);
+                }
+
+                rawAiOutput = rootNode.path("candidates")
+                        .get(0)
+                        .path("content")
+                        .path("parts")
+                        .get(0)
+                        .path("text")
+                        .asText();
+
+                rawAiOutput = cleanMarkdownFences(rawAiOutput);
+
+                return responseMapper.mapResponse(rawAiOutput);
+
+            } catch (BusinessValidationException e) {
+                throw e;
+            } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+                log.warn("Gemini extraction parsing failed. Attempt {} of {}. Error: {}", attempt, maxRetries, e.getOriginalMessage());
+                if (attempt < maxRetries) {
+                    continue;
+                }
+                log.error("Gemini JSON parse failed after {} attempt(s).", maxRetries, e);
+                throw new BusinessValidationException("GEMINI_JSON_PARSE_FAILED");
+            } catch (Exception e) {
+                if (e.getMessage() != null && e.getMessage().contains("GEMINI_JSON_PARSE_FAILED")) {
+                    if (attempt < maxRetries) {
+                        continue;
+                    }
+                    throw new BusinessValidationException("GEMINI_JSON_PARSE_FAILED");
+                }
+                log.warn("Gemini extraction failed. Attempt {} of {}.", attempt, maxRetries, e);
+                if (attempt < maxRetries) {
+                    continue;
+                }
+                throw new BusinessValidationException("Failed to parse Gemini extraction output. Invalid JSON or mismatch.");
+            }
+        }
+        throw new BusinessValidationException("Gemini extraction failed.");
+    }
+
+    private Map<String, Object> buildResponseSchema() {
+        Map<String, Object> stringFieldSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of("type", "STRING", "nullable", true),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER", "nullable", true),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> stringListFieldSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"), "nullable", true),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER", "nullable", true),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> productSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of(
+                                "type", "ARRAY",
+                                "items", Map.of(
+                                        "type", "OBJECT",
+                                        "properties", Map.of(
+                                                "name", Map.of("type", "STRING")
+                                        ),
+                                        "required", List.of("name")
+                                ),
+                                "nullable", true
+                        ),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER", "nullable", true),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> integerFieldSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of("type", "INTEGER", "nullable", true),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER", "nullable", true),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> fallbackObjectSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of("type", "OBJECT"),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER"),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> financialSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of(
+                                "type", "OBJECT",
+                                "properties", Map.of(
+                                        "revenue", Map.of("type", "NUMBER"),
+                                        "revenueCurrency", Map.of("type", "STRING"),
+                                        "revenueGrowth", Map.of("type", "NUMBER"),
+                                        "profitMargin", Map.of("type", "NUMBER"),
+                                        "debtRatio", Map.of("type", "NUMBER"),
+                                        "fundingStage", Map.of("type", "STRING"),
+                                        "profitability", Map.of("type", "STRING")
+                                )
+                        ),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER"),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> innovationSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of(
+                                "type", "OBJECT",
+                                "properties", Map.of(
+                                        "patents", Map.of("type", "INTEGER"),
+                                        "rdInvestmentPercent", Map.of("type", "NUMBER"),
+                                        "techStack", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")),
+                                        "technologyCapabilities", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")),
+                                        "techMaturityLevel", Map.of("type", "INTEGER"),
+                                        "productInnovationRate", Map.of("type", "NUMBER")
+                                )
+                        ),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER"),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> marketSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of(
+                                "type", "OBJECT",
+                                "properties", Map.of(
+                                        "marketShare", Map.of("type", "NUMBER"),
+                                        "brandRank", Map.of("type", "INTEGER"),
+                                        "clientCount", Map.of("type", "INTEGER"),
+                                        "mainMarkets", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                                )
+                        ),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER"),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> riskSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of(
+                                "type", "OBJECT",
+                                "properties", Map.of(
+                                        "overallRiskLevel", Map.of("type", "STRING"),
+                                        "financialRisk", Map.of("type", "STRING"),
+                                        "legalRisk", Map.of("type", "STRING"),
+                                        "reputationRisk", Map.of("type", "STRING"),
+                                        "securityRisk", Map.of("type", "STRING"),
+                                        "supplyInterruptionRisk", Map.of("type", "STRING"),
+                                        "dependencyRisk", Map.of("type", "STRING")
+                                )
+                        ),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER"),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> complianceSchema = Map.of(
+                "type", "OBJECT",
+                "properties", Map.of(
+                        "value", Map.of(
+                                "type", "OBJECT",
+                                "properties", Map.of(
+                                        "status", Map.of("type", "STRING"),
+                                        "qualityCertifications", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")),
+                                        "securityCertifications", Map.of("type", "ARRAY", "items", Map.of("type", "STRING")),
+                                        "antiCorruptionPolicy", Map.of("type", "STRING"),
+                                        "laborCompliance", Map.of("type", "STRING"),
+                                        "environmentalPolicy", Map.of("type", "STRING")
+                                )
+                        ),
+                        "confidence", Map.of("type", "NUMBER"),
+                        "evidenceText", Map.of("type", "STRING"),
+                        "pageNumber", Map.of("type", "INTEGER"),
+                        "sourceDocumentIds", Map.of("type", "ARRAY", "items", Map.of("type", "STRING"))
+                ),
+                "required", List.of("value", "confidence", "evidenceText", "sourceDocumentIds")
+        );
+
+        Map<String, Object> properties = new java.util.HashMap<>();
+        
+        List<String> stringFields = List.of(
+                "tradeName", "businessModel", "companyDescription",
+                "website"
+        );
+        for (String field : stringFields) {
+            properties.put(field, stringFieldSchema);
+        }
+
+        List<String> stringListFields = List.of(
+                "industries", "markets", "targetCustomers", "email", "phone", "addresses"
+        );
+        for (String field : stringListFields) {
+            properties.put(field, stringListFieldSchema);
+        }
+
+        properties.put("products", productSchema);
+        properties.put("employeeCount", integerFieldSchema);
+        properties.put("foundedYear", integerFieldSchema);
+
+        List<String> allRequiredFields = new java.util.ArrayList<>();
+        allRequiredFields.addAll(stringFields);
+        allRequiredFields.addAll(stringListFields);
+        allRequiredFields.add("products");
+        allRequiredFields.add("employeeCount");
+        allRequiredFields.add("foundedYear");
+
+        return Map.of(
+                "type", "OBJECT",
+                "properties", properties,
+                "required", allRequiredFields
+        );
+    }
+
+    private String cleanMarkdownFences(String rawOutput) {
+        String clean = rawOutput.trim();
+        if (clean.startsWith("```json")) {
+            clean = clean.replaceFirst("```json", "");
+        } else if (clean.startsWith("```")) {
+            clean = clean.replaceFirst("```", "");
+        }
+        if (clean.endsWith("```")) {
+            clean = clean.substring(0, clean.length() - 3);
+        }
+        return clean.trim();
+    }
+
+    private String rawOutputExcerpt(String rawOutput) {
+        if (rawOutput == null) {
+            return "";
+        }
+        String normalized = rawOutput.replaceAll("\\s+", " ").trim();
+        return normalized.length() <= 1000 ? normalized : normalized.substring(0, 1000) + "...";
+    }
+}
