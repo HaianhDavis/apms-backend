@@ -49,7 +49,7 @@ public class OwnerGeminiAssistantProvider implements AssistantProvider {
     public OwnerGeminiAssistantProvider(
             ObjectMapper objectMapper,
             GeminiApiKeyManager geminiApiKeyManager,
-            @Value("${app.ai.gemini.model:gemini-3.6-flash}") String geminiModel) {
+            @Value("${app.ai.gemini.model:gemini-3.8-flash}") String geminiModel) {
         this.restClient = RestClient.builder()
                 .requestInterceptor(com.apms.domain.ai.service.provider.GeminiCredentialDiagnostics.interceptor("OwnerGeminiAssistantProvider")).build();
         this.objectMapper = objectMapper;

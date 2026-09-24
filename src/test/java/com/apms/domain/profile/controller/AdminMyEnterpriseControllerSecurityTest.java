@@ -52,6 +52,12 @@ class AdminMyEnterpriseControllerSecurityTest {
     private OwnerOrganizationService ownerOrganizationService;
 
     @MockitoBean
+    private com.apms.domain.profile.service.AdminMyEnterpriseFinancialService enterpriseFinancialService;
+
+    @MockitoBean
+    private com.apms.domain.document.service.StorageService storageService;
+
+    @MockitoBean
     private UserDetailsServiceImpl userDetailsService;
 
     @MockitoBean
@@ -94,8 +100,9 @@ class AdminMyEnterpriseControllerSecurityTest {
     @Test
     @WithMockUser(username = "admin", authorities = {"ROLE_SYSTEM_ADMIN"})
     void admin_getAdminMyEnterprise_returnsOk() throws Exception {
-        when(ownerOrganizationService.getOwnerCompanyId()).thenReturn("owner-fpt-id");
-        when(profileService.getProfileByCompanyId("owner-fpt-id"))
+        CompanyProfile profile = CompanyProfile.builder().id("owner-fpt-id").build();
+        when(ownerOrganizationService.findOwnerCompanyProfile()).thenReturn(java.util.Optional.of(profile));
+        when(profileService.toResponse(profile))
                 .thenReturn(ProfileResponse.builder()
                         .companyId("owner-fpt-id")
                         .identity(CompanyProfile.Identity.builder().legalName("FPT Corporation").build())
@@ -104,7 +111,38 @@ class AdminMyEnterpriseControllerSecurityTest {
         mockMvc.perform(get(ENDPOINT))
                 .andExpect(status().isOk());
 
-        verify(profileService).getProfileByCompanyId("owner-fpt-id");
+        verify(profileService).toResponse(profile);
+    }
+
+    @Test
+    @WithMockUser(username = "admin", authorities = {"ROLE_SYSTEM_ADMIN"})
+    void admin_getAdminMyEnterprise_unconfigured_returnsOk() throws Exception {
+        when(ownerOrganizationService.findOwnerCompanyProfile()).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(get(ENDPOINT))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @WithMockUser(username = "admin", authorities = {"ROLE_SYSTEM_ADMIN"})
+    void admin_createAdminMyEnterprise_returnsOk() throws Exception {
+        CompanyProfile created = CompanyProfile.builder().id("new-owner-id").build();
+        when(ownerOrganizationService.createOwnerEnterprise(any(), any())).thenReturn(created);
+        when(profileService.toResponse(created))
+                .thenReturn(ProfileResponse.builder().id("new-owner-id").build());
+
+        String json = """
+                {
+                    "legalName": "My Enterprise Corp",
+                    "tradeName": "My Corp",
+                    "taxCode": "0123456789"
+                }
+                """;
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(ENDPOINT)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json))
+                .andExpect(status().isOk());
     }
 
     @Test

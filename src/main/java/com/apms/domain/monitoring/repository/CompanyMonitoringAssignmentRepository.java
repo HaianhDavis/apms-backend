@@ -22,5 +22,10 @@ public interface CompanyMonitoringAssignmentRepository extends JpaRepository<Com
     @Query("SELECT c FROM CompanyMonitoringAssignment c WHERE c.status = 'ACTIVE' AND c.nextReviewAt <= :now")
     Page<CompanyMonitoringAssignment> findDueOrOverdueActiveAssignments(@Param("now") LocalDateTime now, Pageable pageable);
 
+    Page<CompanyMonitoringAssignment> findByCompanyProfileIdIn(java.util.Collection<String> companyProfileIds, Pageable pageable);
+
+    @Query("SELECT c FROM CompanyMonitoringAssignment c WHERE c.status = 'ACTIVE' AND c.nextReviewAt <= :now AND c.companyProfileId IN :companyProfileIds")
+    Page<CompanyMonitoringAssignment> findDueOrOverdueActiveAssignmentsForCompanies(@Param("now") LocalDateTime now, @Param("companyProfileIds") java.util.Collection<String> companyProfileIds, Pageable pageable);
+
     boolean existsByCompanyProfileIdAndAssignedStaffId(String companyProfileId, Long assignedStaffId);
 }

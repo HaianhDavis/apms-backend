@@ -30,7 +30,7 @@ public class CompanyProfileContractController {
      * Does NOT mutate database state or run implicit backfill.
      */
     @GetMapping("/{companyProfileId}/contracts")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyProfileId))")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_OWNER') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @companyScope.canManageCompanyProfile(#companyProfileId)) or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyProfileId))")
     public ResponseEntity<ApiResponse<List<CompanyProfileContractDto>>> getContracts(
             @PathVariable String companyProfileId,
             @RequestParam(required = false) Long projectId) {
@@ -74,7 +74,7 @@ public class CompanyProfileContractController {
      * Scoped strictly to the target companyProfileId.
      */
     @PostMapping("/{companyProfileId}/contracts/backfill")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') and @companyScope.canAccessCompany(#companyProfileId))")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @companyScope.canManageCompanyProfile(#companyProfileId))")
     public ResponseEntity<ApiResponse<Integer>> backfillContracts(
             @PathVariable String companyProfileId,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {

@@ -14,6 +14,7 @@ import com.apms.domain.profile.dto.CompanyProfileUpdateProposalResponse;
 import com.apms.domain.profile.dto.CreateCompanyProfileUpdateProposalRequest;
 import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
 import com.apms.domain.profile.repository.mongo.CompanyProfileUpdateProposalRepository;
+import com.apms.domain.profile.validation.CompanyProfileFieldValidator;
 import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
@@ -62,6 +63,10 @@ public class CompanyProfileUpdateProposalService {
             throw new ResourceNotFoundException("Target CompanyProfile does not exist");
         }
 
+        if (request.getProposedContact() != null) {
+            CompanyProfileFieldValidator.validateProposedContact(request.getProposedContact());
+        }
+
         CompanyProfileUpdateProposal proposal = CompanyProfileUpdateProposal.builder()
                 .origin(com.apms.common.enums.ProposalOrigin.PROJECT)
                 .projectId(projectId)
@@ -103,6 +108,10 @@ public class CompanyProfileUpdateProposalService {
             throw new ResourceNotFoundException("Target CompanyProfile does not exist");
         }
 
+        if (request.getProposedContact() != null) {
+            CompanyProfileFieldValidator.validateProposedContact(request.getProposedContact());
+        }
+
         java.util.List<CompanyProfileUpdateProposal> existingSubmitted = proposalRepository.findByCompanyProfileIdAndStatusIn(
                 request.getCompanyProfileId(),
                 java.util.List.of(SubmissionStatus.SUBMITTED, SubmissionStatus.IN_REVIEW)
@@ -125,30 +134,65 @@ public class CompanyProfileUpdateProposalService {
             }
         }
 
-        CompanyProfileUpdateProposal proposal = CompanyProfileUpdateProposal.builder()
-                .origin(com.apms.common.enums.ProposalOrigin.MONITORING)
-                .companyProfileId(request.getCompanyProfileId())
-                .proposedIdentity(request.getProposedIdentity())
-                .proposedBusiness(request.getProposedBusiness())
-                .proposedCompanySize(request.getProposedCompanySize())
-                .proposedContact(request.getProposedContact())
-                .proposedInsights(request.getProposedInsights())
-                .proposedFinancial(request.getProposedFinancial())
-                .proposedMarket(request.getProposedMarket())
-                .proposedInnovation(request.getProposedInnovation())
-                .proposedRisk(request.getProposedRisk())
-                .proposedCompliance(request.getProposedCompliance())
-                .proposedCompanyMembers(request.getProposedCompanyMembers())
-                .proposedRelationship(request.getProposedRelationship())
-                .changedFieldPaths(request.getChangedFieldPaths())
-                .originalValues(origValues)
-                .fieldEvidence(request.getFieldEvidence())
-                .sourceDocumentIds(request.getSourceDocumentIds())
-                .extractionId(request.getExtractionId())
-                .changeSummary(request.getChangeSummary())
-                .status(SubmissionStatus.DRAFT)
-                .submittedBy(currentUser.getId())
-                .build();
+        java.util.List<CompanyProfileUpdateProposal> existingDrafts = proposalRepository.findByCompanyProfileIdAndStatusIn(
+                request.getCompanyProfileId(),
+                java.util.List.of(SubmissionStatus.DRAFT)
+        );
+        CompanyProfileUpdateProposal proposal = existingDrafts.stream()
+                .filter(p -> p.getOrigin() == com.apms.common.enums.ProposalOrigin.MONITORING &&
+                        (p.getSubmittedBy() == null || currentUser.getId().equals(p.getSubmittedBy())))
+                .findFirst()
+                .orElse(null);
+
+        if (proposal != null) {
+            proposal.setProposedIdentity(request.getProposedIdentity());
+            proposal.setProposedBusiness(request.getProposedBusiness());
+            proposal.setProposedCompanySize(request.getProposedCompanySize());
+            proposal.setProposedContact(request.getProposedContact());
+            proposal.setProposedInsights(request.getProposedInsights());
+            proposal.setProposedFinancial(request.getProposedFinancial());
+            proposal.setProposedMarket(request.getProposedMarket());
+            proposal.setProposedInnovation(request.getProposedInnovation());
+            proposal.setProposedRisk(request.getProposedRisk());
+            proposal.setProposedCompliance(request.getProposedCompliance());
+            proposal.setProposedCompanyMembers(request.getProposedCompanyMembers());
+            proposal.setProposedRelationship(request.getProposedRelationship());
+            proposal.setChangedFieldPaths(request.getChangedFieldPaths());
+            proposal.setOriginalValues(origValues);
+            proposal.setFieldEvidence(request.getFieldEvidence());
+            proposal.setSourceDocumentIds(request.getSourceDocumentIds());
+            proposal.setExtractionId(request.getExtractionId());
+            proposal.setChangeSummary(request.getChangeSummary());
+            proposal.setUpdatedAt(java.time.LocalDateTime.now());
+            if (proposal.getSubmittedBy() == null) {
+                proposal.setSubmittedBy(currentUser.getId());
+            }
+        } else {
+            proposal = CompanyProfileUpdateProposal.builder()
+                    .origin(com.apms.common.enums.ProposalOrigin.MONITORING)
+                    .companyProfileId(request.getCompanyProfileId())
+                    .proposedIdentity(request.getProposedIdentity())
+                    .proposedBusiness(request.getProposedBusiness())
+                    .proposedCompanySize(request.getProposedCompanySize())
+                    .proposedContact(request.getProposedContact())
+                    .proposedInsights(request.getProposedInsights())
+                    .proposedFinancial(request.getProposedFinancial())
+                    .proposedMarket(request.getProposedMarket())
+                    .proposedInnovation(request.getProposedInnovation())
+                    .proposedRisk(request.getProposedRisk())
+                    .proposedCompliance(request.getProposedCompliance())
+                    .proposedCompanyMembers(request.getProposedCompanyMembers())
+                    .proposedRelationship(request.getProposedRelationship())
+                    .changedFieldPaths(request.getChangedFieldPaths())
+                    .originalValues(origValues)
+                    .fieldEvidence(request.getFieldEvidence())
+                    .sourceDocumentIds(request.getSourceDocumentIds())
+                    .extractionId(request.getExtractionId())
+                    .changeSummary(request.getChangeSummary())
+                    .status(SubmissionStatus.DRAFT)
+                    .submittedBy(currentUser.getId())
+                    .build();
+        }
 
         proposal = proposalRepository.save(proposal);
 

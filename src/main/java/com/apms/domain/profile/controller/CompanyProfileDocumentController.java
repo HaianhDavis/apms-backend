@@ -34,7 +34,7 @@ public class CompanyProfileDocumentController {
     private final AuditLogService auditLogService;
 
     @GetMapping("/{companyProfileId}/documents")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyProfileId))")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_OWNER') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @companyScope.canManageCompanyProfile(#companyProfileId)) or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyProfileId))")
     public ResponseEntity<PageResponse<CompanyDocumentResponse>> getPublishedDocuments(
             @PathVariable String companyProfileId,
             @RequestParam(required = false) Long projectId,
@@ -51,7 +51,7 @@ public class CompanyProfileDocumentController {
     }
 
     @PostMapping("/{companyProfileId}/documents/reconcile")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @companyScope.canManageCompanyProfile(#companyProfileId))")
     public ResponseEntity<java.util.Map<String, Object>> reconcilePublishedDocuments(
             @PathVariable String companyProfileId,
             HttpServletRequest request,
@@ -68,7 +68,7 @@ public class CompanyProfileDocumentController {
     }
 
     @GetMapping("/{companyProfileId}/documents/{documentId}/download")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyProfileId))")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasRole('BUSINESS_OWNER') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @companyScope.canManageCompanyProfile(#companyProfileId)) or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyProfileId))")
     public ResponseEntity<Resource> downloadDocument(
             @PathVariable String companyProfileId,
             @PathVariable String documentId,

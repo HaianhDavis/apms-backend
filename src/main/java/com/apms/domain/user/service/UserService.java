@@ -142,39 +142,127 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
-    public List<UserProfileResponse> searchActiveUsersByEmail(String email) {
-        String term = email == null ? "" : email.trim();
-        return accountRepository.findTop10ByEmailContainingIgnoreCaseAndIsActiveTrue(term).stream()
+    public List<UserProfileResponse> searchActiveUsers(String email, SystemRole role) {
+        String term = email == null ? "" : email.trim().toLowerCase();
+        List<Account> accounts;
+        if (role != null) {
+            accounts = accountRepository.findActiveAccountsByRole(role);
+        } else {
+            accounts = accountRepository.findTop10ByEmailContainingIgnoreCaseAndIsActiveTrue(term);
+        }
+
+        return accounts.stream()
+                .filter(a -> {
+                    if (role == SystemRole.BUSINESS_DEVELOPMENT_STAFF) {
+                        return a.getRoles() != null &&
+                                a.getRoles().contains(SystemRole.BUSINESS_DEVELOPMENT_STAFF) &&
+                                !a.getRoles().contains(SystemRole.SYSTEM_ADMIN) &&
+                                !a.getRoles().contains(SystemRole.BUSINESS_OWNER) &&
+                                !a.getRoles().contains(SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+                    }
+                    return true;
+                })
                 .map(this::mapAccountToResponse)
+                .filter(res -> {
+                    if (term.isEmpty()) return true;
+                    String emailMatch = res.getEmail() != null ? res.getEmail().toLowerCase() : "";
+                    String nameMatch = res.getFullName() != null ? res.getFullName().toLowerCase() : "";
+                    return emailMatch.contains(term) || nameMatch.contains(term);
+                })
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<UserProfileResponse> searchActiveUsersByEmail(String email) {
+        return searchActiveUsers(email, null);
+    }
+
+    @Transactional
+    public UserProfileResponse updateMyProfile(Long currentUserId, UpdateMyProfileRequest request) {
+        Account account = accountRepository.findById(currentUserId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        UserProfile profile = userProfileRepository.findByAccountId(currentUserId)
+                .orElseGet(() -> {
+                    UserProfile newProfile = UserProfile.builder()
+                            .account(account)
+                            .firstName(account.getEmail())
+                            .lastName("")
+                            .build();
+                    return userProfileRepository.save(newProfile);
+                });
+
+        String trimmedName = request.getFullName() != null ? request.getFullName().trim() : "";
+        if (trimmedName.isEmpty()) {
+            throw new IllegalArgumentException("Full name cannot be blank");
+        }
+
+        profile.setFirstName(trimmedName);
+        profile.setLastName("");
+        userProfileRepository.save(profile);
+
+        auditLogService.log(currentUserId, AuditAction.USER_UPDATED, "Account", account.getId().toString(), "Updated self profile name");
+
+        return mapToResponse(account, profile);
     }
 
     private UserProfileResponse getProfileResponse(Long userId) {
         Account account = accountRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
         UserProfile profile = userProfileRepository.findByAccountId(userId)
-                .orElseThrow(() -> new IllegalArgumentException("Profile not found"));
+                .orElse(null);
 
         return mapToResponse(account, profile);
     }
 
     private UserProfileResponse mapToResponse(Account account, UserProfile profile) {
+        String dept = profile != null ? profile.getDepartment() : null;
+        if (dept == null || dept.isBlank()) {
+            boolean isAdmin = account.getRoles() != null && account.getRoles().stream()
+                    .anyMatch(r -> r.name().contains("ADMIN"));
+            dept = isAdmin ? "Platform Administration" : "Business Development";
+        }
+
+        String phone = profile != null ? profile.getPhone() : null;
+        if ((phone == null || phone.isBlank()) && account.getPhoneNumber() != null && !account.getPhoneNumber().isBlank()) {
+            phone = account.getPhoneNumber();
+        }
+
         return UserProfileResponse.builder()
                 .id(account.getId())
                 .email(account.getEmail())
-                .fullName((profile.getFirstName() + " " + profile.getLastName()).trim())
+                .fullName(profile != null ? (profile.getFirstName() + " " + profile.getLastName()).trim() : account.getEmail())
                 .roles(account.getRoles())
                 .enabled(account.getIsActive())
                 .emailVerified(account.getEmailVerified())
                 .createdAt(account.getCreatedAt())
+                .phone(phone)
+                .department(dept)
+                .bio(profile != null ? profile.getBio() : null)
+                .address(profile != null ? profile.getAddress() : null)
                 .build();
     }
 
     private UserProfileResponse mapAccountToResponse(Account account) {
-        String fullName = userProfileRepository.findByAccountId(account.getId())
-                .map(profile -> (profile.getFirstName() + " " + profile.getLastName()).trim())
-                .filter(name -> !name.isBlank())
-                .orElse(account.getEmail());
+        UserProfile profile = userProfileRepository.findByAccountId(account.getId()).orElse(null);
+        String fullName = profile != null
+                ? (profile.getFirstName() + " " + profile.getLastName()).trim()
+                : "";
+        if (fullName.isBlank()) {
+            fullName = account.getEmail();
+        }
+
+        String dept = profile != null ? profile.getDepartment() : null;
+        if (dept == null || dept.isBlank()) {
+            boolean isAdmin = account.getRoles() != null && account.getRoles().stream()
+                    .anyMatch(r -> r.name().contains("ADMIN"));
+            dept = isAdmin ? "Platform Administration" : "Business Development";
+        }
+
+        String phone = profile != null ? profile.getPhone() : null;
+        if ((phone == null || phone.isBlank()) && account.getPhoneNumber() != null && !account.getPhoneNumber().isBlank()) {
+            phone = account.getPhoneNumber();
+        }
 
         return UserProfileResponse.builder()
                 .id(account.getId())
@@ -184,6 +272,10 @@ public class UserService {
                 .enabled(account.getIsActive())
                 .emailVerified(account.getEmailVerified())
                 .createdAt(account.getCreatedAt())
+                .phone(phone)
+                .department(dept)
+                .bio(profile != null ? profile.getBio() : null)
+                .address(profile != null ? profile.getAddress() : null)
                 .build();
     }
 }

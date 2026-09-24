@@ -92,7 +92,7 @@ public class ProfileController {
     // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF (project-scoped)
     // ─────────────────────────────────────────────
     @GetMapping("/{companyId}")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyId))")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and ((#projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyId)) or @companyScope.canAccessCompany(#companyId)))")
     public ResponseEntity<ApiResponse<ProfileResponse>> getProfile(
             @PathVariable String companyId,
             @RequestParam(required = false) Long projectId) {
@@ -131,7 +131,7 @@ public class ProfileController {
     // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF (project-scoped)
     // ─────────────────────────────────────────────
     @GetMapping("/{companyId}/sources")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and #projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyId))")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER') or (hasRole('BUSINESS_DEVELOPMENT_STAFF') and ((#projectId != null and @companyScope.canReadCompanyProfileFromProject(principal.id, #projectId, #companyId)) or @companyScope.canAccessCompany(#companyId)))")
     public ResponseEntity<ApiResponse<ProfileSourcesResponse>> getProfileSources(
             @PathVariable String companyId,
             @RequestParam(required = false) Long projectId) {

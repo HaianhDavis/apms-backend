@@ -100,10 +100,8 @@ public class RelationshipClosenessAccessEvaluator {
         }
 
         if (hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
-            boolean isResponsible = profile.getResponsibleManagerId() != null
+            return profile.getResponsibleManagerId() != null
                     && profile.getResponsibleManagerId().equals(currentUser.getId());
-            boolean inProject = isInProjectScope(profile, currentUser.getId(), VIEW_PROJECT_STATUSES);
-            return isResponsible || inProject;
         }
 
         if (hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_STAFF)) {
@@ -149,11 +147,8 @@ public class RelationshipClosenessAccessEvaluator {
         if (hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
             boolean isResponsible = target.getResponsibleManagerId() != null
                     && target.getResponsibleManagerId().equals(currentUser.getId());
-            boolean inProject = isInProjectScope(target, currentUser.getId(), statuses);
-            if (!isResponsible && !inProject) {
-                throw new AccessDeniedException(isWrite
-                        ? "Target company is not within your active project scope."
-                        : "Target company is not within your project scope.");
+            if (!isResponsible) {
+                throw new AccessDeniedException("Target company is not managed by you.");
             }
             return;
         }

@@ -49,6 +49,11 @@ public class AdminUpdateEnterpriseBasicInfoRequest {
     @Length(max = 500, message = "Địa chỉ trụ sở tối đa 500 ký tự")
     private String headOfficeAddress;
 
+    private Integer foundedYear;
+
+    @Length(max = 2000, message = "Mô tả công ty tối đa 2000 ký tự")
+    private String companyDescription;
+
     @Length(max = 2000, message = "Mô hình kinh doanh tối đa 2000 ký tự")
     private String businessModel;
 

@@ -36,7 +36,7 @@ public class GeminiExtractionProvider implements ExtractionProvider {
             ObjectMapper objectMapper,
             AiExtractionResponseMapper responseMapper,
             GeminiRequestExecutor requestExecutor,
-            @Value("${app.ai.gemini.model:gemini-3.6-flash}") String geminiModel,
+            @Value("${app.ai.gemini.model:gemini-3.8-flash}") String geminiModel,
             @Value("${app.ai.gemini.http.connect-timeout-ms:15000}") long connectTimeoutMs,
             @Value("${app.ai.gemini.http.read-timeout-ms:180000}") long readTimeoutMs) {
         HttpClient httpClient = HttpClient.newBuilder()

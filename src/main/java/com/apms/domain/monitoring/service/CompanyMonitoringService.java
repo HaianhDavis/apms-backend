@@ -312,8 +312,81 @@ public class CompanyMonitoringService {
     }
 
     @Transactional(readOnly = true)
+    public Page<CompanyMonitoringAssignmentResponse> getAllAssignments(Long currentUserId, Pageable pageable) {
+        if (currentUserId == null) {
+            return assignmentRepository.findAll(pageable)
+                    .map(assignment -> {
+                        CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
+                        return mapToResponse(assignment, companyProfile);
+                    });
+        }
+
+        Account currentUser = accountRepository.findById(currentUserId)
+                .orElseThrow(() -> new IllegalArgumentException("Account not found"));
+
+        if (currentUser.getRoles().contains(SystemRole.SYSTEM_ADMIN)) {
+            return assignmentRepository.findAll(pageable)
+                    .map(assignment -> {
+                        CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
+                        return mapToResponse(assignment, companyProfile);
+                    });
+        }
+
+        List<CompanyProfile> managedProfiles = companyProfileRepository.findByResponsibleManagerId(currentUserId);
+        Set<String> managedCompanyKeys = managedProfiles.stream()
+                .flatMap(profile -> java.util.stream.Stream.of(profile.getId(), profile.getCompanyId()))
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toSet());
+
+        if (managedCompanyKeys.isEmpty()) {
+            return Page.empty(pageable);
+        }
+
+        return assignmentRepository.findByCompanyProfileIdIn(managedCompanyKeys, pageable)
+                .map(assignment -> {
+                    CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
+                    return mapToResponse(assignment, companyProfile);
+                });
+    }
+
+    @Transactional(readOnly = true)
     public Page<CompanyMonitoringAssignmentResponse> getAllAssignments(Pageable pageable) {
-        return assignmentRepository.findAll(pageable)
+        return getAllAssignments(null, pageable);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<CompanyMonitoringAssignmentResponse> getDueOrOverdueAssignments(Long currentUserId, Pageable pageable) {
+        LocalDateTime now = LocalDateTime.now();
+        if (currentUserId == null) {
+            return assignmentRepository.findDueOrOverdueActiveAssignments(now, pageable)
+                    .map(assignment -> {
+                        CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
+                        return mapToResponse(assignment, companyProfile);
+                    });
+        }
+
+        Account currentUser = accountRepository.findById(currentUserId)
+                .orElseThrow(() -> new IllegalArgumentException("Account not found"));
+
+        if (currentUser.getRoles().contains(SystemRole.SYSTEM_ADMIN)) {
+            return assignmentRepository.findDueOrOverdueActiveAssignments(now, pageable)
+                    .map(assignment -> {
+                        CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
+                        return mapToResponse(assignment, companyProfile);
+                    });
+        }
+
+        List<CompanyProfile> managedProfiles = companyProfileRepository.findByResponsibleManagerId(currentUserId);
+        Set<String> managedCompanyKeys = managedProfiles.stream()
+                .flatMap(profile -> java.util.stream.Stream.of(profile.getId(), profile.getCompanyId()))
+                .filter(StringUtils::hasText)
+                .collect(Collectors.toSet());
+
+        if (managedCompanyKeys.isEmpty()) {
+            return Page.empty(pageable);
+        }
+
+        return assignmentRepository.findDueOrOverdueActiveAssignmentsForCompanies(now, managedCompanyKeys, pageable)
                 .map(assignment -> {
                     CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
                     return mapToResponse(assignment, companyProfile);
@@ -322,12 +395,7 @@ public class CompanyMonitoringService {
 
     @Transactional(readOnly = true)
     public Page<CompanyMonitoringAssignmentResponse> getDueOrOverdueAssignments(Pageable pageable) {
-        LocalDateTime now = LocalDateTime.now();
-        return assignmentRepository.findDueOrOverdueActiveAssignments(now, pageable)
-                .map(assignment -> {
-                    CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
-                    return mapToResponse(assignment, companyProfile);
-                });
+        return getDueOrOverdueAssignments(null, pageable);
     }
 
     public LocalDateTime calculateNextReviewAt(LocalDateTime baseTime, MonitoringFrequency frequency) {

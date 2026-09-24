@@ -6,7 +6,8 @@ import com.apms.domain.financial.ReportingPeriod;
 import com.apms.domain.financial.ReportingPeriodType;
 import com.apms.domain.financial.dto.FinancialDocumentExtractionResult;
 import com.apms.domain.financial.dto.FinancialExtractionResponse;
-import com.apms.domain.ai.service.provider.GeminiApiKeyManager;
+import com.apms.domain.ai.service.provider.GeminiAllKeysUnavailableException;
+import com.apms.domain.ai.service.provider.GeminiRequestExecutor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,7 +18,6 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StreamUtils;
 import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientResponseException;
 
 import java.io.File;
 import java.io.IOException;
@@ -34,16 +34,13 @@ public class FinancialExtractionService {
 
     private final ObjectMapper objectMapper;
     private final RestClient.Builder restClientBuilder;
-    private final GeminiApiKeyManager geminiApiKeyManager;
+    private final GeminiRequestExecutor geminiRequestExecutor;
 
-    @Value("${app.ai.gemini.model:gemini-3.6-flash}")
+    @Value("${app.ai.gemini.model:gemini-3.8-flash}")
     private String geminiModel;
 
     @Value("${app.storage.upload-dir:uploads/}")
     private String storagePath;
-
-    private static final int MAX_GEMINI_RETRIES = 3;
-    private static final long INITIAL_BACKOFF_MS = 2000L;
 
     public FinancialExtractionResponse extractDocuments(List<RawDocument> documents) {
         List<FinancialDocumentExtractionResult> results = new ArrayList<>();
@@ -227,19 +224,7 @@ public class FinancialExtractionService {
         }
     }
 
-    private String getCleanApiKey() {
-        String key = geminiApiKeyManager.getApiKey();
-        if (key == null || key.isBlank()) return "";
-        return key.trim();
-    }
-
     private FinancialDocumentExtractionResult callGemini(String promptTemplate, String text) {
-        String cleanKey = getCleanApiKey();
-        if (cleanKey.isBlank()) {
-            throw new BusinessValidationException("Gemini API key is not configured.");
-        }
-        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + cleanKey;
-
         String combinedPrompt = promptTemplate + "\n\n=== DOCUMENT TEXT ===\n" + text;
 
         Map<String, Object> requestBody = Map.of(
@@ -257,64 +242,31 @@ public class FinancialExtractionService {
         RestClient restClient = restClientBuilder.clone()
                 .requestInterceptor(com.apms.domain.ai.service.provider.GeminiCredentialDiagnostics.interceptor("FinancialExtractionService")).build();
 
-        for (int attempt = 1; attempt <= MAX_GEMINI_RETRIES; attempt++) {
-            try {
-                String response = restClient.post()
+        try {
+            String response = geminiRequestExecutor.execute(apiKey -> {
+                String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + apiKey;
+                return restClient.post()
                         .uri(url)
-                        .header("x-goog-api-key", cleanKey)
+                        .header("x-goog-api-key", apiKey)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                         .body(requestBody)
                         .retrieve()
                         .body(String.class);
+            });
 
-                return parseGeminiResponse(response);
-            } catch (RestClientResponseException e) {
-                int statusCode = e.getStatusCode().value();
-                log.warn("Gemini API error (status {}): {}", statusCode, e.getResponseBodyAsString());
-                if ((statusCode == 503 || statusCode == 429 || statusCode >= 500) && attempt < MAX_GEMINI_RETRIES) {
-                    long backoff = INITIAL_BACKOFF_MS * attempt;
-                    log.warn("Gemini API {} error (attempt {}/{}). Retrying in {}ms...", statusCode, attempt, MAX_GEMINI_RETRIES, backoff);
-                    try {
-                        Thread.sleep(backoff);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                    continue;
-                }
-                if (statusCode == 404) {
-                    throw new BusinessValidationException("Gemini model is unavailable. Set GEMINI_MODEL to a supported model, for example gemini-3.6-flash.");
-                }
-                if (statusCode == 429) {
-                    throw new BusinessValidationException("Gemini API rate limit exceeded. Please retry later.");
-                }
-                if (statusCode == 401 || statusCode == 403) {
-                    throw new BusinessValidationException("Gemini API key is invalid or unauthorized.");
-                }
-                if (statusCode == 503) {
-                    throw new BusinessValidationException("Gemini model is currently experiencing high demand (503). Please retry in a few moments.");
-                }
-                throw new BusinessValidationException("Gemini API call failed: " + e.getStatusCode());
-            } catch (BusinessValidationException e) {
-                throw e;
-            } catch (Exception e) {
-                log.error("Failed to call Gemini API", e);
-                if (attempt < MAX_GEMINI_RETRIES) {
-                    try { Thread.sleep(INITIAL_BACKOFF_MS * attempt); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
-                    continue;
-                }
-                throw new BusinessValidationException("Gemini extraction failed. Please retry later.");
-            }
+            return parseGeminiResponse(response);
+        } catch (com.apms.domain.ai.service.provider.GeminiAllKeysUnavailableException e) {
+            log.error("All Gemini API keys are unavailable for financial extraction", e);
+            throw new BusinessValidationException("Gemini API key is invalid or unauthorized.");
+        } catch (BusinessValidationException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Failed to call Gemini API", e);
+            throw new BusinessValidationException("Gemini extraction failed. Please retry later.");
         }
-        throw new BusinessValidationException("Gemini extraction failed after " + MAX_GEMINI_RETRIES + " attempts.");
     }
 
     private FinancialDocumentExtractionResult callGeminiMultimodal(String promptTemplate, String mimeType, String base64Data) {
-        String cleanKey = getCleanApiKey();
-        if (cleanKey.isBlank()) {
-            throw new BusinessValidationException("Gemini API key is not configured.");
-        }
-        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + cleanKey;
-
         Map<String, Object> requestBody = Map.of(
                 "contents", List.of(
                         Map.of("parts", List.of(
@@ -332,57 +284,31 @@ public class FinancialExtractionService {
         );
 
         RestClient restClient = restClientBuilder.clone()
-                .requestInterceptor(com.apms.domain.ai.service.provider.GeminiCredentialDiagnostics.interceptor("FinancialExcelExtraction")).build();
+                .requestInterceptor(com.apms.domain.ai.service.provider.GeminiCredentialDiagnostics.interceptor("FinancialMultimodalExtraction")).build();
 
-        for (int attempt = 1; attempt <= MAX_GEMINI_RETRIES; attempt++) {
-            try {
-                String response = restClient.post()
+        try {
+            String response = geminiRequestExecutor.execute(apiKey -> {
+                String url = "https://generativelanguage.googleapis.com/v1beta/models/" + geminiModel + ":generateContent?key=" + apiKey;
+                return restClient.post()
                         .uri(url)
-                        .header("x-goog-api-key", cleanKey)
+                        .header("x-goog-api-key", apiKey)
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
                         .body(requestBody)
                         .retrieve()
                         .body(String.class);
+            });
 
-                return parseGeminiResponse(response);
-            } catch (RestClientResponseException e) {
-                int statusCode = e.getStatusCode().value();
-                log.warn("Gemini Multimodal API error (status {}): {}", statusCode, e.getResponseBodyAsString());
-                if ((statusCode == 503 || statusCode == 429 || statusCode >= 500) && attempt < MAX_GEMINI_RETRIES) {
-                    long backoff = INITIAL_BACKOFF_MS * attempt;
-                    log.warn("Gemini Multimodal {} error (attempt {}/{}). Retrying in {}ms...", statusCode, attempt, MAX_GEMINI_RETRIES, backoff);
-                    try {
-                        Thread.sleep(backoff);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                    continue;
-                }
-                // If multimodal fails on 400 (payload too large) or 503 (model overloaded) or 429: fallback to text extraction
-                if (statusCode == 400 || statusCode == 503 || statusCode == 429) {
-                    log.warn("Gemini Multimodal unavailable with status {}. Falling back to text-based extraction.", statusCode);
-                    return null;
-                }
-                if (statusCode == 404) {
-                    throw new BusinessValidationException("Gemini model is unavailable. Set GEMINI_MODEL to a supported model, for example gemini-3.6-flash.");
-                }
-                if (statusCode == 401 || statusCode == 403) {
-                    throw new BusinessValidationException("Gemini API key is invalid or unauthorized.");
-                }
-                throw new BusinessValidationException("Gemini API call failed: " + e.getStatusCode());
-            } catch (BusinessValidationException e) {
-                throw e;
-            } catch (Exception e) {
-                log.error("Failed to call Gemini Multimodal API", e);
-                if (attempt < MAX_GEMINI_RETRIES) {
-                    try { Thread.sleep(INITIAL_BACKOFF_MS * attempt); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
-                    continue;
-                }
-                log.warn("Gemini Multimodal failed after retries. Falling back to text-based extraction.");
-                return null;
-            }
+            return parseGeminiResponse(response);
+        } catch (com.apms.domain.ai.service.provider.GeminiAllKeysUnavailableException e) {
+            log.error("All Gemini API keys are unavailable for multimodal extraction", e);
+            throw new BusinessValidationException("Gemini API key is invalid or unauthorized.");
+        } catch (BusinessValidationException e) {
+            log.warn("Gemini Multimodal failed with business error ({}). Falling back to text-based extraction.", e.getMessage());
+            return null;
+        } catch (Exception e) {
+            log.warn("Gemini Multimodal failed ({}). Falling back to text-based extraction.", e.getMessage());
+            return null;
         }
-        return null;
     }
 
     private FinancialDocumentExtractionResult parseGeminiResponse(String responseJson) {

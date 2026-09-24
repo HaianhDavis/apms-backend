@@ -12,8 +12,10 @@ public class GraphCompanyDto {
     private String companyId;
     private String name;
     private String industry;
+    private List<String> industries;
     private ZonedDateTime createdAt;
     private ZonedDateTime updatedAt;
+    private Boolean isOwner;
 
     private List<CompanyRelationshipDto> relationships;
 }

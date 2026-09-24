@@ -27,4 +27,7 @@ public interface CompanyProfileRepository extends MongoRepository<CompanyProfile
 
     boolean existsByIdentityTaxCode(String taxCode);
     Optional<CompanyProfile> findByIdentityTaxCode(String taxCode);
+
+    Optional<CompanyProfile> findFirstByIsOwnerEnterpriseTrue();
+    boolean existsByIsOwnerEnterpriseTrue();
 }

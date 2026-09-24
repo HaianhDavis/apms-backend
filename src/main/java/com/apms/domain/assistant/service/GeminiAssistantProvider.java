@@ -61,7 +61,7 @@ public class GeminiAssistantProvider implements AssistantProvider {
     public GeminiAssistantProvider(
             ObjectMapper objectMapper,
             GeminiApiKeyManager geminiApiKeyManager,
-            @Value("${app.ai.gemini.model:gemini-3.6-flash}") String geminiModel) {
+            @Value("${app.ai.gemini.model:gemini-3.8-flash}") String geminiModel) {
         this.restClient = RestClient.builder()
                 .requestInterceptor(com.apms.domain.ai.service.provider.GeminiCredentialDiagnostics.interceptor("GeminiAssistantProvider")).build();
         this.objectMapper = objectMapper;

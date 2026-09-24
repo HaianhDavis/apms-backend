@@ -264,7 +264,10 @@ public class StaffCompanyScopeEvaluator {
         if (!isStaff(user)) return null;
 
         Set<String> ids = new LinkedHashSet<>();
-        ids.add(ownerOrganizationService.getOwnerCompanyProfileId());
+        String ownerId = ownerOrganizationService.getOwnerCompanyProfileId();
+        if (ownerId != null) {
+            ids.add(ownerId);
+        }
         List<String> projectTargets = projectRepository.findTargetCompanyProfileIdsByMemberAccountId(user.getId());
         if (projectTargets != null) {
             ids.addAll(projectTargets);
@@ -297,7 +300,8 @@ public class StaffCompanyScopeEvaluator {
             return true;
         }
         return monitoringAssignmentRepository.existsByCompanyProfileIdAndAssignedStaffId(compId, accountId)
-                || (mongoId != null && monitoringAssignmentRepository.existsByCompanyProfileIdAndAssignedStaffId(mongoId, accountId));
+                || (mongoId != null && monitoringAssignmentRepository.existsByCompanyProfileIdAndAssignedStaffId(mongoId, accountId))
+                || (companyIdOrProfileId != null && monitoringAssignmentRepository.existsByCompanyProfileIdAndAssignedStaffId(companyIdOrProfileId, accountId));
     }
 
     private boolean isStaff(UserDetailsImpl user) {

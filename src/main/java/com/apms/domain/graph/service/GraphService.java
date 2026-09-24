@@ -23,8 +23,12 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -48,6 +52,23 @@ public class GraphService {
     // EVENT LISTENER
     // ─────────────────────────────────────────────
 
+    public static String normalizeRelationshipType(String raw) {
+        if (!StringUtils.hasText(raw)) return null;
+        String clean = raw.trim().toUpperCase().replace(" ", "_").replace("-", "_");
+        return switch (clean) {
+            case "PARTNER", "PARTNER_WITH" -> "PARTNER_WITH";
+            case "COMPETITOR", "COMPETITOR_OF" -> "COMPETITOR_OF";
+            case "SUPPLIER", "SUPPLIER_OF" -> "SUPPLIER_OF";
+            case "CUSTOMER", "CUSTOMER_OF" -> "CUSTOMER_OF";
+            case "POTENTIAL_PARTNER", "POTENTIAL_PARTNER_OF" -> "POTENTIAL_PARTNER_OF";
+            case "NONE" -> null;
+            default -> {
+                if (clean.matches("^[A-Z_]+$")) yield clean;
+                yield null;
+            }
+        };
+    }
+
     @EventListener
     @Order(2)
     public void handleCandidateApprovedEvent(CandidateApprovedEvent event) {
@@ -61,11 +82,23 @@ public class GraphService {
                 .orElse(null);
         if (project == null) return;
 
-        // The ProfileService should have run before this.
-        // If they run in unpredictable order, an @Order annotation on listeners is best.
-        // For now, we attempt to find the newly created/updated profile.
+        // Find the newly created or updated profile
         CompanyProfile profile = profileRepository.findByCandidateId(event.getCandidateId())
-                .orElse(null);
+                .orElseGet(() -> {
+                    if (candidate.getLifecycle() != null && StringUtils.hasText(candidate.getLifecycle().getConvertedCompanyProfileId())) {
+                        String convertedId = candidate.getLifecycle().getConvertedCompanyProfileId().trim();
+                        return profileRepository.findById(convertedId)
+                                .or(() -> profileRepository.findByCompanyId(convertedId))
+                                .orElse(null);
+                    }
+                    if (StringUtils.hasText(project.getTargetCompanyProfileId())) {
+                        String targetId = project.getTargetCompanyProfileId().trim();
+                        return profileRepository.findById(targetId)
+                                .or(() -> profileRepository.findByCompanyId(targetId))
+                                .orElse(null);
+                    }
+                    return null;
+                });
 
         if (profile == null) {
             log.error("CompanyProfile not found for candidateId: {}. Ensure ProfileService runs first.", event.getCandidateId());
@@ -77,60 +110,103 @@ public class GraphService {
         // 1. Create or merge CompanyNode for the approved CompanyProfile
         mergeCompanyNode(profile);
 
-        // 2. The relationship is from OwnerCompany to the target company (which is `profile`)
+        // 2. Synchronize canonical relationship from OwnerCompany to target CompanyProfile
         if (finalRelType != null) {
-            // Create relationship: OwnerCompany --[rel]-> TargetCompany (which is `profile.getCompanyId()`)
-            createRelationship(
-                    ownerOrganizationService.getOwnerCompanyId(),
-                    profile.getCompanyId(),
-                    finalRelType.name(),
-                    candidate.getReview() != null ? candidate.getReview().getReviewedBy() : "SYSTEM",
-                    String.valueOf(project.getId()),
-                    candidate.getId(),
-                    event.getConfidenceScore() != null ? event.getConfidenceScore() : 1.0
-            );
+            String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+            String canonicalRel = normalizeRelationshipType(finalRelType.name());
+            String reviewer = candidate.getReview() != null && candidate.getReview().getReviewedBy() != null
+                    ? candidate.getReview().getReviewedBy() : "SYSTEM";
+            if (StringUtils.hasText(ownerCompanyId) && canonicalRel != null) {
+                replaceRelationship(
+                        ownerCompanyId,
+                        profile.getCompanyId(),
+                        canonicalRel,
+                        reviewer
+                );
+            }
         } else {
             log.warn("No finalRelType provided for candidate approval, cannot create relationship.");
         }
     }
 
     public void mergeCompanyNode(CompanyProfile profile) {
-        if (profile == null || !StringUtils.hasText(profile.getCompanyId())) {
+        if (profile == null) {
+            return;
+        }
+        String companyId = StringUtils.hasText(profile.getCompanyId()) ? profile.getCompanyId().trim() : profile.getId();
+        if (!StringUtils.hasText(companyId)) {
             return;
         }
 
-        String name = CompanyProfile.getCanonicalDisplayName(profile, "Unknown");
-        if ("Unknown Company".equals(name) || !StringUtils.hasText(name)) {
+        String name = null;
+        if (profile.getIdentity() != null && StringUtils.hasText(profile.getIdentity().getLegalName())) {
+            name = profile.getIdentity().getLegalName().trim();
+        }
+        if (!StringUtils.hasText(name)) {
             name = "Unknown";
         }
-        name = name.trim();
 
-        String industry = profile.getBusiness() != null && profile.getBusiness().getIndustries() != null && !profile.getBusiness().getIndustries().isEmpty()
-                ? profile.getBusiness().getIndustries().get(0) : "Unknown";
+        List<String> rawIndustries = profile.getBusiness() != null ? profile.getBusiness().getIndustries() : null;
+        List<String> industries = normalizeIndustries(rawIndustries);
+        String legacyIndustry = !industries.isEmpty() ? industries.get(0) : "Unknown";
 
-        mergeCompanyNode(profile.getCompanyId().trim(), name, industry);
+        mergeCompanyNode(companyId.trim(), name, industries, legacyIndustry);
+    }
+
+    public void mergeCompanyNode(String companyId, String name, List<String> industries) {
+        List<String> norm = normalizeIndustries(industries);
+        String legacyIndustry = !norm.isEmpty() ? norm.get(0) : "Unknown";
+        mergeCompanyNode(companyId, name, norm, legacyIndustry);
     }
 
     public void mergeCompanyNode(String companyId, String name, String industry) {
         if (!StringUtils.hasText(companyId)) return;
+        List<String> industries = (StringUtils.hasText(industry) && !"Unknown".equalsIgnoreCase(industry.trim()))
+                ? List.of(industry.trim())
+                : Collections.emptyList();
+        String legacyIndustry = StringUtils.hasText(industry) ? industry.trim() : "Unknown";
+        mergeCompanyNode(companyId, name, industries, legacyIndustry);
+    }
+
+    public void mergeCompanyNode(String companyId, String name, List<String> industries, String legacyIndustry) {
+        if (!StringUtils.hasText(companyId)) return;
         String canonicalName = StringUtils.hasText(name) ? name.trim() : "Unknown";
-        String canonicalIndustry = StringUtils.hasText(industry) ? industry.trim() : "Unknown";
+        List<String> canonicalIndustries = industries != null ? industries : Collections.emptyList();
+        String canonicalLegacyIndustry = StringUtils.hasText(legacyIndustry) ? legacyIndustry.trim() : (!canonicalIndustries.isEmpty() ? canonicalIndustries.get(0) : "Unknown");
 
         String cypher = """
             MERGE (c:Company {companyId: $companyId})
-            ON CREATE SET c.name = $name, c.industry = $industry, c.createdAt = datetime()
-            ON MATCH SET c.name = $name, c.industry = $industry, c.updatedAt = datetime()
+            ON CREATE SET c.name = $name, c.industries = $industries, c.industry = $industry, c.createdAt = datetime()
+            ON MATCH SET c.name = $name, c.industries = $industries, c.industry = $industry, c.updatedAt = datetime()
             """;
 
         neo4jClient.query(cypher)
                 .bindAll(Map.of(
                         "companyId", companyId.trim(),
                         "name", canonicalName,
-                        "industry", canonicalIndustry
+                        "industries", canonicalIndustries,
+                        "industry", canonicalLegacyIndustry
                 ))
                 .run();
 
-        log.info("Merged CompanyNode: companyId={}, name={}", companyId.trim(), canonicalName);
+        log.info("Merged CompanyNode: companyId={}, name={}, industries={}", companyId.trim(), canonicalName, canonicalIndustries);
+    }
+
+    public static List<String> normalizeIndustries(List<String> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> result = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String s : raw) {
+            if (s == null) continue;
+            String trimmed = s.trim();
+            if (trimmed.isEmpty()) continue;
+            if (seen.add(trimmed.toLowerCase(java.util.Locale.ROOT))) {
+                result.add(trimmed);
+            }
+        }
+        return Collections.unmodifiableList(result);
     }
 
     public void createRelationship(String sourceCompanyId, String targetCompanyId, String relType, String confirmedBy, String projectId, String candidateId, double confidenceScore) {
@@ -208,14 +284,78 @@ public class GraphService {
         log.info("Created/Updated relationship ({})-[:{}]->({})", dto.getSourceCompanyId(), dto.getRelationshipType(), dto.getTargetCompanyId());
     }
 
+    public void deleteRelationshipBetween(String sourceCompanyId, String targetCompanyId) {
+        if (!StringUtils.hasText(targetCompanyId)) return;
+
+        String canonicalSourceId = StringUtils.hasText(sourceCompanyId)
+                ? sourceCompanyId.trim()
+                : (ownerOrganizationService != null ? ownerOrganizationService.getOwnerCompanyId() : "");
+
+        if (ownerOrganizationService != null) {
+            ownerOrganizationService.findOwnerCompanyProfile().ifPresent(owner -> {
+                mergeCompanyNode(owner);
+            });
+        }
+
+        List<String> targetIds = new ArrayList<>();
+        targetIds.add(targetCompanyId.trim());
+
+        if (profileRepository != null) {
+            CompanyProfile profile = profileRepository.findByCompanyId(targetCompanyId.trim())
+                    .or(() -> profileRepository.findById(targetCompanyId.trim()))
+                    .orElse(null);
+            if (profile != null) {
+                mergeCompanyNode(profile);
+                if (StringUtils.hasText(profile.getCompanyId()) && !targetIds.contains(profile.getCompanyId().trim())) {
+                    targetIds.add(profile.getCompanyId().trim());
+                }
+                if (StringUtils.hasText(profile.getId()) && !targetIds.contains(profile.getId().trim())) {
+                    targetIds.add(profile.getId().trim());
+                }
+            }
+        }
+
+        String deleteCypher = """
+            MATCH (c1:Company {companyId: $sourceCompanyId})
+            MATCH (c2:Company)
+            WHERE c2.companyId IN $targetIds
+            MATCH (c1)-[r:PARTNER_WITH|COMPETITOR_OF|POTENTIAL_PARTNER_OF|SUPPLIER_OF|CUSTOMER_OF]-(c2)
+            DELETE r
+            """;
+
+        neo4jClient.query(deleteCypher)
+                .bindAll(Map.of(
+                        "sourceCompanyId", canonicalSourceId,
+                        "targetIds", targetIds
+                ))
+                .run();
+
+        log.info("Deleted relationships between source {} and targetIds {}", canonicalSourceId, targetIds);
+    }
+
     public void replaceRelationship(String sourceCompanyId, String targetCompanyId, String newRelType, String confirmedBy) {
-        if (!newRelType.matches("^[A-Z_]+$")) {
-            throw new IllegalArgumentException("Invalid relationship type: " + newRelType);
+        String canonicalRel = normalizeRelationshipType(newRelType);
+        if (canonicalRel == null) {
+            // Relationship is NONE or empty -> remove existing edge
+            deleteRelationshipBetween(sourceCompanyId, targetCompanyId);
+            return;
         }
 
         String canonicalSourceId = StringUtils.hasText(sourceCompanyId)
                 ? sourceCompanyId.trim()
                 : (ownerOrganizationService != null ? ownerOrganizationService.getOwnerCompanyId() : "");
+
+        // If sourceCompanyId was passed as MongoDB document ObjectId, resolve to universal companyId (UUID)
+        if (ownerOrganizationService != null) {
+            Optional<CompanyProfile> ownerOpt = ownerOrganizationService.findOwnerCompanyProfile();
+            if (ownerOpt.isPresent()) {
+                CompanyProfile owner = ownerOpt.get();
+                if (canonicalSourceId.equals(owner.getId()) && StringUtils.hasText(owner.getCompanyId())) {
+                    canonicalSourceId = owner.getCompanyId().trim();
+                }
+                mergeCompanyNode(owner);
+            }
+        }
 
         String canonicalTargetId = targetCompanyId != null ? targetCompanyId.trim() : "";
         List<String> targetIds = new ArrayList<>();
@@ -224,8 +364,8 @@ public class GraphService {
         }
 
         if (profileRepository != null && StringUtils.hasText(targetCompanyId)) {
-            CompanyProfile profile = profileRepository.findByCompanyId(targetCompanyId)
-                    .or(() -> profileRepository.findById(targetCompanyId))
+            CompanyProfile profile = profileRepository.findByCompanyId(targetCompanyId.trim())
+                    .or(() -> profileRepository.findById(targetCompanyId.trim()))
                     .orElse(null);
             if (profile != null) {
                 mergeCompanyNode(profile);
@@ -240,6 +380,12 @@ public class GraphService {
                     targetIds.add(profile.getId().trim());
                 }
             }
+        }
+
+        // Do not create owner -> owner relationship
+        if (canonicalSourceId.equals(canonicalTargetId)) {
+            log.info("Skipping self-relationship for owner company {}", canonicalSourceId);
+            return;
         }
 
         // Delete ONLY supported APMS business relationship edges between this exact pair in either direction
@@ -266,7 +412,7 @@ public class GraphService {
             SET r.confidenceScore = 1.0,
                 r.confirmedBy = $confirmedBy,
                 r.confirmedAt = coalesce(r.confirmedAt, datetime())
-            """, newRelType);
+            """, canonicalRel);
 
         neo4jClient.query(createCypher)
                 .bindAll(Map.of(
@@ -277,7 +423,7 @@ public class GraphService {
                 .run();
 
         log.info("Replaced relationships between owner {} and target {} (targetIds: {}) with type {}",
-                canonicalSourceId, canonicalTargetId, targetIds, newRelType);
+                canonicalSourceId, canonicalTargetId, targetIds, canonicalRel);
     }
 
     public void updateRelationshipMetadata(String sourceCompanyId, String targetCompanyId, String relType, CompanyRelationshipDto metadataDto) {
@@ -338,32 +484,71 @@ public class GraphService {
 
         List<CompanyRelationshipDto> relationships = getOutgoingRelationships(companyId);
 
+        String ownerCompanyId = ownerOrganizationService != null ? ownerOrganizationService.getOwnerCompanyId() : null;
+        boolean isOwner = ownerCompanyId != null && ownerCompanyId.equals(node.getCompanyId());
+
+        List<String> industries = (node.getIndustries() != null && !node.getIndustries().isEmpty())
+                ? node.getIndustries()
+                : (StringUtils.hasText(node.getIndustry()) && !"Unknown".equalsIgnoreCase(node.getIndustry().trim())
+                ? List.of(node.getIndustry().trim())
+                : List.of());
+        String legacyIndustry = StringUtils.hasText(node.getIndustry())
+                ? node.getIndustry().trim()
+                : (!industries.isEmpty() ? industries.get(0) : "Unknown");
+
         return GraphCompanyDto.builder()
                 .companyId(node.getCompanyId())
                 .name(node.getName())
-                .industry(node.getIndustry())
+                .industry(legacyIndustry)
+                .industries(industries)
                 .createdAt(node.getCreatedAt())
                 .updatedAt(node.getUpdatedAt())
+                .isOwner(isOwner)
                 .relationships(relationships)
                 .build();
     }
 
     public List<GraphCompanyDto> getNetwork() {
+        String ownerCompanyId = ownerOrganizationService != null ? ownerOrganizationService.getOwnerCompanyId() : null;
+
         return companyNodeRepository.findAllNodes().stream()
                 .filter(node -> isVisible(node.getCompanyId()))
-                .map(node -> GraphCompanyDto.builder()
-                        .companyId(node.getCompanyId())
-                        .name(node.getName())
-                        .industry(node.getIndustry())
-                        .createdAt(node.getCreatedAt())
-                        .updatedAt(node.getUpdatedAt())
-                        .build())
+                .map(node -> {
+                    List<String> industries = (node.getIndustries() != null && !node.getIndustries().isEmpty())
+                            ? node.getIndustries()
+                            : (StringUtils.hasText(node.getIndustry()) && !"Unknown".equalsIgnoreCase(node.getIndustry().trim())
+                            ? List.of(node.getIndustry().trim())
+                            : List.of());
+                    String legacyIndustry = StringUtils.hasText(node.getIndustry())
+                            ? node.getIndustry().trim()
+                            : (!industries.isEmpty() ? industries.get(0) : "Unknown");
+
+                    return GraphCompanyDto.builder()
+                            .companyId(node.getCompanyId())
+                            .name(node.getName())
+                            .industry(legacyIndustry)
+                            .industries(industries)
+                            .createdAt(node.getCreatedAt())
+                            .updatedAt(node.getUpdatedAt())
+                            .build();
+                })
+                .map(node -> {
+                    boolean isOwner = ownerCompanyId != null && ownerCompanyId.equals(node.getCompanyId());
+                    return GraphCompanyDto.builder()
+                            .companyId(node.getCompanyId())
+                            .name(node.getName())
+                            .industry(node.getIndustry())
+                            .createdAt(node.getCreatedAt())
+                            .updatedAt(node.getUpdatedAt())
+                            .isOwner(isOwner)
+                            .build();
+                })
                 .toList();
     }
 
     public List<CompanyRelationshipDto> getPairRelationships(String companyIdA, String companyIdB) {
         if (!isVisible(companyIdA) || !isVisible(companyIdB)) return List.of();
-        
+
         String cypher = """
             MATCH (c1:Company {companyId: $companyIdA})-[r]-(c2:Company {companyId: $companyIdB})
             RETURN type(r) as relType, startNode(r).companyId as sourceCompanyId, endNode(r).companyId as targetCompanyId,
@@ -392,18 +577,18 @@ public class GraphService {
                     String endDateStr = (String) record.get("endDate");
 
                     return CompanyRelationshipDto.builder()
-                        .sourceCompanyId((String) record.get("sourceCompanyId"))
-                        .targetCompanyId((String) record.get("targetCompanyId"))
-                        .relationshipType((String) record.get("relType"))
-                        .confidenceScore((Double) record.get("confidenceScore"))
-                        .confirmedBy((String) record.get("confirmedBy"))
-                        .projectId((String) record.get("projectId"))
-                        .candidateId((String) record.get("candidateId"))
-                        .startDate(StringUtils.hasText(startDateStr) ? LocalDate.parse(startDateStr) : null)
-                        .endDate(StringUtils.hasText(endDateStr) ? LocalDate.parse(endDateStr) : null)
-                        .status((String) record.get("status"))
-                        .metadata(parsedMetadata)
-                        .build();
+                            .sourceCompanyId((String) record.get("sourceCompanyId"))
+                            .targetCompanyId((String) record.get("targetCompanyId"))
+                            .relationshipType((String) record.get("relType"))
+                            .confidenceScore((Double) record.get("confidenceScore"))
+                            .confirmedBy((String) record.get("confirmedBy"))
+                            .projectId((String) record.get("projectId"))
+                            .candidateId((String) record.get("candidateId"))
+                            .startDate(StringUtils.hasText(startDateStr) ? LocalDate.parse(startDateStr) : null)
+                            .endDate(StringUtils.hasText(endDateStr) ? LocalDate.parse(endDateStr) : null)
+                            .status((String) record.get("status"))
+                            .metadata(parsedMetadata)
+                            .build();
                 })
                 .toList();
     }
@@ -415,6 +600,8 @@ public class GraphService {
 
         String cypher = String.format("MATCH (c:Company)-[:%s]->() RETURN DISTINCT c", relType);
 
+        String ownerCompanyId = ownerOrganizationService != null ? ownerOrganizationService.getOwnerCompanyId() : null;
+
         return neo4jClient.query(cypher)
                 .fetchAs(CompanyNode.class)
                 .mappedBy((typeSystem, record) -> {
@@ -423,14 +610,40 @@ public class GraphService {
                     c.setCompanyId(node.get("companyId").asString());
                     c.setName(node.get("name").asString("Unknown"));
                     c.setIndustry(node.get("industry").asString("Unknown"));
+                    if (node.containsKey("industries") && !node.get("industries").isNull()) {
+                        try {
+                            c.setIndustries(node.get("industries").asList(org.neo4j.driver.Value::asString));
+                        } catch (Exception ignored) {}
+                    }
                     return c;
                 })
                 .all().stream()
-                .map(node -> GraphCompanyDto.builder()
-                        .companyId(node.getCompanyId())
-                        .name(node.getName())
-                        .industry(node.getIndustry())
-                        .build())
+                .map(node -> {
+                    List<String> industries = (node.getIndustries() != null && !node.getIndustries().isEmpty())
+                            ? node.getIndustries()
+                            : (StringUtils.hasText(node.getIndustry()) && !"Unknown".equalsIgnoreCase(node.getIndustry().trim())
+                            ? List.of(node.getIndustry().trim())
+                            : List.of());
+                    String legacyIndustry = StringUtils.hasText(node.getIndustry())
+                            ? node.getIndustry().trim()
+                            : (!industries.isEmpty() ? industries.get(0) : "Unknown");
+
+                    return GraphCompanyDto.builder()
+                            .companyId(node.getCompanyId())
+                            .name(node.getName())
+                            .industry(legacyIndustry)
+                            .industries(industries)
+                            .build();
+                })
+                .map(node -> {
+                    boolean isOwner = ownerCompanyId != null && ownerCompanyId.equals(node.getCompanyId());
+                    return GraphCompanyDto.builder()
+                            .companyId(node.getCompanyId())
+                            .name(node.getName())
+                            .industry(node.getIndustry())
+                            .isOwner(isOwner)
+                            .build();
+                })
                 .filter(dto -> isVisible(dto.getCompanyId()))
                 .toList();
     }
@@ -464,18 +677,18 @@ public class GraphService {
                     String endDateStr = (String) record.get("endDate");
 
                     return CompanyRelationshipDto.builder()
-                        .sourceCompanyId(companyId)
-                        .targetCompanyId((String) record.get("targetCompanyId"))
-                        .relationshipType((String) record.get("relType"))
-                        .confidenceScore((Double) record.get("confidenceScore"))
-                        .confirmedBy((String) record.get("confirmedBy"))
-                        .projectId((String) record.get("projectId"))
-                        .candidateId((String) record.get("candidateId"))
-                        .startDate(StringUtils.hasText(startDateStr) ? LocalDate.parse(startDateStr) : null)
-                        .endDate(StringUtils.hasText(endDateStr) ? LocalDate.parse(endDateStr) : null)
-                        .status((String) record.get("status"))
-                        .metadata(parsedMetadata)
-                        .build();
+                            .sourceCompanyId(companyId)
+                            .targetCompanyId((String) record.get("targetCompanyId"))
+                            .relationshipType((String) record.get("relType"))
+                            .confidenceScore((Double) record.get("confidenceScore"))
+                            .confirmedBy((String) record.get("confirmedBy"))
+                            .projectId((String) record.get("projectId"))
+                            .candidateId((String) record.get("candidateId"))
+                            .startDate(StringUtils.hasText(startDateStr) ? LocalDate.parse(startDateStr) : null)
+                            .endDate(StringUtils.hasText(endDateStr) ? LocalDate.parse(endDateStr) : null)
+                            .status((String) record.get("status"))
+                            .metadata(parsedMetadata)
+                            .build();
                 })
                 .filter(rel -> isVisible(rel.getTargetCompanyId()))
                 .toList();
@@ -492,7 +705,7 @@ public class GraphService {
                 .mappedBy((typeSystem, record) -> record.get("relType").asString())
                 .all()
                 .stream().toList();
-        
+
         if (types.isEmpty()) {
             throw new com.apms.common.exception.BusinessConflictException("No relationship found between " + sourceCompanyId + " and " + targetCompanyId);
         }

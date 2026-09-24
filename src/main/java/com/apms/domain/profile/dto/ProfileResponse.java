@@ -50,4 +50,7 @@ public class ProfileResponse {
     private Boolean canAccessRelationshipCloseness;
     private Boolean canTransferManagement;
     private Boolean isCurrentResponsibleManager;
+    private Boolean canViewSensitiveResearch;
+    private Boolean canViewFinancials;
+    private Boolean canViewContracts;
 }

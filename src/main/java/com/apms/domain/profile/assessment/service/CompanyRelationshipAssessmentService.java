@@ -1821,7 +1821,7 @@ public class CompanyRelationshipAssessmentService {
             if (target == null) return false;
             boolean isResponsible = target.getResponsibleManagerId() != null
                     && target.getResponsibleManagerId().equals(user.getId());
-            return isResponsible || accessEvaluator.isInProjectScope(target, user.getId(), List.of(ProjectStatus.DRAFT, ProjectStatus.ACTIVE));
+            return isResponsible;
         }
         if (hasRole(user, SystemRole.BUSINESS_OWNER)) {
             // Owner can create adjustment ONLY when at least one finalized assessment exists

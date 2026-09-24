@@ -35,8 +35,8 @@ public class OwnerCompanyProfileController {
     @GetMapping("/company-profile")
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<ProfileResponse>> getOwnerCompanyProfile() {
-        String ownerId = ownerOrganizationService.getOwnerCompanyId();
-        ProfileResponse response = profileService.getApprovedProfileResponse(ownerId);
+        com.apms.domain.profile.CompanyProfile ownerProfile = ownerOrganizationService.resolveApprovedOwnerProfile();
+        ProfileResponse response = profileService.toResponse(ownerProfile);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

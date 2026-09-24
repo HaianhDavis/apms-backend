@@ -68,7 +68,7 @@ public class TaskExtractionOrchestrator {
     @Value("${app.storage.upload-dir:uploads/}")
     private String uploadDir;
 
-    @Value("${app.ai.gemini.model:gemini-3.6-flash}")
+    @Value("${app.ai.gemini.model:gemini-3.8-flash}")
     private String geminiModel;
 
     @Transactional
