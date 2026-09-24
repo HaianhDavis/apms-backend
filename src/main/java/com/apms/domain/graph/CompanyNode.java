@@ -17,6 +17,8 @@ public class CompanyNode {
 
     private String industry;
 
+    private java.util.List<String> industries;
+
     private ZonedDateTime createdAt;
 
     private ZonedDateTime updatedAt;

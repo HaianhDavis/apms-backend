@@ -151,7 +151,7 @@ public class ProjectService {
 
         if (request.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY) {
             if (StringUtils.hasText(request.getTargetCompanyTaxCode())) {
-                com.apms.domain.project.dto.OpenProjectCheckResponse openCheck = checkOpenProjectForCompany(
+                OpenProjectCheckResponse openCheck = checkOpenProjectForCompany(
                         null,
                         request.getTargetCompanyTaxCode(),
                         null
@@ -167,7 +167,7 @@ public class ProjectService {
                             details
                     );
                 }
-                com.apms.domain.project.dto.DuplicateTaxCodeCheckResponse duplicateCheck = checkDuplicateTaxCode(request.getTargetCompanyTaxCode());
+                DuplicateTaxCodeCheckResponse duplicateCheck = checkDuplicateTaxCode(request.getTargetCompanyTaxCode());
                 if (duplicateCheck.isExists()) {
                     if (duplicateCheck.isExistingOfficialCompany() || "COMPANY_PROFILE".equals(duplicateCheck.getMatchType())) {
                         throw new BusinessValidationException("An official company already exists with this tax code. Please select the 'Update existing company' project type.");
@@ -212,7 +212,7 @@ public class ProjectService {
             }
         }
 
-        com.apms.common.enums.RelationshipType originalRel = null;
+        RelationshipType originalRel = null;
         if (request.getProjectType() == ProjectType.UPDATE_EXISTING_COMPANY && org.springframework.util.StringUtils.hasText(createTargetProfileId)) {
             originalRel = resolveCanonicalRelationship(createTargetProfileId);
         }
@@ -235,7 +235,7 @@ public class ProjectService {
         project = projectRepository.save(project);
         
         if (project.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY && projectTargetProfileResolver != null) {
-            com.apms.domain.profile.CompanyProfile shell = projectTargetProfileResolver.getOrCreateProjectProfileShell(project, creatorAccountId);
+            CompanyProfile shell = projectTargetProfileResolver.getOrCreateProjectProfileShell(project, creatorAccountId);
             if (shell != null && !shell.getCompanyId().equals(project.getTargetCompanyProfileId())) {
                 project.setTargetCompanyProfileId(shell.getCompanyId());
                 project = projectRepository.save(project);
@@ -278,7 +278,7 @@ public class ProjectService {
     @Transactional
     public ProjectResponse getProjectById(Long id) {
         Project project = findProjectOrThrow(id);
-        if (project.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY && !org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId()) && projectTargetProfileResolver != null) {
+        if (project.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY && !StringUtils.hasText(project.getTargetCompanyProfileId()) && projectTargetProfileResolver != null) {
             com.apms.domain.profile.CompanyProfile shell = projectTargetProfileResolver.getOrCreateProjectProfileShell(project, project.getCreatedById());
             if (shell != null && !shell.getCompanyId().equals(project.getTargetCompanyProfileId())) {
                 project.setTargetCompanyProfileId(shell.getCompanyId());
@@ -286,10 +286,10 @@ public class ProjectService {
             }
         }
         final String lookupProfileId = project.getTargetCompanyProfileId();
-        if (!org.springframework.util.StringUtils.hasText(project.getTargetCompanyTaxCode()) && org.springframework.util.StringUtils.hasText(lookupProfileId)) {
-            java.util.Optional<com.apms.domain.profile.CompanyProfile> profileOpt = companyProfileRepository.findByCompanyId(lookupProfileId)
+        if (!StringUtils.hasText(project.getTargetCompanyTaxCode()) && StringUtils.hasText(lookupProfileId)) {
+            Optional<CompanyProfile> profileOpt = companyProfileRepository.findByCompanyId(lookupProfileId)
                     .or(() -> companyProfileRepository.findById(lookupProfileId));
-            if (profileOpt.isPresent() && profileOpt.get().getIdentity() != null && org.springframework.util.StringUtils.hasText(profileOpt.get().getIdentity().getTaxCode())) {
+            if (profileOpt.isPresent() && profileOpt.get().getIdentity() != null && StringUtils.hasText(profileOpt.get().getIdentity().getTaxCode())) {
                 project.setTargetCompanyTaxCode(profileOpt.get().getIdentity().getTaxCode());
                 project = projectRepository.save(project);
             }
@@ -320,7 +320,7 @@ public class ProjectService {
         }
 
         List<Long> projectIds = page.getContent().stream().map(Project::getId).collect(Collectors.toList());
-        Map<Long, ProjectTaskRepository.ProjectTaskStats> statsMap = projectIds.isEmpty() ? java.util.Collections.emptyMap() :
+        Map<Long, ProjectTaskRepository.ProjectTaskStats> statsMap = projectIds.isEmpty() ? Collections.emptyMap() :
                 projectTaskRepository.getProjectTaskStatsIn(projectIds, TaskStatus.DONE, TaskStatus.CANCELLED)
                         .stream().collect(Collectors.toMap(ProjectTaskRepository.ProjectTaskStats::getProjectId, s -> s));
 
@@ -438,7 +438,7 @@ public class ProjectService {
                 }
             }
             
-            if (org.springframework.util.StringUtils.hasText(project.getTargetCompanyProfileId())) {
+            if (StringUtils.hasText(project.getTargetCompanyProfileId())) {
                 syncTargetIdentity(project.getTargetCompanyProfileId(), project.getTargetCompanyTaxCode());
             }
 

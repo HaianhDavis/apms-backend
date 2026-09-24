@@ -3,6 +3,7 @@ package com.apms.domain.profile.service;
 import com.apms.common.enums.ProjectStatus;
 import com.apms.common.enums.ProjectType;
 import com.apms.common.event.CandidateApprovedEvent;
+import com.apms.common.exception.BusinessConflictException;
 import com.apms.common.exception.BusinessValidationException;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.candidate.CompanyCandidate;
@@ -31,6 +32,7 @@ import com.apms.domain.crawler.service.TrackedCompanyCache;
 import com.apms.domain.crawler.domain.TrackedCompany;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.apms.domain.graph.service.GraphService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -44,23 +46,17 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.neo4j.core.Neo4jClient;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Optional;
-import java.util.Comparator;
+import java.util.*;
+
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Objects;
-import java.util.Set;
-import java.util.UUID;
 
 @Slf4j
 @Service
@@ -72,6 +68,7 @@ public class ProfileService {
     private final ProjectRepository projectRepository;
     private final MongoTemplate mongoTemplate;
     private final Neo4jClient neo4jClient;
+    private final GraphService graphService;
     private final AuditLogService auditLogService;
     private final OwnerOrganizationService ownerOrganizationService;
     private final TrackedCompanyRepository trackedCompanyRepository;
@@ -680,11 +677,6 @@ public class ProfileService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ProfileResponse> searchProfilesByName(String name, boolean excludeOwner, Pageable pageable) {
-        return searchProfilesByName(name, excludeOwner, null, null, null, pageable);
-    }
-
-    @Transactional(readOnly = true)
     public Page<ProfileResponse> searchBusinessFacingProfilesByName(String name, boolean excludeOwner, Pageable pageable) {
         return searchProfilesByName(name, excludeOwner, null, null, com.apms.common.enums.ProfileVisibility.PUBLISHED, pageable);
     }
@@ -769,18 +761,6 @@ public class ProfileService {
     // ─────────────────────────────────────────────
 
     @Transactional
-    public ProfileResponse updateProfile(String companyId, UpdateCompanyProfileRequest request) {
-        UserDetailsImpl currentUser = null;
-        try {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            if (auth != null && auth.getPrincipal() instanceof UserDetailsImpl) {
-                currentUser = (UserDetailsImpl) auth.getPrincipal();
-            }
-        } catch (Exception ignored) {}
-        return updateProfile(companyId, request, currentUser);
-    }
-
-    @Transactional
     public ProfileResponse updateProfile(String companyId, UpdateCompanyProfileRequest request, UserDetailsImpl currentUser) {
         CompanyProfile profile = profileRepository.findByCompanyId(companyId)
                 .or(() -> profileRepository.findById(companyId))
@@ -794,15 +774,15 @@ public class ProfileService {
             boolean isAdmin = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_SYSTEM_ADMIN"));
             boolean isManager = currentUser.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_BUSINESS_DEVELOPMENT_MANAGER"));
             if (!isAdmin && !isManager) {
-                throw new org.springframework.security.access.AccessDeniedException("You are not responsible for this company profile.");
+                throw new AccessDeniedException("You are not responsible for this company profile.");
             }
             if (isManager && !isAdmin) {
                 if (profile.getResponsibleManagerId() == null || !profile.getResponsibleManagerId().equals(currentUser.getId())) {
-                    throw new org.springframework.security.access.AccessDeniedException("You are not responsible for this company profile.");
+                    throw new AccessDeniedException("You are not responsible for this company profile.");
                 }
             }
         } else {
-            throw new org.springframework.security.access.AccessDeniedException("You are not responsible for this company profile.");
+            throw new AccessDeniedException("You are not responsible for this company profile.");
         }
 
         // Verification status (APPROVED vs UNVERIFIED) does not block authorized Manager direct profile editing
@@ -812,10 +792,12 @@ public class ProfileService {
         if (request.getExpectedMajorVersion() == null || request.getExpectedRevision() == null
                 || request.getExpectedMajorVersion() != currentVersion.majorVersion()
                 || request.getExpectedRevision() != currentVersion.revision()) {
-            throw new com.apms.common.exception.BusinessConflictException("The company profile has changed since you opened it. Refresh before saving.");
+            throw new BusinessConflictException("The company profile has changed since you opened it. Refresh before saving.");
         }
 
-        java.util.Map<String, Object> beforeSnapshot = versionService.createSnapshotMap(profile);
+        // Trước khi thay đổi dữ liệu, hệ thống tạo: beforeSnapshot và cố convert thành: originalProfile
+        //Mục đích chính là để sau này: so sánh before / after và rollback nếu tạo Version History thất bại
+        Map<String, Object> beforeSnapshot = versionService.createSnapshotMap(profile);
         CompanyProfile originalProfile = null;
         if (objectMapper != null && beforeSnapshot != null) {
             try {
@@ -1010,6 +992,37 @@ public class ProfileService {
             return toResponse(profile);
         }
 
+        boolean legalNameChanged = changedFieldPaths.contains("identity.legalName");
+        boolean taxCodeChanged = changedFieldPaths.contains("identity.taxCode");
+
+        List<Project> activeResearchProjects = (legalNameChanged || taxCodeChanged)
+                ? findActiveNewCompanyResearchProjects(profile)
+                : Collections.emptyList();
+
+        // Validate changed tax code before any persistence
+        if (taxCodeChanged) {
+            String newTaxCode = profile.getIdentity() != null ? profile.getIdentity().getTaxCode() : null;
+            validateTaxCodeChange(profile, newTaxCode, activeResearchProjects);
+        }
+
+        // Prepare linked active research project synchronization
+        boolean shouldSyncProjects = !activeResearchProjects.isEmpty() && (legalNameChanged || taxCodeChanged);
+        String newLegalName = profile.getIdentity() != null ? profile.getIdentity().getLegalName() : null;
+        String newTaxCode = profile.getIdentity() != null ? profile.getIdentity().getTaxCode() : null;
+
+        List<ProjectIdentityBackup> projectBackups = new ArrayList<>();
+        if (shouldSyncProjects) {
+            for (Project project : activeResearchProjects) {
+                projectBackups.add(new ProjectIdentityBackup(project, project.getTargetCompanyName(), project.getTargetCompanyTaxCode()));
+                if (legalNameChanged && StringUtils.hasText(newLegalName)) {
+                    project.setTargetCompanyName(newLegalName);
+                }
+                if (taxCodeChanged) {
+                    project.setTargetCompanyTaxCode(newTaxCode);
+                }
+            }
+        }
+
         profile.incrementMinorVersion();
         if (profile.getMetadata() == null) {
             profile.setMetadata(new CompanyProfile.Metadata());
@@ -1018,6 +1031,62 @@ public class ProfileService {
         profile.getMetadata().setLastModifiedBy(currentUser != null ? String.valueOf(currentUser.getId()) : "SYSTEM");
 
         profileRepository.save(profile);
+
+        if (shouldSyncProjects) {
+            try {
+                projectRepository.saveAll(activeResearchProjects);
+            } catch (Exception ex) {
+                log.error("Failed to synchronize linked project target identity for company {}: {}", profile.getId(), ex.getMessage(), ex);
+                if (originalProfile != null) {
+                    try {
+                        profileRepository.save(originalProfile);
+                        log.info("Successfully rolled back profile {} after SQL project sync failure", profile.getId());
+                    } catch (Exception mongoEx) {
+                        log.error("CRITICAL: Failed to rollback profile {} after SQL sync failure: {}", profile.getId(), mongoEx.getMessage(), mongoEx);
+                    }
+                }
+                for (ProjectIdentityBackup backup : projectBackups) {
+                    backup.project().setTargetCompanyName(backup.targetCompanyName());
+                    backup.project().setTargetCompanyTaxCode(backup.targetCompanyTaxCode());
+                }
+                throw ex;
+            }
+        }
+
+        boolean neo4jUpdated = false;
+        String canonicalCompanyId = StringUtils.hasText(profile.getCompanyId()) ? profile.getCompanyId().trim() : profile.getId();
+        boolean industriesChanged = changedFieldPaths.contains("business.industries");
+        boolean shouldSyncNeo4j = (legalNameChanged || industriesChanged) && StringUtils.hasText(canonicalCompanyId) && graphService != null;
+
+        if (shouldSyncNeo4j) {
+            try {
+                graphService.mergeCompanyNode(profile);
+                neo4jUpdated = true;
+            } catch (Exception ex) {
+                log.error("Failed to synchronize Neo4j company node for company {}: {}", canonicalCompanyId, ex.getMessage(), ex);
+                if (originalProfile != null) {
+                    try {
+                        profileRepository.save(originalProfile);
+                        log.info("Successfully rolled back profile {} after Neo4j sync failure", profile.getId());
+                    } catch (Exception mongoEx) {
+                        log.error("CRITICAL: Failed to rollback profile {} after Neo4j sync failure: {}", profile.getId(), mongoEx.getMessage(), mongoEx);
+                    }
+                }
+                if (shouldSyncProjects) {
+                    try {
+                        for (ProjectIdentityBackup backup : projectBackups) {
+                            backup.project().setTargetCompanyName(backup.targetCompanyName());
+                            backup.project().setTargetCompanyTaxCode(backup.targetCompanyTaxCode());
+                        }
+                        projectRepository.saveAll(activeResearchProjects);
+                        log.info("Successfully rolled back SQL project target identity after Neo4j sync failure");
+                    } catch (Exception sqlEx) {
+                        log.error("CRITICAL: Failed to rollback SQL projects after Neo4j sync failure: {}", sqlEx.getMessage(), sqlEx);
+                    }
+                }
+                throw ex;
+            }
+        }
 
         CompanyProfileVersion savedVersion = null;
         try {
@@ -1045,17 +1114,41 @@ public class ProfileService {
                     log.error("CRITICAL: Failed to rollback profile {} after version creation failure: {}", profile.getId(), rollbackEx.getMessage(), rollbackEx);
                 }
             }
+            if (shouldSyncProjects) {
+                try {
+                    for (ProjectIdentityBackup backup : projectBackups) {
+                        backup.project().setTargetCompanyName(backup.targetCompanyName());
+                        backup.project().setTargetCompanyTaxCode(backup.targetCompanyTaxCode());
+                    }
+                    projectRepository.saveAll(activeResearchProjects);
+                    log.info("Successfully rolled back linked project target identity after version creation failure");
+                } catch (Exception sqlRollbackEx) {
+                    log.error("CRITICAL: Failed to rollback SQL project target identity after version creation failure: {}", sqlRollbackEx.getMessage(), sqlRollbackEx);
+                }
+            }
+            if (neo4jUpdated && graphService != null && originalProfile != null) {
+                try {
+                    graphService.mergeCompanyNode(originalProfile);
+                    log.info("Successfully rolled back Neo4j company node after version creation failure");
+                } catch (Exception neoRollbackEx) {
+                    log.error("CRITICAL: Failed to rollback Neo4j company node after version creation failure: {}", neoRollbackEx.getMessage(), neoRollbackEx);
+                }
+            }
             throw ex;
         }
 
         if (currentUser != null) {
             try {
+                String auditDetail = "Profile updated by Manager (" + profile.getVersionLabel() + ", " + changedFieldPaths.size() + " fields changed)";
+                if (shouldSyncProjects) {
+                    auditDetail += " [synchronized target identity to linked active research project(s)]";
+                }
                 auditLogService.log(
                         currentUser.getId(),
                         AuditAction.COMPANY_PROFILE_UPDATED,
                         "CompanyProfile",
                         companyId,
-                        "Profile updated by Manager (" + profile.getVersionLabel() + ", " + changedFieldPaths.size() + " fields changed)"
+                        auditDetail
                 );
             } catch (Exception e) {
                 log.warn("Failed to write audit log for manager profile update on company {}: {}", companyId, e.getMessage());
@@ -1068,6 +1161,80 @@ public class ProfileService {
         }
 
         return toResponse(profile);
+    }
+
+    private record ProjectIdentityBackup(Project project, String targetCompanyName, String targetCompanyTaxCode) {}
+
+    private List<Project> findActiveNewCompanyResearchProjects(CompanyProfile profile) {
+        if (profile == null) {
+            return Collections.emptyList();
+        }
+        String canonicalProfileId = StringUtils.hasText(profile.getCompanyId())
+                ? profile.getCompanyId().trim()
+                : (profile.getId() != null ? profile.getId().trim() : null);
+
+        if (!StringUtils.hasText(canonicalProfileId)) {
+            return Collections.emptyList();
+        }
+
+        List<Project> linkedProjects = projectRepository.findByTargetCompanyProfileId(canonicalProfileId);
+        if (linkedProjects == null || linkedProjects.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return linkedProjects.stream()
+                .filter(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)
+                .filter(p -> p.getStatus() == ProjectStatus.DRAFT || p.getStatus() == ProjectStatus.ACTIVE)
+                .collect(java.util.stream.Collectors.toList());
+    }
+
+    private void validateTaxCodeChange(CompanyProfile currentProfile, String newTaxCode, List<Project> linkedActiveProjects) {
+        if (!StringUtils.hasText(newTaxCode)) {
+            return;
+        }
+        String normTax = newTaxCode.replaceAll("[\\s\\-]", "").trim();
+        if (normTax.isEmpty()) {
+            return;
+        }
+
+        // 1. Check if another canonical CompanyProfile already uses this tax code
+        Optional<CompanyProfile> existingProfileOpt = profileRepository.findByIdentityTaxCode(normTax)
+                .filter(p -> !Boolean.TRUE.equals(p.getIsDeleted()));
+
+        if (existingProfileOpt.isPresent()) {
+            CompanyProfile existing = existingProfileOpt.get();
+            boolean isSameProfile = (currentProfile.getId() != null && currentProfile.getId().equals(existing.getId()))
+                    || (StringUtils.hasText(currentProfile.getCompanyId()) && currentProfile.getCompanyId().equals(existing.getCompanyId()));
+            if (!isSameProfile) {
+                if (companyProfileOfficialEvaluator.isOfficial(existing)) {
+                    throw new BusinessValidationException("An official company already exists with this tax code. Please select the 'Update existing company' project type.");
+                } else {
+                    throw new BusinessValidationException("Tax code is already registered to another company profile.");
+                }
+            }
+        }
+
+        // 2. Check if another open research project already uses this tax code
+        List<Project> openProjects = projectRepository.findOpenProjectsByTargetCompanyTaxCode(normTax);
+        if (openProjects != null && !openProjects.isEmpty()) {
+            Set<Long> linkedProjectIds = linkedActiveProjects != null
+                    ? linkedActiveProjects.stream().map(Project::getId).filter(Objects::nonNull).collect(java.util.stream.Collectors.toSet())
+                    : Collections.emptySet();
+
+            for (Project openProj : openProjects) {
+                if (openProj.getId() != null && !linkedProjectIds.contains(openProj.getId())) {
+                    Map<String, Object> details = new LinkedHashMap<>();
+                    details.put("conflictingProjectId", openProj.getId());
+                    if (openProj.getProjectName() != null) details.put("conflictingProjectName", openProj.getProjectName());
+                    if (openProj.getStatus() != null) details.put("conflictingProjectStatus", openProj.getStatus());
+                    throw new BusinessValidationException(
+                            "COMPANY_HAS_OPEN_PROJECT",
+                            "A research project already exists for this tax code. Complete or close the existing project before creating another one.",
+                            details
+                    );
+                }
+            }
+        }
     }
 
     private Object extractValueByPath(java.util.Map<String, Object> map, String path) {

@@ -1,15 +1,15 @@
 package com.apms.domain.project.controller;
 
+import com.apms.common.response.ApiResponse;
 import com.apms.common.response.PageResponse;
-import com.apms.domain.project.dto.CreateProjectTaskSubmissionRequest;
-import com.apms.domain.project.dto.ProjectTaskSubmissionResponse;
-import com.apms.domain.project.dto.ReviewTaskSubmissionRequest;
+import com.apms.domain.project.dto.*;
 import com.apms.domain.project.service.ProjectTaskSubmissionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -39,7 +39,7 @@ public class ProjectTaskSubmissionController {
             @PathVariable Long taskId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size) {
-        Pageable pageable = PageRequest.of(page, size, org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt"));
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         Page<ProjectTaskSubmissionResponse> pageResult = submissionService.getSubmissions(projectId, taskId, pageable);
 
         PageResponse<ProjectTaskSubmissionResponse> response = new PageResponse<>(
@@ -78,7 +78,7 @@ public class ProjectTaskSubmissionController {
             @PathVariable Long projectId,
             @PathVariable Long taskId,
             @PathVariable Long submissionId,
-            @Valid @RequestBody com.apms.domain.project.dto.FieldReviewRequest request) {
+            @Valid @RequestBody FieldReviewRequest request) {
         submissionService.reviewFields(projectId, taskId, submissionId, request);
         return ResponseEntity.ok().build();
     }
@@ -90,7 +90,7 @@ public class ProjectTaskSubmissionController {
             @PathVariable Long taskId,
             @PathVariable Long submissionId,
             @PathVariable String fieldPath,
-            @Valid @RequestBody com.apms.domain.project.dto.FieldReopenRequest request) {
+            @Valid @RequestBody FieldReopenRequest request) {
         submissionService.reopenField(projectId, taskId, submissionId, fieldPath, request);
         return ResponseEntity.ok().build();
     }
@@ -102,7 +102,7 @@ public class ProjectTaskSubmissionController {
             @PathVariable Long taskId,
             @PathVariable Long submissionId) {
         submissionService.cancelSubmission(projectId, taskId, submissionId);
-        return ResponseEntity.ok(com.apms.common.response.ApiResponse.success(null, "Submission cancelled successfully"));
+        return ResponseEntity.ok(ApiResponse.success(null, "Submission cancelled successfully"));
     }
 
     @PostMapping("/cancel")
@@ -111,6 +111,6 @@ public class ProjectTaskSubmissionController {
             @PathVariable Long projectId,
             @PathVariable Long taskId) {
         submissionService.cancelSubmission(projectId, taskId, null);
-        return ResponseEntity.ok(com.apms.common.response.ApiResponse.success(null, "Submission cancelled successfully"));
+        return ResponseEntity.ok(ApiResponse.success(null, "Submission cancelled successfully"));
     }
 }

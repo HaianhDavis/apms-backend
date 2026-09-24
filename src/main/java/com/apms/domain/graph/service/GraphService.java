@@ -23,8 +23,11 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -95,42 +98,83 @@ public class GraphService {
     }
 
     public void mergeCompanyNode(CompanyProfile profile) {
-        if (profile == null || !StringUtils.hasText(profile.getCompanyId())) {
+        if (profile == null) {
+            return;
+        }
+        String companyId = StringUtils.hasText(profile.getCompanyId()) ? profile.getCompanyId().trim() : profile.getId();
+        if (!StringUtils.hasText(companyId)) {
             return;
         }
 
-        String name = CompanyProfile.getCanonicalDisplayName(profile, "Unknown");
-        if ("Unknown Company".equals(name) || !StringUtils.hasText(name)) {
+        String name = null;
+        if (profile.getIdentity() != null && StringUtils.hasText(profile.getIdentity().getLegalName())) {
+            name = profile.getIdentity().getLegalName().trim();
+        }
+        if (!StringUtils.hasText(name)) {
             name = "Unknown";
         }
-        name = name.trim();
 
-        String industry = profile.getBusiness() != null && profile.getBusiness().getIndustries() != null && !profile.getBusiness().getIndustries().isEmpty()
-                ? profile.getBusiness().getIndustries().get(0) : "Unknown";
+        List<String> rawIndustries = profile.getBusiness() != null ? profile.getBusiness().getIndustries() : null;
+        List<String> industries = normalizeIndustries(rawIndustries);
+        String legacyIndustry = !industries.isEmpty() ? industries.get(0) : "Unknown";
 
-        mergeCompanyNode(profile.getCompanyId().trim(), name, industry);
+        mergeCompanyNode(companyId.trim(), name, industries, legacyIndustry);
+    }
+
+    public void mergeCompanyNode(String companyId, String name, List<String> industries) {
+        List<String> norm = normalizeIndustries(industries);
+        String legacyIndustry = !norm.isEmpty() ? norm.get(0) : "Unknown";
+        mergeCompanyNode(companyId, name, norm, legacyIndustry);
     }
 
     public void mergeCompanyNode(String companyId, String name, String industry) {
         if (!StringUtils.hasText(companyId)) return;
+        List<String> industries = (StringUtils.hasText(industry) && !"Unknown".equalsIgnoreCase(industry.trim()))
+                ? List.of(industry.trim())
+                : Collections.emptyList();
+        String legacyIndustry = StringUtils.hasText(industry) ? industry.trim() : "Unknown";
+        mergeCompanyNode(companyId, name, industries, legacyIndustry);
+    }
+
+    public void mergeCompanyNode(String companyId, String name, List<String> industries, String legacyIndustry) {
+        if (!StringUtils.hasText(companyId)) return;
         String canonicalName = StringUtils.hasText(name) ? name.trim() : "Unknown";
-        String canonicalIndustry = StringUtils.hasText(industry) ? industry.trim() : "Unknown";
+        List<String> canonicalIndustries = industries != null ? industries : Collections.emptyList();
+        String canonicalLegacyIndustry = StringUtils.hasText(legacyIndustry) ? legacyIndustry.trim() : (!canonicalIndustries.isEmpty() ? canonicalIndustries.get(0) : "Unknown");
 
         String cypher = """
             MERGE (c:Company {companyId: $companyId})
-            ON CREATE SET c.name = $name, c.industry = $industry, c.createdAt = datetime()
-            ON MATCH SET c.name = $name, c.industry = $industry, c.updatedAt = datetime()
+            ON CREATE SET c.name = $name, c.industries = $industries, c.industry = $industry, c.createdAt = datetime()
+            ON MATCH SET c.name = $name, c.industries = $industries, c.industry = $industry, c.updatedAt = datetime()
             """;
 
         neo4jClient.query(cypher)
                 .bindAll(Map.of(
                         "companyId", companyId.trim(),
                         "name", canonicalName,
-                        "industry", canonicalIndustry
+                        "industries", canonicalIndustries,
+                        "industry", canonicalLegacyIndustry
                 ))
                 .run();
 
-        log.info("Merged CompanyNode: companyId={}, name={}", companyId.trim(), canonicalName);
+        log.info("Merged CompanyNode: companyId={}, name={}, industries={}", companyId.trim(), canonicalName, canonicalIndustries);
+    }
+
+    public static List<String> normalizeIndustries(List<String> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> result = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (String s : raw) {
+            if (s == null) continue;
+            String trimmed = s.trim();
+            if (trimmed.isEmpty()) continue;
+            if (seen.add(trimmed.toLowerCase(java.util.Locale.ROOT))) {
+                result.add(trimmed);
+            }
+        }
+        return Collections.unmodifiableList(result);
     }
 
     public void createRelationship(String sourceCompanyId, String targetCompanyId, String relType, String confirmedBy, String projectId, String candidateId, double confidenceScore) {
@@ -338,10 +382,20 @@ public class GraphService {
 
         List<CompanyRelationshipDto> relationships = getOutgoingRelationships(companyId);
 
+        List<String> industries = (node.getIndustries() != null && !node.getIndustries().isEmpty())
+                ? node.getIndustries()
+                : (StringUtils.hasText(node.getIndustry()) && !"Unknown".equalsIgnoreCase(node.getIndustry().trim())
+                    ? List.of(node.getIndustry().trim())
+                    : List.of());
+        String legacyIndustry = StringUtils.hasText(node.getIndustry())
+                ? node.getIndustry().trim()
+                : (!industries.isEmpty() ? industries.get(0) : "Unknown");
+
         return GraphCompanyDto.builder()
                 .companyId(node.getCompanyId())
                 .name(node.getName())
-                .industry(node.getIndustry())
+                .industry(legacyIndustry)
+                .industries(industries)
                 .createdAt(node.getCreatedAt())
                 .updatedAt(node.getUpdatedAt())
                 .relationships(relationships)
@@ -351,13 +405,25 @@ public class GraphService {
     public List<GraphCompanyDto> getNetwork() {
         return companyNodeRepository.findAllNodes().stream()
                 .filter(node -> isVisible(node.getCompanyId()))
-                .map(node -> GraphCompanyDto.builder()
-                        .companyId(node.getCompanyId())
-                        .name(node.getName())
-                        .industry(node.getIndustry())
-                        .createdAt(node.getCreatedAt())
-                        .updatedAt(node.getUpdatedAt())
-                        .build())
+                .map(node -> {
+                    List<String> industries = (node.getIndustries() != null && !node.getIndustries().isEmpty())
+                            ? node.getIndustries()
+                            : (StringUtils.hasText(node.getIndustry()) && !"Unknown".equalsIgnoreCase(node.getIndustry().trim())
+                                ? List.of(node.getIndustry().trim())
+                                : List.of());
+                    String legacyIndustry = StringUtils.hasText(node.getIndustry())
+                            ? node.getIndustry().trim()
+                            : (!industries.isEmpty() ? industries.get(0) : "Unknown");
+
+                    return GraphCompanyDto.builder()
+                            .companyId(node.getCompanyId())
+                            .name(node.getName())
+                            .industry(legacyIndustry)
+                            .industries(industries)
+                            .createdAt(node.getCreatedAt())
+                            .updatedAt(node.getUpdatedAt())
+                            .build();
+                })
                 .toList();
     }
 
@@ -423,14 +489,31 @@ public class GraphService {
                     c.setCompanyId(node.get("companyId").asString());
                     c.setName(node.get("name").asString("Unknown"));
                     c.setIndustry(node.get("industry").asString("Unknown"));
+                    if (node.containsKey("industries") && !node.get("industries").isNull()) {
+                        try {
+                            c.setIndustries(node.get("industries").asList(org.neo4j.driver.Value::asString));
+                        } catch (Exception ignored) {}
+                    }
                     return c;
                 })
                 .all().stream()
-                .map(node -> GraphCompanyDto.builder()
-                        .companyId(node.getCompanyId())
-                        .name(node.getName())
-                        .industry(node.getIndustry())
-                        .build())
+                .map(node -> {
+                    List<String> industries = (node.getIndustries() != null && !node.getIndustries().isEmpty())
+                            ? node.getIndustries()
+                            : (StringUtils.hasText(node.getIndustry()) && !"Unknown".equalsIgnoreCase(node.getIndustry().trim())
+                                ? List.of(node.getIndustry().trim())
+                                : List.of());
+                    String legacyIndustry = StringUtils.hasText(node.getIndustry())
+                            ? node.getIndustry().trim()
+                            : (!industries.isEmpty() ? industries.get(0) : "Unknown");
+
+                    return GraphCompanyDto.builder()
+                            .companyId(node.getCompanyId())
+                            .name(node.getName())
+                            .industry(legacyIndustry)
+                            .industries(industries)
+                            .build();
+                })
                 .filter(dto -> isVisible(dto.getCompanyId()))
                 .toList();
     }

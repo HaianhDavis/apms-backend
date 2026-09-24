@@ -25,6 +25,5 @@ public interface CompanyProfileRepository extends MongoRepository<CompanyProfile
     @Query("{ 'sourceRefs.projectIds': ?0 }")
     java.util.List<CompanyProfile> findByProjectId(String projectId);
 
-    boolean existsByIdentityTaxCode(String taxCode);
     Optional<CompanyProfile> findByIdentityTaxCode(String taxCode);
 }

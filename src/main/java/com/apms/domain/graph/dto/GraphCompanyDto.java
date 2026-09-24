@@ -12,6 +12,7 @@ public class GraphCompanyDto {
     private String companyId;
     private String name;
     private String industry;
+    private java.util.List<String> industries;
     private ZonedDateTime createdAt;
     private ZonedDateTime updatedAt;
 
