@@ -39,6 +39,7 @@ public class AiExtractionJob {
     @Column(length = 36)
     private String candidateId;
 
+    @org.hibernate.annotations.Nationalized
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String errorMessage;
 

@@ -31,10 +31,9 @@ public class PartnerContractClauseVersion {
     @Column(name = "clause_type", nullable = true, length = 100)
     private String clauseType;
 
+    @org.hibernate.annotations.Nationalized
     @Column(name = "clause_title", nullable = true, length = 255)
     private String clauseTitle;
-
-
 
     @Column(name = "effective_date")
     private LocalDate effectiveDate;
@@ -48,6 +47,7 @@ public class PartnerContractClauseVersion {
     @Column(name = "target_metric_key", length = 100)
     private String targetMetricKey;
 
+    @org.hibernate.annotations.Nationalized
     @Column(name = "target_value", length = 255)
     private String targetValue;
 
@@ -66,15 +66,18 @@ public class PartnerContractClauseVersion {
     @Column(name = "penalty_currency", length = 3)
     private String penaltyCurrency;
 
+    @org.hibernate.annotations.Nationalized
     @Column(name = "penalty_description", length = 500)
     private String penaltyDescription;
 
     @Column(name = "source_raw_document_id", length = 50)
     private String sourceRawDocumentId;
 
+    @org.hibernate.annotations.Nationalized
     @Column(name = "evidence_reference", length = 255)
     private String evidenceReference;
 
+    @org.hibernate.annotations.Nationalized
     @Column(name = "source_excerpt", length = 2000)
     private String sourceExcerpt;
 

@@ -48,21 +48,10 @@ public class ProjectTaskController {
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        boolean staffOnly = currentUser.getAuthorities().stream()
-                .anyMatch(authority -> "ROLE_BUSINESS_DEVELOPMENT_STAFF".equals(authority.getAuthority()));
-        Long effectiveAssignedToUserId;
-        if (staffOnly) {
-            if (status == TaskStatus.AVAILABLE) {
-                effectiveAssignedToUserId = null; // Unassigned pool
-            } else {
-                effectiveAssignedToUserId = currentUser.getId(); // Only their own tasks
-            }
-        } else {
-            effectiveAssignedToUserId = assignedToUserId;
-        }
-        
+        boolean isPoolQuery = (status == TaskStatus.AVAILABLE);
+
         PageResponse<ProjectTaskResponse> response = PageResponse.of(
-                projectTaskService.getTasks(projectId, status, effectiveAssignedToUserId, pageable, staffOnly && status == TaskStatus.AVAILABLE));
+                projectTaskService.getTasks(projectId, status, assignedToUserId, pageable, isPoolQuery));
 
         return ResponseEntity.ok(ApiResponse.success(response));
     }

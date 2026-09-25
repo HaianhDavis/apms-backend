@@ -78,6 +78,15 @@ public class ProjectTaskSubmissionService {
     @org.springframework.context.annotation.Lazy
     private com.apms.domain.financial.service.FinancialResearchService financialResearchService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.springframework.context.ApplicationEventPublisher eventPublisher;
+
+    private void publishWorkflowEvent(String type, Long projectId, Long taskId, Long actorId) {
+        if (eventPublisher != null && projectId != null) {
+            eventPublisher.publishEvent(com.apms.domain.project.event.ProjectWorkflowEvent.of(type, projectId, taskId, actorId));
+        }
+    }
+
     @Transactional
     public ProjectTaskSubmissionResponse submitTask(Long projectId, Long taskId, CreateProjectTaskSubmissionRequest request) {
         Project project = projectRepository.findById(projectId)
@@ -198,6 +207,7 @@ public class ProjectTaskSubmissionService {
                     task.setCompletedAt(null);
                     taskRepository.saveAndFlush(task);
                 }
+                publishWorkflowEvent("TASK_SUBMITTED", projectId, taskId, currentUser.getId());
                 return toResponse(existingSub.get());
             } else {
                 throw e; // if we can't find it, rethrow
@@ -223,6 +233,8 @@ public class ProjectTaskSubmissionService {
         projectMemberRepository.findByProject_Id(projectId).stream()
                 .filter(m -> m.getProjectRole() == com.apms.common.enums.ProjectRole.LEADER)
                 .forEach(m -> notificationService.notifyTaskSubmitted(task, m.getAccount(), sender));
+
+        publishWorkflowEvent("TASK_SUBMITTED", projectId, taskId, currentUser.getId());
 
         return toResponse(submission);
     }
@@ -315,6 +327,7 @@ public class ProjectTaskSubmissionService {
                 "Staff cancelled pending submission for task " + taskId
         );
         log.info("Cancelled pending submission {} for task {}, status returned to IN_PROGRESS", subId, taskId);
+        publishWorkflowEvent("TASK_SUBMISSION_CANCELLED", projectId, taskId, currentUser.getId());
     }
 
     @Transactional(readOnly = true)
@@ -613,6 +626,12 @@ public class ProjectTaskSubmissionService {
             if (recipient != null) {
                 notificationService.notifyTaskChangesRequested(task, submission, recipient, reviewer, request.getComment());
             }
+        }
+
+        if (request.getDecision() == com.apms.common.enums.ReviewDecision.APPROVE) {
+            publishWorkflowEvent("TASK_APPROVED", projectId, taskId, currentUser.getId());
+        } else {
+            publishWorkflowEvent("TASK_CHANGES_REQUESTED", projectId, taskId, currentUser.getId());
         }
 
         return toResponse(submission);

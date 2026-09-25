@@ -3,6 +3,7 @@ package com.apms.domain.profile.assessment;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.Nationalized;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.math.BigDecimal;
@@ -70,9 +71,11 @@ public class CompanyRelationshipAssessment {
     @Column(name = "commercial_awarded_score")
     private Integer commercialAwardedScore;
 
+    @Nationalized
     @Column(name = "commercial_adjustment_reason", length = 1000)
     private String commercialAdjustmentReason;
 
+    @Nationalized
     @Column(name = "commercial_evidence_note", length = 1000)
     private String commercialEvidenceNote;
 
@@ -131,33 +134,39 @@ public class CompanyRelationshipAssessment {
     @Column(name = "cooperation_score")
     private Integer cooperationScore;
 
+    @Nationalized
     @Column(name = "cooperation_evidence_note", length = 1000)
     private String cooperationEvidenceNote;
 
     @Column(name = "strategic_score")
     private Integer strategicScore;
 
+    @Nationalized
     @Column(name = "strategic_evidence_note", length = 1000)
     private String strategicEvidenceNote;
 
     @Column(name = "relationship_network_score")
     private Integer relationshipNetworkScore;
 
+    @Nationalized
     @Column(name = "relationship_network_note", length = 500)
     private String relationshipNetworkNote;
 
     @Column(name = "engagement_score")
     private Integer engagementScore;
 
+    @Nationalized
     @Column(name = "engagement_evidence_note", length = 1000)
     private String engagementEvidenceNote;
 
     @Column(name = "qualitative_score")
     private Integer qualitativeScore;
 
+    @Nationalized
     @Column(name = "qualitative_evidence_note", length = 1000)
     private String qualitativeEvidenceNote;
 
+    @Nationalized
     @Column(name = "manager_note", length = 2000)
     private String managerNote;
 
@@ -177,6 +186,7 @@ public class CompanyRelationshipAssessment {
     private LocalDateTime managerSubmittedAt;
 
     // Changes Requested
+    @Nationalized
     @Column(name = "changes_requested_reason", length = 2000)
     private String changesRequestedReason;
 
@@ -190,42 +200,50 @@ public class CompanyRelationshipAssessment {
     @Column(name = "owner_commercial_score")
     private Integer ownerCommercialScore;
 
+    @Nationalized
     @Column(name = "owner_commercial_note", length = 1000)
     private String ownerCommercialNote;
 
     @Column(name = "owner_cooperation_score")
     private Integer ownerCooperationScore;
 
+    @Nationalized
     @Column(name = "owner_cooperation_note", length = 1000)
     private String ownerCooperationNote;
 
     @Column(name = "owner_strategic_score")
     private Integer ownerStrategicScore;
 
+    @Nationalized
     @Column(name = "owner_strategic_note", length = 1000)
     private String ownerStrategicNote;
 
     @Column(name = "owner_relationship_network_score")
     private Integer ownerRelationshipNetworkScore;
 
+    @Nationalized
     @Column(name = "owner_relationship_network_note", length = 500)
     private String ownerRelationshipNetworkNote;
 
     @Column(name = "owner_engagement_score")
     private Integer ownerEngagementScore;
 
+    @Nationalized
     @Column(name = "owner_engagement_note", length = 1000)
     private String ownerEngagementNote;
 
     @Column(name = "owner_qualitative_score")
     private Integer ownerQualitativeScore;
 
+    @Nationalized
     @Column(name = "owner_qualitative_note", length = 1000)
     private String ownerQualitativeNote;
 
+    @Nationalized
     @Column(name = "owner_note", length = 2000)
     private String ownerNote;
 
+    @Nationalized
     @Column(name = "owner_adjustment_reason", length = 2000)
     private String ownerAdjustmentReason;
 

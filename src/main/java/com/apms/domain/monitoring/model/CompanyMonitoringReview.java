@@ -43,6 +43,7 @@ public class CompanyMonitoringReview {
     @Column(name = "update_proposal_id")
     private String updateProposalId;
 
+    @org.hibernate.annotations.Nationalized
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String note;
 }

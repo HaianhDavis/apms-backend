@@ -98,6 +98,15 @@ public class ProjectService {
     @Autowired(required = false)
     private CompanyMonitoringAssignmentRepository companyMonitoringAssignmentRepository;
 
+    @Autowired(required = false)
+    private org.springframework.context.ApplicationEventPublisher eventPublisher;
+
+    private void publishWorkflowEvent(String type, Long projectId, Long actorId) {
+        if (eventPublisher != null && projectId != null) {
+            eventPublisher.publishEvent(com.apms.domain.project.event.ProjectWorkflowEvent.of(type, projectId, actorId));
+        }
+    }
+
     // ─────────────────────────────────────────────
     // CREATE
     // ─────────────────────────────────────────────
@@ -502,6 +511,7 @@ public class ProjectService {
         }
 
         List<ProjectMember> members = projectMemberRepository.findByProject_Id(id);
+        publishWorkflowEvent("PROJECT_UPDATED", id, currentUserId);
         return toResponse(project, members);
     }
 
@@ -565,6 +575,8 @@ public class ProjectService {
         String detail = String.format("Project %s. Reason: %s", newStatus, request.getReason() != null ? request.getReason() : "None");
         auditLogService.log(actorId, action, "Project", String.valueOf(project.getId()), detail);
 
+        publishWorkflowEvent(newStatus == ProjectStatus.COMPLETED ? "PROJECT_COMPLETED" : "PROJECT_CLOSED", id, actorId);
+
         return toResponse(project, members);
     }
 
@@ -613,6 +625,7 @@ public class ProjectService {
         auditLogService.log(actorId, action, "Project", String.valueOf(project.getId()), detail);
 
         List<ProjectMember> members = projectMemberRepository.findByProject_Id(id);
+        publishWorkflowEvent("PROJECT_STATUS_CHANGED", id, actorId);
         return toResponse(project, members);
     }
 
@@ -820,6 +833,7 @@ public class ProjectService {
         }
         
         log.info("Member added: projectId={}, accountId={}, email={}, role=MEMBER", projectId, accountId, account.getEmail());
+        publishWorkflowEvent("PROJECT_MEMBER_ADDED", projectId, actorId);
         return toMemberResponse(member);
     }
 
@@ -884,6 +898,7 @@ public class ProjectService {
         } catch (Exception e) {
             log.warn("Failed to send project member removed notification: {}", e.getMessage());
         }
+        publishWorkflowEvent("PROJECT_MEMBER_REMOVED", projectId, actorId);
     }
 
     @Transactional
@@ -909,6 +924,7 @@ public class ProjectService {
         
         targetMember.setProjectRole(newRole);
         targetMember = projectMemberRepository.save(targetMember);
+        publishWorkflowEvent("PROJECT_MEMBER_ROLE_CHANGED", projectId, actorId);
         return toMemberResponse(targetMember);
     }
 
@@ -943,6 +959,7 @@ public class ProjectService {
             currentLeader.setProjectRole(ProjectRole.MEMBER);
             projectMemberRepository.save(currentLeader);
         }
+        publishWorkflowEvent("PROJECT_MEMBER_ROLE_CHANGED", projectId, actorId);
     }
 
     @Transactional
@@ -965,6 +982,7 @@ public class ProjectService {
         }
         
         projectMemberRepository.deleteByProject_IdAndAccount_Id(projectId, actorId);
+        publishWorkflowEvent("PROJECT_MEMBER_REMOVED", projectId, actorId);
     }
 
     private ProjectMember getProjectMember(Long projectId, Long accountId) {

@@ -54,9 +54,11 @@ public class ProjectTaskSubmission {
     @Column(nullable = false)
     private SubmissionStatus status;
 
+    @org.hibernate.annotations.Nationalized
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String note;
 
+    @org.hibernate.annotations.Nationalized
     @Column(name = "target_item_ids", columnDefinition = "NVARCHAR(MAX)")
     private String targetItemIds;
 
@@ -84,6 +86,7 @@ public class ProjectTaskSubmission {
 
     private LocalDateTime reviewedAt;
 
+    @org.hibernate.annotations.Nationalized
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String reviewComment;
 

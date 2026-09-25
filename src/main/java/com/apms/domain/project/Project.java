@@ -24,7 +24,8 @@ public class Project {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
+    @org.hibernate.annotations.Nationalized
+    @Column(nullable = false, length = 255)
     private String projectName;
 
     @Enumerated(EnumType.STRING)
@@ -43,7 +44,8 @@ public class Project {
      * For RESEARCH_NEW_COMPANY: a single company name.
      * For RESEARCH_MULTIPLE_COMPANIES: a research scope/query string.
      */
-    @Column(nullable = false)
+    @org.hibernate.annotations.Nationalized
+    @Column(nullable = false, length = 255)
     private String targetCompanyName;
 
     /**
@@ -65,9 +67,11 @@ public class Project {
     @Column(name = "original_relationship_type", nullable = true, length = 50)
     private com.apms.common.enums.RelationshipType originalRelationshipType;
 
+    @org.hibernate.annotations.Nationalized
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String description;
 
+    @org.hibernate.annotations.Nationalized
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String objective;
 
@@ -106,6 +110,7 @@ public class Project {
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
 
+    @org.hibernate.annotations.Nationalized
     @Column(name = "close_reason", columnDefinition = "NVARCHAR(MAX)")
     private String closeReason;
 

@@ -50,9 +50,11 @@ public class PartnerContract {
     @Column(nullable = true, length = 100)
     private String contractNumber;
 
+    @org.hibernate.annotations.Nationalized
     @Column(nullable = true, length = 255)
     private String contractTitle;
 
+    @org.hibernate.annotations.Nationalized
     @Column(nullable = true, length = 100)
     private String contractType;
 

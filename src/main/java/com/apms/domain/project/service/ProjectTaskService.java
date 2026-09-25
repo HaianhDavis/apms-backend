@@ -62,6 +62,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import java.util.ArrayList;
 import java.util.Comparator;
+import com.apms.domain.project.event.ProjectWorkflowEvent;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import java.util.List;
 
 @Slf4j
@@ -85,6 +88,15 @@ public class ProjectTaskService {
     private final AuditLogRepository auditLogRepository;
     private final com.apms.domain.project.repository.sql.ProjectMemberRepository projectMemberRepository;
     private final FinancialResearchService financialResearchService;
+
+    @Autowired(required = false)
+    private ApplicationEventPublisher eventPublisher;
+
+    private void publishWorkflowEvent(String type, Long projectId, Long taskId, Long actorId) {
+        if (eventPublisher != null && projectId != null) {
+            eventPublisher.publishEvent(ProjectWorkflowEvent.of(type, projectId, taskId, actorId));
+        }
+    }
 
     @Transactional
     public ProjectTaskResponse createTask(Long projectId, CreateProjectTaskRequest request) {
@@ -153,6 +165,8 @@ public class ProjectTaskService {
         if (assignedTo != null) {
             auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_ASSIGNED, "ProjectTask", String.valueOf(task.getId()), "Task assigned to user: " + assignedTo.getId());
         }
+
+        publishWorkflowEvent("TASK_CREATED", projectId, task.getId(), currentUser.getId());
 
         return toResponse(task);
     }
@@ -376,6 +390,8 @@ public class ProjectTaskService {
             notificationService.notifyTaskAssigned(task, newlyAssignedTo, sender);
         }
 
+        publishWorkflowEvent("TASK_UPDATED", task.getProject().getId(), task.getId(), currentUser.getId());
+
         return toResponse(task);
     }
 
@@ -412,6 +428,7 @@ public class ProjectTaskService {
 
         projectTaskRepository.delete(task);
         auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_UPDATED, "ProjectTask", String.valueOf(taskId), "Task deleted");
+        publishWorkflowEvent("TASK_DELETED", projectId, taskId, currentUser.getId());
     }
 
     @Transactional
@@ -861,6 +878,7 @@ public class ProjectTaskService {
 
         // Re-fetch to return the updated state
         task = projectTaskRepository.findById(taskId).orElseThrow();
+        publishWorkflowEvent("TASK_CLAIMED", projectId, taskId, currentUser.getId());
         return toResponse(task);
     }
 
@@ -895,6 +913,7 @@ public class ProjectTaskService {
 
         // Re-fetch to return the updated state
         task = projectTaskRepository.findById(taskId).orElseThrow();
+        publishWorkflowEvent("TASK_RELEASED", projectId, taskId, currentUser.getId());
         return toResponse(task);
     }
 

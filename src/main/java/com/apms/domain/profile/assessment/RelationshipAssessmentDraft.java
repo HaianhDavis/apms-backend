@@ -3,6 +3,7 @@ package com.apms.domain.profile.assessment;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.Nationalized;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
@@ -87,49 +88,64 @@ public class RelationshipAssessmentDraft {
     private Integer ownerQualitativeScore;
 
     // Manager Evidence Notes
+    @Nationalized
     @Column(name = "commercial_evidence_note", length = 1000)
     private String commercialEvidenceNote;
 
+    @Nationalized
     @Column(name = "cooperation_evidence_note", length = 1000)
     private String cooperationEvidenceNote;
 
+    @Nationalized
     @Column(name = "strategic_evidence_note", length = 1000)
     private String strategicEvidenceNote;
 
+    @Nationalized
     @Column(name = "relationship_network_note", length = 500)
     private String relationshipNetworkNote;
 
+    @Nationalized
     @Column(name = "engagement_evidence_note", length = 1000)
     private String engagementEvidenceNote;
 
+    @Nationalized
     @Column(name = "qualitative_evidence_note", length = 1000)
     private String qualitativeEvidenceNote;
 
+    @Nationalized
     @Column(name = "manager_note", length = 2000)
     private String managerNote;
 
     // Owner Criterion Notes
+    @Nationalized
     @Column(name = "owner_commercial_note", length = 1000)
     private String ownerCommercialNote;
 
+    @Nationalized
     @Column(name = "owner_cooperation_note", length = 1000)
     private String ownerCooperationNote;
 
+    @Nationalized
     @Column(name = "owner_strategic_note", length = 1000)
     private String ownerStrategicNote;
 
+    @Nationalized
     @Column(name = "owner_relationship_network_note", length = 500)
     private String ownerRelationshipNetworkNote;
 
+    @Nationalized
     @Column(name = "owner_engagement_note", length = 1000)
     private String ownerEngagementNote;
 
+    @Nationalized
     @Column(name = "owner_qualitative_note", length = 1000)
     private String ownerQualitativeNote;
 
+    @Nationalized
     @Column(name = "owner_note", length = 2000)
     private String ownerNote;
 
+    @Nationalized
     @Column(name = "owner_adjustment_reason", length = 2000)
     private String ownerAdjustmentReason;
 

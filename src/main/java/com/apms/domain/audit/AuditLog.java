@@ -48,6 +48,7 @@ public class AuditLog {
 
     private String entityId;
 
+    @org.hibernate.annotations.Nationalized
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String detail;
 

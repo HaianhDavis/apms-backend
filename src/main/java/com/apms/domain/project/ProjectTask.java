@@ -41,9 +41,11 @@ public class ProjectTask {
     @EqualsAndHashCode.Exclude
     private Account assignedToAccount;
 
-    @Column(nullable = false)
+    @org.hibernate.annotations.Nationalized
+    @Column(nullable = false, length = 255)
     private String title;
 
+    @org.hibernate.annotations.Nationalized
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String description;
 

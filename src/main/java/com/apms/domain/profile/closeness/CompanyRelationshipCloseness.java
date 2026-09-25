@@ -31,6 +31,7 @@ public class CompanyRelationshipCloseness {
     @Column(name = "stars", nullable = false)
     private Integer stars;
 
+    @org.hibernate.annotations.Nationalized
     @Column(name = "note", length = 1000)
     private String note;
 
@@ -43,6 +44,7 @@ public class CompanyRelationshipCloseness {
     @Column(name = "manager_stars")
     private Integer managerStars;
 
+    @org.hibernate.annotations.Nationalized
     @Column(name = "manager_note", length = 1000)
     private String managerNote;
 
@@ -55,6 +57,7 @@ public class CompanyRelationshipCloseness {
     @Column(name = "owner_stars")
     private Integer ownerStars;
 
+    @org.hibernate.annotations.Nationalized
     @Column(name = "owner_note", length = 1000)
     private String ownerNote;
 

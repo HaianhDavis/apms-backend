@@ -30,9 +30,11 @@ public class ProjectKeyResult {
     @Column(nullable = false, length = 50)
     private ProjectKeyResultType type;
 
-    @Column(nullable = false)
+    @org.hibernate.annotations.Nationalized
+    @Column(nullable = false, length = 255)
     private String name;
 
+    @org.hibernate.annotations.Nationalized
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String description;
 

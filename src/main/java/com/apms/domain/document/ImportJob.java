@@ -51,6 +51,8 @@ public class ImportJob {
     /**
      * Original file name. Null for MANUAL_INPUT.
      */
+    @org.hibernate.annotations.Nationalized
+    @Column(length = 255)
     private String fileName;
 
     /**
@@ -80,6 +82,7 @@ public class ImportJob {
 
     private LocalDateTime completedAt;
 
+    @org.hibernate.annotations.Nationalized
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String errorMessage;
 

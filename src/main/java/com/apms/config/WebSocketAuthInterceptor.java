@@ -66,7 +66,9 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                 Matcher matcher = DESTINATION_PATTERN.matcher(destination);
                 if (matcher.matches()) {
                     Long projectId = Long.parseLong(matcher.group(1));
-                    if (!projectMemberRepository.existsByProject_IdAndAccount_Id(projectId, userDetails.getId())) {
+                    boolean isSystemAdmin = userDetails.getAuthorities() != null && userDetails.getAuthorities().stream()
+                            .anyMatch(a -> "ROLE_SYSTEM_ADMIN".equals(a.getAuthority()) || "ROLE_ADMIN".equals(a.getAuthority()));
+                    if (!isSystemAdmin && !projectMemberRepository.existsByProject_IdAndAccount_Id(projectId, userDetails.getId())) {
                         throw new AccessDeniedException("User is not a member of project " + projectId);
                     }
                 }
