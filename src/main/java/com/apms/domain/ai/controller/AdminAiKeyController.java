@@ -71,10 +71,19 @@ public class AdminAiKeyController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @GetMapping("/{id}/reveal")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<com.apms.domain.ai.dto.RevealAiApiKeyResponse>> revealKey(@PathVariable String id) {
+        com.apms.domain.ai.dto.RevealAiApiKeyResponse response = apiKeyProvider.revealKey(id);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
     @PostMapping("/reload")
     @PreAuthorize("hasRole('SYSTEM_ADMIN')")
-    public ResponseEntity<ApiResponse<List<AiApiKeyDto>>> reloadKeys() {
+    public ResponseEntity<ApiResponse<com.apms.domain.ai.dto.ReloadAiKeysResponse>> reloadKeys() {
         apiKeyProvider.reload();
-        return ResponseEntity.ok(ApiResponse.success(apiKeyProvider.getAllKeys()));
+        int activeCount = apiKeyProvider.getActiveKeys().size();
+        List<AiApiKeyDto> allKeys = apiKeyProvider.getAllKeys();
+        return ResponseEntity.ok(ApiResponse.success(new com.apms.domain.ai.dto.ReloadAiKeysResponse(activeCount, allKeys)));
     }
 }
