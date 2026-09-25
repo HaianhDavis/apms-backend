@@ -12,6 +12,7 @@ import org.springframework.web.client.RestClientResponseException;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
@@ -20,6 +21,7 @@ import java.util.concurrent.ThreadLocalRandom;
 @Component
 public class GeminiRequestExecutor {
 
+    private final GeminiApiKeyProvider apiKeyProvider;
     private final GeminiApiKeyManager keyManager;
     private final GeminiExtractionConcurrencyLimiter concurrencyLimiter;
     private final int transientAttempts;
@@ -30,6 +32,7 @@ public class GeminiRequestExecutor {
 
     @Autowired
     public GeminiRequestExecutor(
+            @Autowired(required = false) GeminiApiKeyProvider apiKeyProvider,
             GeminiApiKeyManager keyManager,
             GeminiExtractionConcurrencyLimiter concurrencyLimiter,
             @Value("${app.ai.gemini.retry.transient-attempts:${gemini.retry.transient-attempts:2}}") int transientAttempts,
@@ -37,6 +40,7 @@ public class GeminiRequestExecutor {
             @Value("${app.ai.gemini.retry.max-delay-ms:15000}") long maxDelayMs,
             @Value("${app.ai.gemini.retry.jitter-ms:1000}") long jitterMs,
             @Value("${app.ai.gemini.retry.max-retry-after-ms:120000}") long maxRetryAfterMs) {
+        this.apiKeyProvider = apiKeyProvider;
         this.keyManager = keyManager;
         this.concurrencyLimiter = concurrencyLimiter;
         this.transientAttempts = Math.max(0, transientAttempts);
@@ -46,18 +50,33 @@ public class GeminiRequestExecutor {
         this.maxRetryAfterMs = Math.max(1000, maxRetryAfterMs);
     }
 
+    public GeminiRequestExecutor(
+            GeminiApiKeyManager keyManager,
+            GeminiExtractionConcurrencyLimiter concurrencyLimiter,
+            int transientAttempts,
+            long initialDelayMs,
+            long maxDelayMs,
+            long jitterMs,
+            long maxRetryAfterMs) {
+        this(null, keyManager, concurrencyLimiter, transientAttempts, initialDelayMs, maxDelayMs, jitterMs, maxRetryAfterMs);
+    }
+
     /**
      * Test-friendly constructor with zero delays for fast unit tests.
      */
     public GeminiRequestExecutor(GeminiApiKeyManager keyManager, int transientAttempts) {
-        this(keyManager, new GeminiExtractionConcurrencyLimiter(1), transientAttempts, 0, 0, 0, 120000);
+        this(null, keyManager, new GeminiExtractionConcurrencyLimiter(1), transientAttempts, 0, 0, 0, 120000);
     }
 
     /**
      * Test-friendly constructor with configurable concurrency for concurrent tests.
      */
     public GeminiRequestExecutor(GeminiApiKeyManager keyManager, int transientAttempts, int maxConcurrent) {
-        this(keyManager, new GeminiExtractionConcurrencyLimiter(maxConcurrent), transientAttempts, 0, 0, 0, 120000);
+        this(null, keyManager, new GeminiExtractionConcurrencyLimiter(maxConcurrent), transientAttempts, 0, 0, 0, 120000);
+    }
+
+    public GeminiRequestExecutor(GeminiApiKeyProvider apiKeyProvider, GeminiApiKeyManager keyManager, int transientAttempts) {
+        this(apiKeyProvider, keyManager, new GeminiExtractionConcurrencyLimiter(1), transientAttempts, 0, 0, 0, 120000);
     }
 
     /**
@@ -78,6 +97,11 @@ public class GeminiRequestExecutor {
     }
 
     private <T> T executeInternal(GeminiOperation<T> operation) {
+        if (apiKeyProvider != null) {
+            List<String> runtimeKeys = apiKeyProvider.getActiveKeys();
+            keyManager.syncKeys(runtimeKeys);
+        }
+
         Set<Integer> attemptedKeyIndexes = new HashSet<>();
         Optional<GeminiApiKeyManager.GeminiApiKey> currentKey = keyManager.getCurrentKey();
 
@@ -89,11 +113,24 @@ public class GeminiRequestExecutor {
                 T result = executeWithTransientRetry(operation, key);
                 // On success, update active key
                 keyManager.recordSuccess(key.index());
+                if (apiKeyProvider != null) {
+                    apiKeyProvider.recordKeySuccess(key.value());
+                }
                 return result;
             } catch (RestClientResponseException e) {
                 int statusCode = e.getStatusCode().value();
                 if (statusCode == 400 || statusCode == 404) {
                     throw mapNonFailoverResponse(statusCode);
+                }
+
+                if (statusCode == 429) {
+                    if (apiKeyProvider != null) {
+                        apiKeyProvider.recordKeyFailure(key.value(), 429, "RESOURCE_EXHAUSTED", com.apms.domain.ai.entity.AiApiKeyStatus.EXHAUSTED);
+                    }
+                } else if (statusCode == 401 || statusCode == 403) {
+                    if (apiKeyProvider != null) {
+                        apiKeyProvider.recordKeyFailure(key.value(), statusCode, describeStatus(statusCode), com.apms.domain.ai.entity.AiApiKeyStatus.INVALID);
+                    }
                 }
 
                 // For 401/403 or 429, mark credential permanently exhausted for this session

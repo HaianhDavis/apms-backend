@@ -16,7 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Component
 public class GeminiApiKeyManager {
 
-    private final List<String> apiKeys;
+    private final List<String> apiKeys = new java.util.concurrent.CopyOnWriteArrayList<>();
     private final String credentialSource;
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
@@ -32,19 +32,21 @@ public class GeminiApiKeyManager {
         List<String> validConfigured = configuredKeys.stream().filter(k -> !"dummy-key".equalsIgnoreCase(k)).toList();
         List<String> validLegacy = legacyKeys.stream().filter(k -> !"dummy-key".equalsIgnoreCase(k)).toList();
 
+        List<String> initialKeys;
         if (!validConfigured.isEmpty()) {
-            this.apiKeys = validConfigured;
+            initialKeys = validConfigured;
             this.credentialSource = "app.ai.gemini.api-keys";
         } else if (!validLegacy.isEmpty()) {
-            this.apiKeys = validLegacy;
+            initialKeys = validLegacy;
             this.credentialSource = "app.ai.gemini.api-key";
         } else if (!configuredKeys.isEmpty()) {
-            this.apiKeys = configuredKeys;
+            initialKeys = configuredKeys;
             this.credentialSource = "app.ai.gemini.api-keys";
         } else {
-            this.apiKeys = legacyKeys;
+            initialKeys = legacyKeys;
             this.credentialSource = "app.ai.gemini.api-key";
         }
+        this.apiKeys.addAll(initialKeys);
         log.info("Gemini credentials configured: {}", apiKeys.size());
         if (!apiKeys.isEmpty()) {
             log.info("Active Gemini credential: #{}", activeKeyIndex.get() + 1);
@@ -193,6 +195,48 @@ public class GeminiApiKeyManager {
                 .map(k -> k.replaceAll("^[`'\"\\s]+|[`'\"\\s]+$", ""))
                 .filter(StringUtils::hasText)
                 .toList();
+    }
+
+    public synchronized void syncKeys(List<String> newKeys) {
+        if (newKeys == null) {
+            return;
+        }
+        if (new java.util.ArrayList<>(this.apiKeys).equals(newKeys)) {
+            return;
+        }
+
+        List<String> oldKeys = new java.util.ArrayList<>(this.apiKeys);
+        this.apiKeys.clear();
+        this.apiKeys.addAll(newKeys);
+
+        // Remap unavailable keys to their new positions in newKeys
+        Set<Integer> newUnavailable = ConcurrentHashMap.newKeySet();
+        for (int i = 0; i < this.apiKeys.size(); i++) {
+            String k = this.apiKeys.get(i);
+            int oldIdx = oldKeys.indexOf(k);
+            if (oldIdx >= 0 && unavailableKeyIndexes.contains(oldIdx)) {
+                newUnavailable.add(i);
+            }
+        }
+        this.unavailableKeyIndexes.clear();
+        this.unavailableKeyIndexes.addAll(newUnavailable);
+
+        if (this.apiKeys.isEmpty()) {
+            activeKeyIndex.set(0);
+        } else if (activeKeyIndex.get() >= this.apiKeys.size()) {
+            activeKeyIndex.set(0);
+        }
+        log.info("Gemini credentials synchronized with runtime provider. Active key count: {}", this.apiKeys.size());
+    }
+
+    public synchronized void resetAvailability() {
+        this.unavailableKeyIndexes.clear();
+        this.activeKeyIndex.set(0);
+        log.info("Reset Gemini credential availability.");
+    }
+
+    public List<String> getApiKeysList() {
+        return java.util.Collections.unmodifiableList(new java.util.ArrayList<>(this.apiKeys));
     }
 
     /**
