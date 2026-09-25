@@ -48,18 +48,25 @@ public class DashboardService {
                 .stream().filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()))
                 .collect(Collectors.toList());
         
-        Set<String> targetCompanyProfileIds = targetProfiles.stream().map(CompanyProfile::getId).collect(Collectors.toSet());
+        Set<String> targetCompanyProfileIds = targetProfiles.stream()
+                .map(CompanyProfile::getId)
+                .filter(id -> id != null && !id.isBlank())
+                .collect(Collectors.toSet());
 
         RelationshipClosenessOverviewDto closenessOverview = buildClosenessOverview(ownerCompanyProfileId, targetCompanyProfileIds);
         
-        Set<String> ecosystemBusinessIds = new HashSet<>(targetBusinessCompanyIds);
-        ecosystemBusinessIds.add(ownerCompanyId);
+        Set<String> ecosystemBusinessIds = targetBusinessCompanyIds.stream()
+                .filter(id -> id != null && !id.isBlank())
+                .collect(Collectors.toSet());
+        if (ownerCompanyId != null && !ownerCompanyId.isBlank()) {
+            ecosystemBusinessIds.add(ownerCompanyId);
+        }
 
         SignalOverviewDto riskOverview = buildSignalOverview(ExternalDataCategory.RISK, ecosystemBusinessIds, targetProfiles);
         SignalOverviewDto opportunityOverview = buildSignalOverview(ExternalDataCategory.OPPORTUNITY, ecosystemBusinessIds, targetProfiles);
 
         List<CompanyProfile> allExceptOwner = profileRepository.findAll().stream()
-            .filter(p -> !ownerCompanyId.equals(p.getCompanyId()))
+            .filter(p -> ownerCompanyId == null || !ownerCompanyId.equals(p.getCompanyId()))
             .filter(p -> !Boolean.TRUE.equals(p.getIsHidden()) && !Boolean.TRUE.equals(p.getIsDeleted()))
             .filter(p -> {
                 if (managerId == null) return true;
@@ -85,8 +92,11 @@ public class DashboardService {
             // For a specific manager, count relationships based on their companies' Neo4j links, or just use the filtered list's relationships if we map them.
             // But doing graph traversal for specific nodes is hard here without restructuring. 
             // We can approximate by querying neo4j for relationships to companies in allExceptOwner.
-            Set<String> myCompanyIds = allExceptOwner.stream().map(CompanyProfile::getCompanyId).collect(Collectors.toSet());
-            if (!myCompanyIds.isEmpty()) {
+            Set<String> myCompanyIds = allExceptOwner.stream()
+                    .map(CompanyProfile::getCompanyId)
+                    .filter(id -> id != null && !id.isBlank())
+                    .collect(Collectors.toSet());
+            if (!myCompanyIds.isEmpty() && ownerCompanyId != null && !ownerCompanyId.isBlank()) {
                 partnerCount = countNeo4jRelationshipFilterByTargets("PARTNER_WITH", ownerCompanyId, myCompanyIds);
                 competitorCount = countNeo4jRelationshipFilterByTargets("COMPETITOR_OF", ownerCompanyId, myCompanyIds);
                 supplierCount = countNeo4jRelationshipFilterByTargets("SUPPLIER_OF", ownerCompanyId, myCompanyIds);
@@ -140,6 +150,9 @@ public class DashboardService {
     }
 
     private long countNeo4jRelationship(String relType, String ownerCompanyId) {
+        if (ownerCompanyId == null || ownerCompanyId.isBlank()) {
+            return 0L;
+        }
         String cypher = String.format("MATCH (:Company {companyId: $ownerId})-[r:%s]->() RETURN count(r) as cnt", relType);
         return neo4jClient.query(cypher)
                 .bindAll(Map.of("ownerId", ownerCompanyId))
@@ -150,6 +163,9 @@ public class DashboardService {
     }
 
     private long countNeo4jRelationshipFilterByTargets(String relType, String ownerCompanyId, Set<String> targetIds) {
+        if (ownerCompanyId == null || ownerCompanyId.isBlank() || targetIds == null || targetIds.isEmpty()) {
+            return 0L;
+        }
         String cypher = String.format("MATCH (:Company {companyId: $ownerId})-[r:%s]->(t:Company) WHERE t.companyId IN $targetIds RETURN count(r) as cnt", relType);
         return neo4jClient.query(cypher)
                 .bindAll(Map.of("ownerId", ownerCompanyId, "targetIds", targetIds))
@@ -160,17 +176,22 @@ public class DashboardService {
     }
     
     private List<String> getTargetBusinessCompanyIds(String ownerCompanyId) {
+        if (ownerCompanyId == null || ownerCompanyId.isBlank()) {
+            return Collections.emptyList();
+        }
         String cypher = "MATCH (:Company {companyId: $ownerId})-[r:PARTNER_WITH|POTENTIAL_PARTNER_OF|COMPETITOR_OF|CUSTOMER_OF|SUPPLIER_OF]-(t:Company) RETURN DISTINCT t.companyId as targetId";
         return neo4jClient.query(cypher)
                 .bindAll(Map.of("ownerId", ownerCompanyId))
                 .fetchAs(String.class)
                 .mappedBy((ts, record) -> record.get("targetId").asString())
                 .all()
-                .stream().toList();
+                .stream()
+                .filter(id -> id != null && !id.isBlank())
+                .toList();
     }
 
     private RelationshipClosenessOverviewDto buildClosenessOverview(String ownerMongoId, Set<String> distinctTargetMongoIds) {
-        if (distinctTargetMongoIds.isEmpty()) {
+        if (ownerMongoId == null || ownerMongoId.isBlank() || distinctTargetMongoIds == null || distinctTargetMongoIds.isEmpty()) {
             return RelationshipClosenessOverviewDto.builder()
                     .ratedRelationshipCount(0)
                     .unratedRelationshipCount(0)
@@ -184,7 +205,8 @@ public class DashboardService {
         long unratedCount = distinctTargetMongoIds.size() - ratedCount;
 
         Map<Integer, Long> starCounts = closenessRecords.stream()
-                .collect(Collectors.groupingBy(c -> c.getStars(), Collectors.counting()));
+                .filter(c -> c.getStars() != null)
+                .collect(Collectors.groupingBy(CompanyRelationshipCloseness::getStars, Collectors.counting()));
 
         List<RelationshipClosenessDistributionDto> distribution = new ArrayList<>();
         distribution.add(createDist(5, "STRATEGIC", starCounts.getOrDefault(5, 0L)));
