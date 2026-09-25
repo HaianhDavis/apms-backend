@@ -58,8 +58,35 @@ public class GeminiApiKeyProvider {
             AiApiKeyEncryptionService encryptionService,
             GeminiApiKeyManager keyManager,
             String bootstrapConfiguredKeys,
+            String bootstrapLegacyKey,
+            String geminiModel,
+            RestClient restClient) {
+        this.repository = repository;
+        this.encryptionService = encryptionService;
+        this.keyManager = keyManager;
+        this.bootstrapConfiguredKeys = bootstrapConfiguredKeys;
+        this.bootstrapLegacyKey = bootstrapLegacyKey;
+        this.geminiModel = geminiModel;
+        this.restClient = restClient != null ? restClient : RestClient.builder().build();
+    }
+
+    public GeminiApiKeyProvider(
+            AiApiKeyRepository repository,
+            AiApiKeyEncryptionService encryptionService,
+            GeminiApiKeyManager keyManager,
+            String bootstrapConfiguredKeys,
+            String bootstrapLegacyKey,
+            RestClient restClient) {
+        this(repository, encryptionService, keyManager, bootstrapConfiguredKeys, bootstrapLegacyKey, "gemini-3.8-flash", restClient);
+    }
+
+    public GeminiApiKeyProvider(
+            AiApiKeyRepository repository,
+            AiApiKeyEncryptionService encryptionService,
+            GeminiApiKeyManager keyManager,
+            String bootstrapConfiguredKeys,
             String bootstrapLegacyKey) {
-        this(repository, encryptionService, keyManager, bootstrapConfiguredKeys, bootstrapLegacyKey, "gemini-3.8-flash");
+        this(repository, encryptionService, keyManager, bootstrapConfiguredKeys, bootstrapLegacyKey, "gemini-3.8-flash", null);
     }
 
     @PostConstruct
@@ -153,32 +180,154 @@ public class GeminiApiKeyProvider {
         return removed;
     }
 
+    record KeyValidationResult(
+            boolean success,
+            AiApiKeyStatus status,
+            Integer errorCode,
+            String error,
+            String message,
+            boolean transientError
+    ) {}
+
+    private KeyValidationResult validateKey(String plainKey) {
+        if (!StringUtils.hasText(plainKey)) {
+            return new KeyValidationResult(false, AiApiKeyStatus.INVALID, 400, "INVALID_KEY", "API key cannot be empty", false);
+        }
+        try {
+            Map<String, Object> body = Map.of(
+                    "contents", List.of(Map.of("parts", List.of(Map.of("text", "ping")))),
+                    "generationConfig", Map.of("maxOutputTokens", 1)
+            );
+            String testModel = StringUtils.hasText(geminiModel) ? geminiModel : "gemini-2.5-flash";
+            if (testModel.startsWith("models/")) {
+                testModel = testModel.substring(7);
+            }
+
+            restClient.post()
+                    .uri("https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={key}", testModel, plainKey)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(body)
+                    .retrieve()
+                    .toBodilessEntity();
+
+            return new KeyValidationResult(true, AiApiKeyStatus.ACTIVE, null, null, "API key is valid and available.", false);
+        } catch (RestClientResponseException e) {
+            int code = e.getStatusCode().value();
+            if (code == 429) {
+                return new KeyValidationResult(false, AiApiKeyStatus.EXHAUSTED, 429, "RESOURCE_EXHAUSTED", "API key quota is currently exhausted.", false);
+            } else if (code == 401 || code == 403) {
+                String err = code == 401 ? "UNAUTHORIZED" : "FORBIDDEN";
+                return new KeyValidationResult(false, AiApiKeyStatus.INVALID, code, err, "API key is invalid or unauthorized.", false);
+            } else if (code == 503 || code == 502 || code == 504) {
+                return new KeyValidationResult(false, null, code, "SERVICE_UNAVAILABLE", "Gemini service temporarily unavailable (HTTP " + code + ").", true);
+            } else {
+                return new KeyValidationResult(false, AiApiKeyStatus.INVALID, code, "HTTP_" + code, "Validation failed with status " + code, false);
+            }
+        } catch (Exception e) {
+            return new KeyValidationResult(false, null, null, "NETWORK_ERROR", "Validation request failed: " + e.getMessage(), true);
+        }
+    }
+
     public synchronized AiApiKeyDto setKeyEnabled(String id, boolean enabled) {
         if (repository != null && id != null) {
             Optional<AiApiKeyDocument> docOpt = repository.findById(id);
             if (docOpt.isPresent()) {
                 AiApiKeyDocument doc = docOpt.get();
-                doc.setActive(enabled);
-                doc.setStatus(enabled ? AiApiKeyStatus.ACTIVE : AiApiKeyStatus.DISABLED);
-                doc.setUpdatedAt(Instant.now());
-                doc = repository.save(doc);
+                if (!enabled) {
+                    doc.setActive(false);
+                    doc.setStatus(AiApiKeyStatus.DISABLED);
+                    doc.setUpdatedAt(Instant.now());
+                    doc = repository.save(doc);
 
-                try {
-                    String decrypted = encryptionService.decrypt(doc.getEncryptedKey(), doc.getEncryptionIv(), doc.getKeyVersion());
-                    if (enabled) {
-                        if (!activeRawKeys.contains(decrypted)) {
-                            activeRawKeys.add(decrypted);
-                        }
-                    } else {
+                    try {
+                        String decrypted = encryptionService.decrypt(doc.getEncryptedKey(), doc.getEncryptionIv(), doc.getKeyVersion());
                         activeRawKeys.remove(decrypted);
+                        if (keyManager != null) {
+                            keyManager.syncKeys(new ArrayList<>(activeRawKeys));
+                        }
+                    } catch (Exception e) {
+                        log.warn("Could not decrypt key for disable id={}: {}", id, e.getMessage());
+                    }
+                    log.info("Gemini API key id={} set enabled=false (DISABLED). Active key count: {}", id, activeRawKeys.size());
+                    return toDto(doc);
+                }
+
+                // Enable requested: Validate exact Gemini key first!
+                String plainKey;
+                try {
+                    plainKey = encryptionService.decrypt(doc.getEncryptedKey(), doc.getEncryptionIv(), doc.getKeyVersion());
+                } catch (Exception e) {
+                    doc.setActive(false);
+                    doc.setStatus(AiApiKeyStatus.INVALID);
+                    doc.setLastError("DECRYPTION_FAILED");
+                    doc.setLastFailureAt(Instant.now());
+                    doc.setUpdatedAt(Instant.now());
+                    doc = repository.save(doc);
+                    return toDto(doc);
+                }
+
+                KeyValidationResult validation = validateKey(plainKey);
+                if (validation.success()) {
+                    doc.setActive(true);
+                    doc.setStatus(AiApiKeyStatus.ACTIVE);
+                    doc.setLastUsedAt(Instant.now());
+                    doc.setLastError(null);
+                    doc.setLastErrorCode(null);
+                    doc.setUpdatedAt(Instant.now());
+                    doc = repository.save(doc);
+
+                    if (!activeRawKeys.contains(plainKey)) {
+                        activeRawKeys.add(plainKey);
                     }
                     if (keyManager != null) {
                         keyManager.syncKeys(new ArrayList<>(activeRawKeys));
                     }
-                } catch (Exception e) {
-                    log.warn("Could not decrypt key for status change id={}: {}", id, e.getMessage());
+                    log.info("Gemini API key id={} enabled and validated as ACTIVE. Active key count: {}", id, activeRawKeys.size());
+                } else if (validation.status() == AiApiKeyStatus.EXHAUSTED) {
+                    doc.setActive(false);
+                    doc.setStatus(AiApiKeyStatus.EXHAUSTED);
+                    doc.setLastErrorCode(429);
+                    doc.setLastError("RESOURCE_EXHAUSTED");
+                    doc.setLastFailureAt(Instant.now());
+                    doc.setUpdatedAt(Instant.now());
+                    doc = repository.save(doc);
+
+                    activeRawKeys.remove(plainKey);
+                    if (keyManager != null) {
+                        keyManager.syncKeys(new ArrayList<>(activeRawKeys));
+                    }
+                    log.warn("Gemini API key id={} enable attempted but quota is EXHAUSTED.", id);
+                } else if (validation.status() == AiApiKeyStatus.INVALID) {
+                    doc.setActive(false);
+                    doc.setStatus(AiApiKeyStatus.INVALID);
+                    doc.setLastErrorCode(validation.errorCode());
+                    doc.setLastError(validation.error());
+                    doc.setLastFailureAt(Instant.now());
+                    doc.setUpdatedAt(Instant.now());
+                    doc = repository.save(doc);
+
+                    activeRawKeys.remove(plainKey);
+                    if (keyManager != null) {
+                        keyManager.syncKeys(new ArrayList<>(activeRawKeys));
+                    }
+                    log.warn("Gemini API key id={} enable attempted but credential is INVALID ({}).", id, validation.error());
+                } else {
+                    // Transient error: preserve safe non-active state (keep DISABLED)
+                    doc.setActive(false);
+                    doc.setStatus(AiApiKeyStatus.DISABLED);
+                    doc.setLastErrorCode(validation.errorCode());
+                    doc.setLastError(validation.error());
+                    doc.setLastFailureAt(Instant.now());
+                    doc.setUpdatedAt(Instant.now());
+                    doc = repository.save(doc);
+
+                    activeRawKeys.remove(plainKey);
+                    if (keyManager != null) {
+                        keyManager.syncKeys(new ArrayList<>(activeRawKeys));
+                    }
+                    log.warn("Gemini API key id={} enable attempted but hit transient error ({}). Kept DISABLED.", id, validation.error());
                 }
-                log.info("Gemini API key id={} set enabled={}. Active key count: {}", id, enabled, activeRawKeys.size());
+
                 return toDto(doc);
             }
         }
@@ -201,23 +350,41 @@ public class GeminiApiKeyProvider {
             return new TestAiApiKeyResponse(false, "INVALID", "Could not decrypt API key");
         }
 
-        try {
-            Map<String, Object> body = Map.of(
-                    "contents", List.of(Map.of("parts", List.of(Map.of("text", "ping")))),
-                    "generationConfig", Map.of("maxOutputTokens", 1)
-            );
-            String testModel = StringUtils.hasText(geminiModel) ? geminiModel : "gemini-2.5-flash";
-            if (testModel.startsWith("models/")) {
-                testModel = testModel.substring(7);
+        boolean wasDisabled = (doc.getStatus() == AiApiKeyStatus.DISABLED);
+        KeyValidationResult validation = validateKey(plainKey);
+
+        if (wasDisabled) {
+            // Keep DISABLED: do not automatically enable a disabled key upon test
+            doc.setStatus(AiApiKeyStatus.DISABLED);
+            doc.setActive(false);
+            if (validation.success()) {
+                doc.setLastError(null);
+                doc.setLastErrorCode(null);
+                doc.setLastUsedAt(Instant.now());
+                doc.setUpdatedAt(Instant.now());
+                repository.save(doc);
+                return new TestAiApiKeyResponse(true, "ACTIVE", "API key is valid and available (currently DISABLED).");
+            } else if (validation.status() == AiApiKeyStatus.EXHAUSTED) {
+                doc.setLastErrorCode(429);
+                doc.setLastError("RESOURCE_EXHAUSTED");
+                doc.setLastFailureAt(Instant.now());
+                doc.setUpdatedAt(Instant.now());
+                repository.save(doc);
+                return new TestAiApiKeyResponse(false, "EXHAUSTED", "API key quota is currently exhausted.");
+            } else if (validation.status() == AiApiKeyStatus.INVALID) {
+                doc.setLastErrorCode(validation.errorCode());
+                doc.setLastError(validation.error());
+                doc.setLastFailureAt(Instant.now());
+                doc.setUpdatedAt(Instant.now());
+                repository.save(doc);
+                return new TestAiApiKeyResponse(false, "INVALID", "API key is invalid or unauthorized.");
+            } else {
+                return new TestAiApiKeyResponse(false, "DISABLED", validation.message());
             }
+        }
 
-            restClient.post()
-                    .uri("https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={key}", testModel, plainKey)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(body)
-                    .retrieve()
-                    .toBodilessEntity();
-
+        // Key was NOT disabled (ACTIVE, EXHAUSTED, or INVALID)
+        if (validation.success()) {
             doc.setStatus(AiApiKeyStatus.ACTIVE);
             doc.setActive(true);
             doc.setLastUsedAt(Instant.now());
@@ -232,40 +399,48 @@ public class GeminiApiKeyProvider {
                     keyManager.syncKeys(new ArrayList<>(activeRawKeys));
                 }
             }
-
             return new TestAiApiKeyResponse(true, "ACTIVE", "API key is valid and available.");
-        } catch (RestClientResponseException e) {
-            int code = e.getStatusCode().value();
-            if (code == 429) {
-                doc.setStatus(AiApiKeyStatus.EXHAUSTED);
-                doc.setLastErrorCode(429);
-                doc.setLastError("RESOURCE_EXHAUSTED");
-                doc.setLastFailureAt(Instant.now());
-                doc.setUpdatedAt(Instant.now());
-                repository.save(doc);
-                activeRawKeys.remove(plainKey);
-                if (keyManager != null) {
-                    keyManager.syncKeys(new ArrayList<>(activeRawKeys));
-                }
-                return new TestAiApiKeyResponse(false, "EXHAUSTED", "API key quota is currently exhausted.");
-            } else if (code == 401 || code == 403) {
-                doc.setStatus(AiApiKeyStatus.INVALID);
-                doc.setLastErrorCode(code);
-                doc.setLastError(code == 401 ? "UNAUTHORIZED" : "FORBIDDEN");
-                doc.setLastFailureAt(Instant.now());
-                doc.setUpdatedAt(Instant.now());
-                repository.save(doc);
-                activeRawKeys.remove(plainKey);
-                if (keyManager != null) {
-                    keyManager.syncKeys(new ArrayList<>(activeRawKeys));
-                }
-                return new TestAiApiKeyResponse(false, "INVALID", "API key is invalid or unauthorized.");
-            } else {
-                return new TestAiApiKeyResponse(false, doc.getStatus() != null ? doc.getStatus().name() : "ERROR", "Test failed with status " + code);
+        } else if (validation.status() == AiApiKeyStatus.EXHAUSTED) {
+            doc.setStatus(AiApiKeyStatus.EXHAUSTED);
+            doc.setActive(false);
+            doc.setLastErrorCode(429);
+            doc.setLastError("RESOURCE_EXHAUSTED");
+            doc.setLastFailureAt(Instant.now());
+            doc.setUpdatedAt(Instant.now());
+            repository.save(doc);
+
+            activeRawKeys.remove(plainKey);
+            if (keyManager != null) {
+                keyManager.syncKeys(new ArrayList<>(activeRawKeys));
             }
-        } catch (Exception e) {
-            return new TestAiApiKeyResponse(false, doc.getStatus() != null ? doc.getStatus().name() : "ERROR", "Test failed: " + e.getMessage());
+            return new TestAiApiKeyResponse(false, "EXHAUSTED", "API key quota is currently exhausted.");
+        } else if (validation.status() == AiApiKeyStatus.INVALID) {
+            doc.setStatus(AiApiKeyStatus.INVALID);
+            doc.setActive(false);
+            doc.setLastErrorCode(validation.errorCode());
+            doc.setLastError(validation.error());
+            doc.setLastFailureAt(Instant.now());
+            doc.setUpdatedAt(Instant.now());
+            repository.save(doc);
+
+            activeRawKeys.remove(plainKey);
+            if (keyManager != null) {
+                keyManager.syncKeys(new ArrayList<>(activeRawKeys));
+            }
+            return new TestAiApiKeyResponse(false, "INVALID", "API key is invalid or unauthorized.");
+        } else {
+            return new TestAiApiKeyResponse(false, doc.getStatus().name(), validation.message());
         }
+    }
+
+    public com.apms.domain.ai.dto.RevealAiApiKeyResponse revealKey(String id) {
+        if (repository == null || id == null) {
+            throw new ResourceNotFoundException("API key storage not available");
+        }
+        AiApiKeyDocument doc = repository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("API key not found with id: " + id));
+        String plainKey = encryptionService.decrypt(doc.getEncryptedKey(), doc.getEncryptionIv(), doc.getKeyVersion());
+        return new com.apms.domain.ai.dto.RevealAiApiKeyResponse(doc.getId(), plainKey);
     }
 
     public synchronized void recordKeySuccess(String rawKey) {
@@ -276,7 +451,11 @@ public class GeminiApiKeyProvider {
                 doc.setLastUsedAt(Instant.now());
                 if (doc.getStatus() != AiApiKeyStatus.DISABLED) {
                     doc.setStatus(AiApiKeyStatus.ACTIVE);
+                    doc.setActive(true);
+                    doc.setLastError(null);
+                    doc.setLastErrorCode(null);
                 }
+                doc.setUpdatedAt(Instant.now());
                 repository.save(doc);
             });
         }
@@ -284,10 +463,12 @@ public class GeminiApiKeyProvider {
 
     public synchronized void recordKeyFailure(String rawKey, int errorCode, String errorMessage, AiApiKeyStatus targetStatus) {
         if (rawKey == null) return;
+        activeRawKeys.remove(rawKey);
         String docId = rawKeyToDocId.get(rawKey);
         if (docId != null && repository != null) {
             repository.findById(docId).ifPresent(doc -> {
                 doc.setStatus(targetStatus);
+                doc.setActive(false);
                 doc.setLastErrorCode(errorCode);
                 doc.setLastError(errorMessage);
                 doc.setLastFailureAt(Instant.now());
@@ -479,16 +660,22 @@ public class GeminiApiKeyProvider {
     }
 
     private AiApiKeyDto toDto(AiApiKeyDocument doc) {
+        AiApiKeyStatus effectiveStatus = doc.getStatus() != null
+                ? doc.getStatus()
+                : (doc.isActive() ? AiApiKeyStatus.ACTIVE : AiApiKeyStatus.DISABLED);
+        Integer errorCode = effectiveStatus == AiApiKeyStatus.ACTIVE ? null : doc.getLastErrorCode();
+        String errorMsg = effectiveStatus == AiApiKeyStatus.ACTIVE ? null : doc.getLastError();
+
         return AiApiKeyDto.builder()
                 .id(doc.getId())
                 .provider(doc.getProvider() != null ? doc.getProvider() : "GEMINI")
                 .maskedKey(doc.getMaskedKey())
                 .label(doc.getLabel())
-                .status(doc.getStatus() != null ? doc.getStatus() : (doc.isActive() ? AiApiKeyStatus.ACTIVE : AiApiKeyStatus.DISABLED))
+                .status(effectiveStatus)
                 .lastUsedAt(doc.getLastUsedAt())
                 .lastFailureAt(doc.getLastFailureAt())
-                .lastErrorCode(doc.getLastErrorCode())
-                .lastError(doc.getLastError())
+                .lastErrorCode(errorCode)
+                .lastError(errorMsg)
                 .active(doc.isActive())
                 .orderIndex(doc.getOrderIndex())
                 .createdSource(doc.getCreatedSource())
