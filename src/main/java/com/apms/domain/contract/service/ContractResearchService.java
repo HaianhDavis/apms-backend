@@ -286,7 +286,8 @@ public class ContractResearchService {
         validateContractEditable(research, entry);
 
         if (req != null) {
-            validateContractDates(req.getSigningDate(), req.getEffectiveDate(), req.getExpiryDate());
+            LocalDate docDate = req.getDocumentDate() != null ? req.getDocumentDate() : entry.getDocumentDate();
+            validateContractDates(docDate, req.getSigningDate(), req.getEffectiveDate(), req.getExpiryDate());
 
             if (StringUtils.hasText(req.getTitle())) {
                 entry.setTitle(req.getTitle().trim());
@@ -318,6 +319,7 @@ public class ContractResearchService {
 
             List<ContractParty> updatedParties = new ArrayList<>();
             if (req.getParties() != null) {
+                validateManualContractPartiesTaxCodes(req.getParties());
                 for (ManualContractPartyDto pDto : req.getParties()) {
                     if (pDto == null) continue;
                     boolean hasPartyData = StringUtils.hasText(pDto.getLegalName())
@@ -433,13 +435,16 @@ public class ContractResearchService {
         }
         String originalFilename = file.getOriginalFilename();
         if (originalFilename == null || !originalFilename.toLowerCase().endsWith(".pdf")) {
-            throw new BusinessValidationException("INVALID_FILE_TYPE", "Only PDF documents are supported for contracts");
+            throw new BusinessValidationException("INVALID_FILE_TYPE", "Only PDF files are allowed.");
+        }
+        if (file.getSize() > 50L * 1024 * 1024) {
+            throw new BusinessValidationException("FILE_TOO_LARGE", "PDF file must not exceed 50 MB.");
         }
 
         Long effectiveUserId = userId != null ? userId : 1L;
 
         // Upload and store new document via DocumentService
-        com.apms.domain.document.dto.ImportJobResponse importJob = documentService.uploadDocument(projectId, taskId, file, effectiveUserId);
+        com.apms.domain.document.dto.ImportJobResponse importJob = documentService.uploadPartnerContractDocument(projectId, taskId, file, effectiveUserId);
         String newDocumentId = importJob.getRawDocumentId();
         if (newDocumentId == null) {
             throw new BusinessValidationException("UPLOAD_FAILED", "Failed to obtain document ID for uploaded file");
@@ -1093,7 +1098,8 @@ public class ContractResearchService {
         }
 
         // Check single active submission constraint
-        List<ProjectTaskSubmission> activeSubs = projectTaskSubmissionRepository.findByProjectTask_Id(taskId).stream()
+        List<ProjectTaskSubmission> allSubs = projectTaskSubmissionRepository.findByProjectTask_Id(taskId);
+        List<ProjectTaskSubmission> activeSubs = allSubs.stream()
                 .filter(s -> s.getStatus() == SubmissionStatus.IN_REVIEW)
                 .toList();
         if (!activeSubs.isEmpty()) {
@@ -1105,7 +1111,8 @@ public class ContractResearchService {
                 .orElseThrow(() -> new BusinessValidationException("TASK_NOT_FOUND", "Project task not found: " + taskId));
 
         boolean isRevision = research.getStatus() == ContractResearchStatus.CHANGES_REQUESTED
-                || (research.getContracts() != null && research.getContracts().stream().anyMatch(c -> c.getReviewStatus() == ContractEntryReviewStatus.CHANGES_REQUESTED));
+                || (research.getContracts() != null && research.getContracts().stream().anyMatch(c -> c.getReviewStatus() == ContractEntryReviewStatus.CHANGES_REQUESTED))
+                || allSubs.stream().anyMatch(s -> s.getStatus() == SubmissionStatus.REVISION_REQUESTED);
         List<ContractEntry> selectedContracts = new ArrayList<>();
         for (String cId : req.getContractEntryIds()) {
             ContractEntry entry = findContractOrThrow(research, cId);
@@ -1113,10 +1120,11 @@ public class ContractResearchService {
                 throw new BusinessValidationException("CONTRACT_APPROVED_IMMUTABLE",
                         "Approved contract '" + entry.getTitle() + "' cannot be resubmitted.");
             }
-            if (isRevision && entry.getReviewStatus() != ContractEntryReviewStatus.CHANGES_REQUESTED
+            if (entry.getReviewStatus() != ContractEntryReviewStatus.CHANGES_REQUESTED
+                    && entry.getReviewStatus() != ContractEntryReviewStatus.DRAFT
                     && entry.getReviewStatus() != ContractEntryReviewStatus.PENDING_REVIEW) {
-                throw new BusinessValidationException("CONTRACT_NOT_IN_REVISION",
-                        "Only contracts with CHANGES_REQUESTED can be resubmitted during revision. Contract '" + entry.getTitle() + "' is in status " + entry.getReviewStatus());
+                throw new BusinessValidationException("CONTRACT_NOT_SUBMITTABLE",
+                        "Contract '" + entry.getTitle() + "' is in status " + entry.getReviewStatus() + " and cannot be submitted.");
             }
             validateSubmissionEligibility(entry);
             selectedContracts.add(entry);
@@ -1595,11 +1603,58 @@ public class ContractResearchService {
     }
 
     public void validateContractDates(LocalDate signingDate, LocalDate effectiveDate, LocalDate expiryDate) {
+        validateContractDates(null, signingDate, effectiveDate, expiryDate);
+    }
+
+    public void validateContractDates(LocalDate documentDate, LocalDate signingDate, LocalDate effectiveDate, LocalDate expiryDate) {
+        if (documentDate != null && signingDate != null && signingDate.isBefore(documentDate)) {
+            throw new BusinessValidationException("INVALID_CONTRACT_DATES", "Ngày ký không được trước ngày tài liệu/văn bản.");
+        }
         if (signingDate != null && effectiveDate != null && effectiveDate.isBefore(signingDate)) {
             throw new BusinessValidationException("INVALID_CONTRACT_DATES", "Ngày hiệu lực phải bằng hoặc sau ngày ký.");
         }
         if (effectiveDate != null && expiryDate != null && !expiryDate.isAfter(effectiveDate)) {
             throw new BusinessValidationException("INVALID_CONTRACT_DATES", "Ngày hết hạn phải sau ngày hiệu lực.");
+        }
+    }
+
+    public void validateManualContractPartiesTaxCodes(List<ManualContractPartyDto> parties) {
+        if (parties == null || parties.isEmpty()) {
+            return;
+        }
+
+        Set<String> seenTaxCodes = new HashSet<>();
+        for (ManualContractPartyDto party : parties) {
+            if (party == null || !StringUtils.hasText(party.getTaxCode())) {
+                continue;
+            }
+            String taxCode = party.getTaxCode().trim();
+            if (!taxCode.matches("\\d+")) {
+                throw new BusinessValidationException("INVALID_TAX_CODE", "Mã số thuế chỉ được chứa chữ số.");
+            }
+            if (!seenTaxCodes.add(taxCode)) {
+                throw new BusinessValidationException("DUPLICATE_TAX_CODE", "Mã số thuế không được trùng với bên tham gia khác.");
+            }
+        }
+    }
+
+    public void validateContractPartiesTaxCodes(List<ContractParty> parties) {
+        if (parties == null || parties.isEmpty()) {
+            return;
+        }
+
+        Set<String> seenTaxCodes = new HashSet<>();
+        for (ContractParty party : parties) {
+            if (party == null || !StringUtils.hasText(party.getTaxCode())) {
+                continue;
+            }
+            String taxCode = party.getTaxCode().trim();
+            if (!taxCode.matches("\\d+")) {
+                throw new BusinessValidationException("INVALID_TAX_CODE", "Mã số thuế chỉ được chứa chữ số.");
+            }
+            if (!seenTaxCodes.add(taxCode)) {
+                throw new BusinessValidationException("DUPLICATE_TAX_CODE", "Mã số thuế không được trùng với bên tham gia khác.");
+            }
         }
     }
 
@@ -1618,7 +1673,7 @@ public class ContractResearchService {
         // Validate contract dates for all submitted contracts (both manual and extracted)
         LocalDate signingDate = entry.getCommonData() != null && entry.getCommonData().getSigningDate() != null
                 ? entry.getCommonData().getSigningDate().getValue()
-                : entry.getDocumentDate();
+                : null;
         LocalDate effectiveDate = entry.getCommonData() != null && entry.getCommonData().getEffectiveDate() != null
                 ? entry.getCommonData().getEffectiveDate().getValue()
                 : null;
@@ -1627,7 +1682,7 @@ public class ContractResearchService {
                 : null;
 
         try {
-            validateContractDates(signingDate, effectiveDate, expiryDate);
+            validateContractDates(entry.getDocumentDate(), signingDate, effectiveDate, expiryDate);
         } catch (BusinessValidationException ex) {
             throw new BusinessValidationException("INVALID_CONTRACT_DATES",
                     "Hợp đồng '" + entry.getTitle() + "' có ngày không hợp lệ: " + ex.getMessage());
@@ -2468,7 +2523,21 @@ public class ContractResearchService {
         if (path.endsWith("parties") && entry.getCommonData() != null && entry.getCommonData().getParties() != null) {
             entry.getCommonData().getParties().stream().filter(p -> p.getId().equals(itemId)).findFirst().ifPresent(p -> {
                 if (payload.containsKey("legalName")) p.setLegalName(payload.get("legalName").toString());
-                if (payload.containsKey("taxCode")) p.setTaxCode(payload.get("taxCode") != null ? payload.get("taxCode").toString() : null);
+                if (payload.containsKey("taxCode")) {
+                    String tc = payload.get("taxCode") != null ? payload.get("taxCode").toString().trim() : null;
+                    if (StringUtils.hasText(tc)) {
+                        if (!tc.matches("\\d+")) {
+                            throw new BusinessValidationException("INVALID_TAX_CODE", "Mã số thuế chỉ được chứa chữ số.");
+                        }
+                        boolean duplicate = entry.getCommonData().getParties().stream()
+                                .filter(other -> other != null && other.getId() != null && !other.getId().equals(itemId) && StringUtils.hasText(other.getTaxCode()))
+                                .anyMatch(other -> other.getTaxCode().trim().equals(tc));
+                        if (duplicate) {
+                            throw new BusinessValidationException("DUPLICATE_TAX_CODE", "Mã số thuế không được trùng với bên tham gia khác.");
+                        }
+                    }
+                    p.setTaxCode(StringUtils.hasText(tc) ? tc : null);
+                }
                 if (payload.containsKey("address")) p.setAddress(payload.get("address") != null ? payload.get("address").toString() : null);
                 if (payload.containsKey("representative")) p.setRepresentative(payload.get("representative") != null ? payload.get("representative").toString() : null);
                 if (payload.containsKey("role")) p.setRole(payload.get("role") != null ? payload.get("role").toString() : null);

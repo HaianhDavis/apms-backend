@@ -506,7 +506,7 @@ class ContractResearchManualWorkflowTest {
         com.apms.domain.document.dto.ImportJobResponse jobRes = com.apms.domain.document.dto.ImportJobResponse.builder()
                 .rawDocumentId("raw-doc-new-123")
                 .build();
-        when(documentService.uploadDocument(eq(projectId), eq(taskId), any(), eq(staffId))).thenReturn(jobRes);
+        when(documentService.uploadPartnerContractDocument(eq(projectId), eq(taskId), any(), eq(staffId))).thenReturn(jobRes);
 
         ContractResearchResponse resp = contractResearchService.replaceContractFile(projectId, taskId, "c-manual", file, staffId);
 
@@ -559,7 +559,7 @@ class ContractResearchManualWorkflowTest {
         com.apms.domain.document.dto.ImportJobResponse jobRes = com.apms.domain.document.dto.ImportJobResponse.builder()
                 .rawDocumentId("raw-doc-new-456")
                 .build();
-        when(documentService.uploadDocument(eq(projectId), eq(taskId), any(), eq(staffId))).thenReturn(jobRes);
+        when(documentService.uploadPartnerContractDocument(eq(projectId), eq(taskId), any(), eq(staffId))).thenReturn(jobRes);
 
         ContractResearchResponse resp = contractResearchService.replaceContractFile(projectId, taskId, "c-ai", file, staffId);
 

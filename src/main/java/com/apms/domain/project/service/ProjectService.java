@@ -200,9 +200,7 @@ public class ProjectService {
                 request.getTargetCompanyName(),
                 resolvedRelationshipType);
 
-        if (request.getPlannedEndDate().isBefore(LocalDate.now())) {
-            throw new com.apms.common.exception.BusinessValidationException("Planned end date cannot be before today");
-        }
+        validatePlannedEndDate(request.getPlannedEndDate());
 
         validateKeyResults(request.getKeyResults(), request.getProjectType(), request.getTargetCompanyProfileId(), resolvedRelationshipType);
 
@@ -378,6 +376,7 @@ public class ProjectService {
             project.setTargetRelationshipType(request.getTargetRelationshipType());
         }
         if (request.getPlannedEndDate() != null) {
+            validatePlannedEndDate(request.getPlannedEndDate());
             LocalDate logicalStartDate = project.getCreatedAt() != null ? project.getCreatedAt().toLocalDate() : LocalDate.now();
             if (request.getPlannedEndDate().isBefore(logicalStartDate)) {
                 throw new com.apms.common.exception.BusinessValidationException("Planned end date cannot be before project start date");
@@ -1050,6 +1049,12 @@ public class ProjectService {
             log.warn("Failed to resolve Neo4j relationship for company {}: {}", targetCompanyProfileId, e.getMessage());
         }
         return null;
+    }
+
+    public void validatePlannedEndDate(LocalDate plannedEndDate) {
+        if (plannedEndDate != null && plannedEndDate.isBefore(LocalDate.now())) {
+            throw new BusinessValidationException("INVALID_DUE_DATE", "Due Date cannot be earlier than today.");
+        }
     }
 
     private void validateProjectTypeInvariants(ProjectType type,

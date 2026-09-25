@@ -69,6 +69,7 @@ public class ContractResearchController {
     }
 
     @PutMapping("/projects/{projectId}/tasks/{taskId}/contract-research/contracts/{contractId}/file")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMember(#projectId)")
     public ResponseEntity<ContractResearchResponse> replaceContractFile(
             @PathVariable Long projectId,
             @PathVariable Long taskId,

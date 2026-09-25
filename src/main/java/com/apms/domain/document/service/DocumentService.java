@@ -192,10 +192,14 @@ public class DocumentService {
     @Transactional
     public ImportJobResponse uploadPartnerContractDocument(Long projectId, Long taskId, MultipartFile file, Long uploaderUserId) {
         validatePartnerContractTaskAccess(projectId, taskId, uploaderUserId, true);
-        if (file == null || file.isEmpty() || file.getSize() > 50L * 1024 * 1024
-                || file.getOriginalFilename() == null
-                || !file.getOriginalFilename().toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")) {
-            throw new BusinessValidationException("A non-empty PDF of at most 50MB is required.");
+        if (file == null || file.isEmpty()) {
+            throw new BusinessValidationException("Uploaded file cannot be empty");
+        }
+        if (file.getOriginalFilename() == null || !file.getOriginalFilename().toLowerCase(java.util.Locale.ROOT).endsWith(".pdf")) {
+            throw new BusinessValidationException("Only PDF files are allowed.");
+        }
+        if (file.getSize() > 50L * 1024 * 1024) {
+            throw new BusinessValidationException("PDF file must not exceed 50 MB.");
         }
         ProjectTask task = projectTaskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found with id: " + taskId));
@@ -634,7 +638,8 @@ public class DocumentService {
         }
         var user = accountRepository.findById(userId)
                 .orElseThrow(() -> new AccessDeniedException("Account not found"));
-        boolean manager = user.getRoles().contains(com.apms.common.enums.SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        boolean manager = user.getRoles().contains(com.apms.common.enums.SystemRole.BUSINESS_DEVELOPMENT_MANAGER)
+                || user.getRoles().contains(com.apms.common.enums.SystemRole.SYSTEM_ADMIN);
         if (!manager && (task.getAssignedToAccount() == null || !userId.equals(task.getAssignedToAccount().getId()))) {
             throw new AccessDeniedException("Staff can only modify their assigned contract task.");
         }
