@@ -193,7 +193,7 @@ public class LoginMfaService {
         });
     }
 
-    private void invalidateActiveChallengesForAccount(Long accountId) {
+    public void invalidateActiveChallengesForAccount(Long accountId) {
         LocalDateTime now = LocalDateTime.now();
         List<OtpChallenge> activeChallenges = challengeRepository
                 .findByAccountIdAndPurposeAndUsedAtIsNullAndInvalidatedAtIsNull(accountId, StepUpPurpose.LOGIN_MFA);

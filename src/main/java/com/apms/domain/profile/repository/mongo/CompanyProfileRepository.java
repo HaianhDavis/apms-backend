@@ -29,4 +29,6 @@ public interface CompanyProfileRepository extends MongoRepository<CompanyProfile
 
     Optional<CompanyProfile> findFirstByIsOwnerEnterpriseTrue();
     boolean existsByIsOwnerEnterpriseTrue();
+
+    boolean existsByIdentityTaxCode(String identityTaxCode);
 }

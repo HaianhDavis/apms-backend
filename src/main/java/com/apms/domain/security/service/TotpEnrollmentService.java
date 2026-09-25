@@ -223,4 +223,12 @@ public class TotpEnrollmentService {
         cred.setLastAcceptedTimeStep(matchedTimeStep);
         repository.save(cred);
     }
+
+    @Transactional
+    public void resetEnrollment(Long accountId) {
+        repository.findByAccountIdWithLock(accountId).ifPresent(cred -> {
+            repository.delete(cred);
+            repository.flush();
+        });
+    }
 }

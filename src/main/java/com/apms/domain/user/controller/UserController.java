@@ -114,4 +114,14 @@ public class UserController {
         userService.assignUserRoles(userId, request, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(null, "User roles updated"));
     }
+
+    @PostMapping({"/users/{userId}/reset-authenticator", "/admin/users/{userId}/reset-authenticator"})
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> resetAuthenticator(
+            @PathVariable Long userId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        userService.resetAuthenticator(userId, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(null, "Authenticator reset successfully. The user must set up Authenticator again on the next sign-in."));
+    }
 }

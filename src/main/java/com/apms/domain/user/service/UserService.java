@@ -2,7 +2,14 @@ package com.apms.domain.user.service;
 
 import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.SystemRole;
+import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.audit.service.AuditLogService;
+import com.apms.domain.auth.service.LoginMfaService;
+import com.apms.domain.auth.service.RefreshTokenService;
+import com.apms.domain.security.entity.AccountTotpCredential;
+import com.apms.domain.security.repository.AccountTotpCredentialRepository;
+import com.apms.domain.security.service.StepUpAuthenticationService;
+import com.apms.domain.security.service.TotpEnrollmentService;
 import com.apms.domain.user.Account;
 import com.apms.domain.user.UserProfile;
 import com.apms.domain.user.dto.*;
@@ -15,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -25,6 +33,11 @@ public class UserService {
     private final UserProfileRepository userProfileRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuditLogService auditLogService;
+    private final TotpEnrollmentService totpEnrollmentService;
+    private final AccountTotpCredentialRepository credentialRepository;
+    private final LoginMfaService loginMfaService;
+    private final RefreshTokenService refreshTokenService;
+    private final StepUpAuthenticationService stepUpAuthenticationService;
 
     @Transactional(readOnly = true)
     public UserProfileResponse getCurrentUserProfile(Long currentUserId) {
@@ -89,9 +102,40 @@ public class UserService {
 
     @Transactional(readOnly = true)
     public List<UserProfileResponse> listUsers() {
+        Set<Long> mfaEnrolledAccountIds = credentialRepository.findAll().stream()
+                .filter(AccountTotpCredential::isEnabled)
+                .map(AccountTotpCredential::getAccountId)
+                .collect(Collectors.toSet());
+
         return accountRepository.findAll().stream()
-                .map(this::mapAccountToResponse)
+                .map(account -> mapAccountToResponse(account, mfaEnrolledAccountIds.contains(account.getId())))
                 .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public void resetAuthenticator(Long targetUserId, Long adminId) {
+        if (targetUserId.equals(adminId)) {
+            throw new IllegalArgumentException("You cannot reset your own Authenticator from Account Management");
+        }
+
+        Account account = accountRepository.findById(targetUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + targetUserId));
+
+        // 1. Invalidate persisted TOTP credentials
+        totpEnrollmentService.resetEnrollment(targetUserId);
+
+        // 2. Invalidate active OTP challenges (login/enrollment) for this user
+        loginMfaService.invalidateActiveChallengesForAccount(targetUserId);
+
+        // 3. Invalidate owner/step-up secure sessions if any
+        stepUpAuthenticationService.invalidateOwnerSecureSession(targetUserId);
+
+        // 4. Revoke active refresh token / session
+        refreshTokenService.revokeToken(targetUserId);
+
+        // 5. Record audit log
+        auditLogService.log(adminId, AuditAction.TOTP_CREDENTIAL_RESET, "Account", targetUserId.toString(),
+                "Admin reset Authenticator for: " + account.getEmail());
     }
 
     @Transactional
@@ -208,14 +252,25 @@ public class UserService {
 
     private UserProfileResponse getProfileResponse(Long userId) {
         Account account = accountRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
         UserProfile profile = userProfileRepository.findByAccountId(userId)
                 .orElse(null);
 
-        return mapToResponse(account, profile);
+        boolean mfaConfigured = credentialRepository.findByAccountId(userId)
+                .map(AccountTotpCredential::isEnabled)
+                .orElse(false);
+
+        return mapToResponse(account, profile, mfaConfigured);
     }
 
     private UserProfileResponse mapToResponse(Account account, UserProfile profile) {
+        boolean mfaConfigured = credentialRepository.findByAccountId(account.getId())
+                .map(AccountTotpCredential::isEnabled)
+                .orElse(false);
+        return mapToResponse(account, profile, mfaConfigured);
+    }
+
+    private UserProfileResponse mapToResponse(Account account, UserProfile profile, Boolean authenticatorConfigured) {
         String dept = profile != null ? profile.getDepartment() : null;
         if (dept == null || dept.isBlank()) {
             boolean isAdmin = account.getRoles() != null && account.getRoles().stream()
@@ -235,6 +290,7 @@ public class UserService {
                 .roles(account.getRoles())
                 .enabled(account.getIsActive())
                 .emailVerified(account.getEmailVerified())
+                .authenticatorConfigured(authenticatorConfigured)
                 .createdAt(account.getCreatedAt())
                 .phone(phone)
                 .department(dept)
@@ -244,6 +300,13 @@ public class UserService {
     }
 
     private UserProfileResponse mapAccountToResponse(Account account) {
+        boolean mfaConfigured = credentialRepository.findByAccountId(account.getId())
+                .map(AccountTotpCredential::isEnabled)
+                .orElse(false);
+        return mapAccountToResponse(account, mfaConfigured);
+    }
+
+    private UserProfileResponse mapAccountToResponse(Account account, Boolean authenticatorConfigured) {
         UserProfile profile = userProfileRepository.findByAccountId(account.getId()).orElse(null);
         String fullName = profile != null
                 ? (profile.getFirstName() + " " + profile.getLastName()).trim()
@@ -271,6 +334,7 @@ public class UserService {
                 .roles(account.getRoles())
                 .enabled(account.getIsActive())
                 .emailVerified(account.getEmailVerified())
+                .authenticatorConfigured(authenticatorConfigured)
                 .createdAt(account.getCreatedAt())
                 .phone(phone)
                 .department(dept)

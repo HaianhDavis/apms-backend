@@ -20,6 +20,7 @@ public class UserProfileResponse {
     private Set<SystemRole> roles;
     private Boolean enabled;
     private Boolean emailVerified;
+    private Boolean authenticatorConfigured;
     private LocalDateTime createdAt;
     private String phone;
     private String department;
