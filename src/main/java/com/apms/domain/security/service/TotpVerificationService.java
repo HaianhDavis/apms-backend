@@ -49,12 +49,12 @@ public class TotpVerificationService {
         throw new TotpException("TOTP_CODE_INVALID");
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = TotpException.class)
     public void verifyStepUpCode(Long accountId, String code) {
         verifyTotp(accountId, code);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = TotpException.class)
     public void verifyTotp(Long accountId, String code) {
         AccountTotpCredential credential = repository.findByAccountIdWithLock(accountId)
                 .orElseThrow(() -> new TotpException("TOTP_NOT_ENROLLED"));

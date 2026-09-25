@@ -172,7 +172,7 @@ public class TotpEnrollmentService {
         return stepUpAuthenticationService.grantOwnerSecureSession(accountId);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = TotpException.class)
     public void confirmEnrollmentForLogin(Long accountId, UUID enrollmentId, String code) {
         AccountTotpCredential cred = repository.findByAccountIdWithLock(accountId)
                 .orElseThrow(() -> new TotpException("TOTP_ENROLLMENT_NOT_FOUND"));
