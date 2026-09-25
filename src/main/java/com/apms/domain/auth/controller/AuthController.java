@@ -100,8 +100,10 @@ public class AuthController {
         } catch (com.apms.common.exception.BusinessValidationException ex) {
             // Keep normal safe validation messages (e.g. invalid code, expired challenge)
             throw ex;
+        } catch (DisabledException ex) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(ex.getMessage()));
         } catch (Exception ex) {
-            log.error("Unexpected error verifying login MFA challenge {}: {}", request.getChallengeId(), ex.getMessage(), ex);
+            log.error("Unexpected error verifying login MFA challenge: {}", ex.getMessage(), ex);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.error("Unable to complete sign in. Please try again."));
         }
