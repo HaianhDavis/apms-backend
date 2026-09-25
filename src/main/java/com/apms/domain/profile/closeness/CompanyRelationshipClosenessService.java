@@ -22,12 +22,16 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
 @Slf4j
 @Service
 public class CompanyRelationshipClosenessService {
+
+    private static final String RATED_BY_OWNER = "BUSINESS_OWNER";
+    private static final String RATED_BY_MANAGER = "BUSINESS_DEVELOPMENT_MANAGER";
 
     private final CompanyRelationshipClosenessRepository closenessRepository;
     private final CompanyProfileRepository companyProfileRepository;
@@ -71,8 +75,8 @@ public class CompanyRelationshipClosenessService {
 
         String ownerId = ownerOrganizationService.getOwnerCompanyProfileId();
         return closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerId, targetCompanyProfileId)
-                .map(this::toResponse)
-                .orElseGet(() -> unratedResponse(targetCompanyProfileId));
+                .map(entity -> toResponse(entity, currentUser))
+                .orElseGet(() -> unratedResponse(targetCompanyProfileId, currentUser));
     }
 
     public RelationshipClosenessResponse updateCloseness(String targetCompanyProfileId, UpdateRelationshipClosenessRequest request, UserDetailsImpl currentUser) {
@@ -89,13 +93,17 @@ public class CompanyRelationshipClosenessService {
                     Optional<CompanyRelationshipCloseness> existingOpt = closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerId, targetCompanyProfileId);
                     
                     if (existingOpt.isPresent()) {
-                        return applyUpdate(existingOpt.get(), request, currentUser.getId());
+                        CompanyRelationshipCloseness existing = existingOpt.get();
+                        if (isManager(currentUser) && isOwnerFinalized(existing)) {
+                            throw new org.springframework.security.access.AccessDeniedException("Business Owner has finalized this relationship closeness rating. Manager can no longer update it.");
+                        }
+                        return applyUpdate(existing, request, currentUser);
                     } else {
                         wasCreate.set(true);
                         CompanyRelationshipCloseness newEntity = new CompanyRelationshipCloseness();
                         newEntity.setOwnerCompanyProfileId(ownerId);
                         newEntity.setTargetCompanyProfileId(targetCompanyProfileId);
-                        return applyCreate(newEntity, request, currentUser.getId());
+                        return applyCreate(newEntity, request, currentUser);
                     }
                 });
                 
@@ -103,7 +111,7 @@ public class CompanyRelationshipClosenessService {
                 String detail = String.format("Target: %s, Previous Stars: %s, New Stars: %d", targetCompanyProfileId, result.previousStars != null ? result.previousStars.toString() : "none", request.getStars());
                 auditLogService.log(currentUser.getId(), action, "CompanyRelationshipCloseness", String.valueOf(result.entity.getId()), detail);
 
-                return toResponse(result.entity);
+                return toResponse(result.entity, currentUser);
             } catch (DataIntegrityViolationException e) {
                 boolean rowExists = Boolean.TRUE.equals(sqlTransactionTemplate.execute(status -> 
                         closenessRepository.findByOwnerCompanyProfileIdAndTargetCompanyProfileId(ownerId, targetCompanyProfileId).isPresent()));
@@ -122,37 +130,56 @@ public class CompanyRelationshipClosenessService {
         throw new IllegalStateException("Should not reach here");
     }
 
-    private ClosenessUpsertResult applyCreate(CompanyRelationshipCloseness entity, UpdateRelationshipClosenessRequest request, Long accountId) {
-        entity.setStars(request.getStars());
-        if (request.getNote() != null) {
-            String trimmed = request.getNote().trim();
-            if (trimmed.length() > 1000) {
-                throw new BusinessValidationException("Note cannot exceed 1000 characters");
-            }
-            entity.setNote(trimmed);
-        } else {
-            entity.setNote(null);
-        }
-        entity.setRatedByAccountId(accountId);
+    private ClosenessUpsertResult applyCreate(CompanyRelationshipCloseness entity, UpdateRelationshipClosenessRequest request, UserDetailsImpl currentUser) {
+        applyActorRating(entity, request, currentUser);
         entity = closenessRepository.saveAndFlush(entity);
         return new ClosenessUpsertResult(entity, null, true);
     }
 
-    private ClosenessUpsertResult applyUpdate(CompanyRelationshipCloseness entity, UpdateRelationshipClosenessRequest request, Long accountId) {
+    private ClosenessUpsertResult applyUpdate(CompanyRelationshipCloseness entity, UpdateRelationshipClosenessRequest request, UserDetailsImpl currentUser) {
         Integer oldStars = entity.getStars();
-        entity.setStars(request.getStars());
-        if (request.getNote() != null) {
-            String trimmed = request.getNote().trim();
-            if (trimmed.length() > 1000) {
-                throw new BusinessValidationException("Note cannot exceed 1000 characters");
-            }
-            entity.setNote(trimmed);
-        } else {
-            entity.setNote(null);
-        }
-        entity.setRatedByAccountId(accountId);
+        applyActorRating(entity, request, currentUser);
         entity = closenessRepository.saveAndFlush(entity);
         return new ClosenessUpsertResult(entity, oldStars, false);
+    }
+
+    private void applyActorRating(CompanyRelationshipCloseness entity, UpdateRelationshipClosenessRequest request, UserDetailsImpl currentUser) {
+        String note = normalizeNote(request.getNote());
+        LocalDateTime now = LocalDateTime.now();
+        boolean ownerRating = hasRole(currentUser, SystemRole.BUSINESS_OWNER);
+
+        if (ownerRating) {
+            entity.setOwnerStars(request.getStars());
+            entity.setOwnerNote(note);
+            entity.setOwnerRatedByAccountId(currentUser.getId());
+            entity.setOwnerRatedAt(now);
+            setEffectiveRating(entity, request.getStars(), note, currentUser.getId(), RATED_BY_OWNER);
+            return;
+        }
+
+        entity.setManagerStars(request.getStars());
+        entity.setManagerNote(note);
+        entity.setManagerRatedByAccountId(currentUser.getId());
+        entity.setManagerRatedAt(now);
+        setEffectiveRating(entity, request.getStars(), note, currentUser.getId(), RATED_BY_MANAGER);
+    }
+
+    private void setEffectiveRating(CompanyRelationshipCloseness entity, Integer stars, String note, Long accountId, String role) {
+        entity.setStars(stars);
+        entity.setNote(note);
+        entity.setRatedByAccountId(accountId);
+        entity.setRatedByRole(role);
+    }
+
+    private String normalizeNote(String note) {
+        if (note == null) {
+            return null;
+        }
+        String trimmed = note.trim();
+        if (trimmed.length() > 1000) {
+            throw new BusinessValidationException("Note cannot exceed 1000 characters");
+        }
+        return trimmed;
     }
 
     @Transactional
@@ -204,6 +231,8 @@ public class CompanyRelationshipClosenessService {
         }
 
         if (hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
+
+
             // Can GET and PUT if in scope
             List<ProjectStatus> allowedStatuses = isPut 
                     ? List.of(ProjectStatus.DRAFT, ProjectStatus.ACTIVE)
@@ -219,11 +248,7 @@ public class CompanyRelationshipClosenessService {
             if (isPut) {
                 throw new org.springframework.security.access.AccessDeniedException("Business Development Staff cannot update relationship closeness.");
             }
-            // Can GET if in scope
-            List<ProjectStatus> allowedStatuses = List.of(ProjectStatus.DRAFT, ProjectStatus.ACTIVE, ProjectStatus.COMPLETED);
-            if (!isInScope(targetCompanyProfileId, user.getId(), allowedStatuses)) {
-                throw new org.springframework.security.access.AccessDeniedException("Target company is not within your project scope.");
-            }
+            // Can GET without scope restrictions so they can view Company Profiles
             return;
         }
 
@@ -231,7 +256,12 @@ public class CompanyRelationshipClosenessService {
     }
 
     private boolean isInScope(String targetCompanyProfileId, Long accountId, List<ProjectStatus> allowedStatuses) {
-        return projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(targetCompanyProfileId, accountId, allowedStatuses);
+        if (projectRepository.existsByTargetCompanyProfileIdAndMembersAccountIdAndStatusIn(targetCompanyProfileId, accountId, allowedStatuses)) {
+            return true;
+        }
+        return companyProfileRepository.findById(targetCompanyProfileId)
+                .map(p -> accountId.equals(p.getResponsibleManagerId()))
+                .orElse(false);
     }
 
     private boolean hasRole(UserDetailsImpl user, SystemRole role) {
@@ -240,19 +270,56 @@ public class CompanyRelationshipClosenessService {
                 .anyMatch(a -> a.getAuthority().equals(roleName));
     }
 
-    private RelationshipClosenessResponse toResponse(CompanyRelationshipCloseness entity) {
+    private boolean isManager(UserDetailsImpl user) {
+        return hasRole(user, SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+    }
+
+    private boolean isOwnerFinalized(CompanyRelationshipCloseness entity) {
+        return entity.getOwnerStars() != null
+                || entity.getOwnerRatedByAccountId() != null
+                || RATED_BY_OWNER.equals(entity.getRatedByRole());
+    }
+
+    private boolean canUpdate(String targetCompanyProfileId, UserDetailsImpl user, CompanyRelationshipCloseness entity) {
+        if (hasRole(user, SystemRole.BUSINESS_OWNER)) {
+            return true;
+        }
+        if (isManager(user) && !isOwnerFinalized(entity)) {
+            return isInScope(targetCompanyProfileId, user.getId(), List.of(ProjectStatus.DRAFT, ProjectStatus.ACTIVE));
+        }
+        return false;
+    }
+
+    private boolean canDelete(UserDetailsImpl user) {
+        return hasRole(user, SystemRole.BUSINESS_OWNER);
+    }
+
+    private RelationshipClosenessResponse toResponse(CompanyRelationshipCloseness entity, UserDetailsImpl currentUser) {
+        boolean ownerFinalized = isOwnerFinalized(entity);
         return RelationshipClosenessResponse.builder()
                 .targetCompanyProfileId(entity.getTargetCompanyProfileId())
                 .stars(entity.getStars())
                 .label(RelationshipClosenessLevel.fromStars(entity.getStars()).name())
                 .note(entity.getNote())
                 .ratedByAccountId(entity.getRatedByAccountId())
+                .ratedByRole(entity.getRatedByRole())
                 .ratedAt(entity.getRatedAt())
                 .updatedAt(entity.getUpdatedAt())
+                .ownerFinalized(ownerFinalized)
+                .managerStars(entity.getManagerStars())
+                .managerNote(entity.getManagerNote())
+                .managerRatedByAccountId(entity.getManagerRatedByAccountId())
+                .managerRatedAt(entity.getManagerRatedAt())
+                .ownerStars(entity.getOwnerStars())
+                .ownerNote(entity.getOwnerNote())
+                .ownerRatedByAccountId(entity.getOwnerRatedByAccountId())
+                .ownerRatedAt(entity.getOwnerRatedAt())
+                .canUpdate(canUpdate(entity.getTargetCompanyProfileId(), currentUser, entity))
+                .canDelete(canDelete(currentUser))
                 .build();
     }
 
-    private RelationshipClosenessResponse unratedResponse(String targetCompanyProfileId) {
+    private RelationshipClosenessResponse unratedResponse(String targetCompanyProfileId, UserDetailsImpl currentUser) {
         return RelationshipClosenessResponse.builder()
                 .targetCompanyProfileId(targetCompanyProfileId)
                 .stars(null)
@@ -261,6 +328,10 @@ public class CompanyRelationshipClosenessService {
                 .ratedByAccountId(null)
                 .ratedAt(null)
                 .updatedAt(null)
+                .ownerFinalized(false)
+                .canUpdate(hasRole(currentUser, SystemRole.BUSINESS_OWNER)
+                        || (isManager(currentUser) && isInScope(targetCompanyProfileId, currentUser.getId(), List.of(ProjectStatus.DRAFT, ProjectStatus.ACTIVE))))
+                .canDelete(canDelete(currentUser))
                 .build();
     }
 }

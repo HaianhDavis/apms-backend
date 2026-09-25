@@ -35,8 +35,8 @@ public class OwnerCompanyProfileController {
     @GetMapping("/company-profile")
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<ProfileResponse>> getOwnerCompanyProfile() {
-        String ownerId = ownerOrganizationService.getOwnerCompanyId();
-        ProfileResponse response = profileService.getApprovedProfileResponse(ownerId);
+        com.apms.domain.profile.CompanyProfile ownerProfile = ownerOrganizationService.resolveApprovedOwnerProfile();
+        ProfileResponse response = profileService.toResponse(ownerProfile);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -55,11 +55,12 @@ public class OwnerCompanyProfileController {
     // GET /api/v1/owner/company-profile/versions
     // Role: SYSTEM_ADMIN, BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
-    @GetMapping("/company-profile/versions")
-    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+//    @GetMapping("/company-profile/versions")
+//    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<PageResponse<CompanyProfileVersionResponse>> getOwnerVersions(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "10") int size) {
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "10") int size
+    ) {
         String ownerId = ownerOrganizationService.getOwnerCompanyId();
         Pageable pageable = PageRequest.of(page, size);
         Page<CompanyProfileVersionResponse> pageResult = versionService.getVersions(ownerId, pageable);
@@ -76,13 +77,25 @@ public class OwnerCompanyProfileController {
     }
 
     // ─────────────────────────────────────────────
+    // GET /api/v1/owner/company-intelligence/{id}
+    // Role: SYSTEM_ADMIN, BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
+    // ─────────────────────────────────────────────
+    @GetMapping("/company-intelligence/{id}")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<Object>> getCompanyIntelligence(@PathVariable String id) {
+        // Mock empty response to prevent 500 errors on frontend
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
+
+    // ─────────────────────────────────────────────
     // GET /api/v1/owner/company-profile/versions/{version}
     // Role: SYSTEM_ADMIN, BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
     @GetMapping("/company-profile/versions/{version}")
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<CompanyProfileVersionResponse> getOwnerVersion(
-            @PathVariable Integer version) {
+            @PathVariable String version) {
         String ownerId = ownerOrganizationService.getOwnerCompanyId();
         return ResponseEntity.ok(versionService.getVersion(ownerId, version));
     }

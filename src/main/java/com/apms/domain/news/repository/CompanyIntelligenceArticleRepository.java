@@ -11,6 +11,7 @@ import java.util.Optional;
 @Repository
 public interface CompanyIntelligenceArticleRepository extends MongoRepository<CompanyIntelligenceArticle, String> {
     Page<CompanyIntelligenceArticle> findByCompanyProfileIdAndIsDeletedFalseAndApprovedAtIsNotNull(String companyProfileId, Pageable pageable);
+    Page<CompanyIntelligenceArticle> findByIsDeletedFalseAndApprovedAtIsNotNull(Pageable pageable);
     Optional<CompanyIntelligenceArticle> findByIdAndCompanyProfileIdAndIsDeletedFalseAndApprovedAtIsNotNull(String id, String companyProfileId);
     boolean existsBySourceDraftId(String sourceDraftId);
 }

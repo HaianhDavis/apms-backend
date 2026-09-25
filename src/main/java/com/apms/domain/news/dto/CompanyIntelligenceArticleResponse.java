@@ -29,6 +29,7 @@ public class CompanyIntelligenceArticleResponse {
     private List<String> tags;
 
     private LocalDateTime approvedAt;
+    private String approvedBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

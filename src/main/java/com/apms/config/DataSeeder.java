@@ -33,8 +33,12 @@ public class DataSeeder implements CommandLineRunner {
 
         createUserIfNotFound("admin@apms.com", "System", "Admin", SystemRole.SYSTEM_ADMIN);
         createUserIfNotFound("owner@apms.com", "Business", "Owner", SystemRole.BUSINESS_OWNER);
-        createUserIfNotFound("manager@apms.com", "Business", "Manager", SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
-        createUserIfNotFound("staff@apms.com", "Research", "Staff", SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        createUserIfNotFound("manager1@apms.com", "Business", "Manager 1", SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        createUserIfNotFound("manager2@apms.com", "Business", "Manager 2", SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        createUserIfNotFound("manager3@apms.com", "Business", "Manager 3", SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        createUserIfNotFound("staff1@apms.com", "Research", "Staff 1", SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        createUserIfNotFound("staff2@apms.com", "Research", "Staff 2", SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        createUserIfNotFound("staff3@apms.com", "Research", "Staff 3", SystemRole.BUSINESS_DEVELOPMENT_STAFF);
 
         log.info("Development DataSeeder completed.");
     }
@@ -61,4 +65,20 @@ public class DataSeeder implements CommandLineRunner {
             log.info("Demo account already exists: {}", email);
         }
     }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.apms.domain.candidate.repository.mongo.CompanyCandidateRepository companyCandidateRepository;
+    
+    @jakarta.annotation.PostConstruct
+    public void printCandidate() {
+        companyCandidateRepository.findByTaskId(1L).forEach(c -> {
+            if (!"1".equals(c.getProjectId())) {
+                c.setProjectId("1");
+                companyCandidateRepository.save(c);
+                log.info("FIXED CANDIDATE {} projectId to 1", c.getId());
+            }
+        });
+    }
 }
+
+

@@ -22,6 +22,7 @@ public class PartnerContractCollectionSubmissionPayload {
     private Long projectId;
     private Long taskId;
     private String targetCompanyProfileId;
+    private List<String> rawDocumentIds;
     private List<String> contractDraftIds;
     private LocalDateTime createdAt;
 }

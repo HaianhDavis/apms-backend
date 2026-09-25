@@ -15,6 +15,8 @@ public class FieldApprovalResponse {
     
     private String previousComment;
     private FieldApprovalStatus previousStatus;
+    private Integer previousReviewedRevision;
+    private Object previousSubmittedValue;
     private Integer changedInRevision;
 
     // STALE info

@@ -9,6 +9,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -19,6 +20,35 @@ import java.util.List;
 public class GraphController {
 
     private final GraphService graphService;
+    private final com.apms.domain.graph.service.GraphRelationshipRepairService graphRelationshipRepairService;
+
+    @PostMapping("/reconcile")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Integer>> reconcile() {
+        int count = graphRelationshipRepairService.reconcileAllOfficialCompanyProfiles();
+        return ResponseEntity.ok(ApiResponse.success(count, "Successfully reconciled official company profiles with Neo4j"));
+    }
+
+    @PostMapping("/repair-relationships")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Integer>> repairRelationships() {
+        int count = graphRelationshipRepairService.reconcileAllOfficialCompanyProfiles();
+        return ResponseEntity.ok(ApiResponse.success(count, "Successfully repaired and reconciled relationships with Neo4j"));
+    }
+
+    @PostMapping("/repair-completed-projects")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Integer>> repairCompletedProjects() {
+        int count = graphRelationshipRepairService.repairAllCompletedProjectRelationships();
+        return ResponseEntity.ok(ApiResponse.success(count, "Successfully repaired completed project relationships"));
+    }
+
+    @PostMapping("/repair-company/{companyId}")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Boolean>> repairCompany(@PathVariable String companyId) {
+        boolean success = graphRelationshipRepairService.repairRelationshipForCompany(companyId);
+        return ResponseEntity.ok(ApiResponse.success(success, "Relationship repair result for " + companyId));
+    }
 
     @GetMapping("/companies/{companyId}")
     @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
@@ -31,7 +61,7 @@ public class GraphController {
     }
 
     @GetMapping("/network")
-    @PreAuthorize("hasRole('BUSINESS_OWNER')")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF', 'SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<List<GraphCompanyDto>>> getNetwork() {
         return ResponseEntity.ok(ApiResponse.success(graphService.getNetwork()));
     }

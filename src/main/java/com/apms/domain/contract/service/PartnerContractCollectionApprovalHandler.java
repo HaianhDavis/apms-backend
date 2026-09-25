@@ -19,6 +19,8 @@ import com.apms.domain.contract.entity.PartnerContractClauseVersion;
 import com.apms.domain.contract.repository.sql.PartnerContractRepository;
 import com.apms.domain.contract.repository.sql.PartnerContractVersionRepository;
 import com.apms.domain.contract.repository.sql.PartnerContractClauseVersionRepository;
+import com.apms.domain.document.RawDocument;
+import com.apms.domain.document.repository.mongo.RawDocumentRepository;
 import com.apms.domain.profile.service.OwnerOrganizationService;
 import java.time.LocalDateTime;
 import org.springframework.stereotype.Component;
@@ -34,6 +36,9 @@ public class PartnerContractCollectionApprovalHandler implements ProjectTaskSubm
     private final PartnerContractClauseVersionRepository clauseVersionRepository;
     private final OwnerOrganizationService ownerOrganizationService;
     private final com.apms.domain.audit.service.AuditLogService auditLogService;
+    private final RawDocumentRepository rawDocumentRepository;
+    private final com.apms.domain.notification.service.NotificationService notificationService;
+    private final com.apms.domain.document.service.CompanyDocumentPublisher companyDocumentPublisher;
 
     @Override
     public boolean supports(SubmissionType type) {
@@ -45,12 +50,115 @@ public class PartnerContractCollectionApprovalHandler implements ProjectTaskSubm
         PartnerContractCollectionSubmissionPayload payload = payloadRepository.findBySubmissionId(submission.getId())
                 .orElseThrow(() -> new BusinessValidationException("Submission payload not found"));
 
+        if (payload.getRawDocumentIds() != null) {
+            String referenceCompanyId = ownerOrganizationService.getOwnerCompanyId();
+
+            for (String rawDocumentId : payload.getRawDocumentIds()) {
+                RawDocument rawDocument = rawDocumentRepository.findById(rawDocumentId)
+                        .orElseThrow(() -> new BusinessValidationException("RawDocument not found: " + rawDocumentId));
+
+                if (Boolean.TRUE.equals(rawDocument.getIsHidden())) {
+                    throw new BusinessValidationException("RawDocument is hidden: " + rawDocumentId);
+                }
+                if (!String.valueOf(payload.getProjectId()).equals(rawDocument.getProjectId())) {
+                    throw new BusinessValidationException("RawDocument project mismatch: " + rawDocumentId);
+                }
+                if (!String.valueOf(payload.getTaskId()).equals(rawDocument.getTaskId())) {
+                    throw new BusinessValidationException("RawDocument task mismatch: " + rawDocumentId);
+                }
+                if (!isPartnerContractRawDocument(rawDocument)) {
+                    throw new BusinessValidationException("RawDocument is not a PARTNER_CONTRACT document: " + rawDocumentId);
+                }
+
+                PartnerContract contract = contractRepository.findByRawDocumentIdAndSourceTaskId(rawDocumentId, payload.getTaskId()).orElse(null);
+                if (contract != null) {
+                    continue;
+                }
+
+                String fileName = rawDocument.getSource() != null
+                        && org.springframework.util.StringUtils.hasText(rawDocument.getSource().getFileName())
+                        ? rawDocument.getSource().getFileName()
+                        : "Partner contract " + rawDocumentId;
+
+                LocalDateTime approvedAt = LocalDateTime.now();
+
+                contract = PartnerContract.builder()
+                        .referenceCompanyId(referenceCompanyId)
+                        .partnerCompanyId(payload.getTargetCompanyProfileId())
+                        .sourceProjectId(payload.getProjectId())
+                        .sourceTaskId(payload.getTaskId())
+                        .sourceSubmissionId(submission.getId())
+                        .ownerCompanyProfileId(referenceCompanyId)
+                        .rawDocumentId(rawDocumentId)
+                        .contractTitle(fileName)
+                        .contractType("PARTNER_CONTRACT")
+                        .reviewStatus(ContractReviewStatus.APPROVED)
+                        .createdByAccountId(submission.getSubmittedByAccount().getId())
+                        .approvedByAccountId(reviewerId)
+                        .approvedAt(approvedAt)
+                        .currentVersion(1)
+                        .build();
+
+                contract = contractRepository.save(contract);
+                auditLogService.log(reviewerId, com.apms.common.enums.AuditAction.PARTNER_CONTRACT_CREATED, "PartnerContract", contract.getId().toString(), "Contract created from approved uploaded document");
+
+                PartnerContractVersion version = PartnerContractVersion.builder()
+                        .contractId(contract.getId())
+                        .referenceCompanyId(contract.getReferenceCompanyId())
+                        .partnerCompanyId(contract.getPartnerCompanyId())
+                        .sourceProjectId(contract.getSourceProjectId())
+                        .sourceTaskId(contract.getSourceTaskId())
+                        .rawDocumentId(contract.getRawDocumentId())
+                        .contractTitle(contract.getContractTitle())
+                        .contractType(contract.getContractType())
+                        .reviewStatus(contract.getReviewStatus())
+                        .lifecycleStatus(contract.getLifecycleStatus())
+                        .createdByAccountId(contract.getCreatedByAccountId())
+                        .createdAt(LocalDateTime.now())
+                        .approvedByAccountId(contract.getApprovedByAccountId())
+                        .approvedAt(contract.getApprovedAt())
+                        .version(1)
+                        .build();
+
+                version = versionRepository.save(version);
+                auditLogService.log(reviewerId, com.apms.common.enums.AuditAction.PARTNER_CONTRACT_APPROVED, "PartnerContractVersion", version.getId().toString(), "Contract version 1 created from approved uploaded document");
+
+                companyDocumentPublisher.publishApprovedDocument(
+                        payload.getTargetCompanyProfileId(),
+                        rawDocumentId,
+                        reviewerId,
+                        approvedAt,
+                        com.apms.domain.document.dto.PublicationContext.builder()
+                                .sourceProjectId(String.valueOf(payload.getProjectId()))
+                                .sourceTaskId(String.valueOf(payload.getTaskId()))
+                                .sourceSubmissionId(String.valueOf(submission.getId()))
+                                .documentType("PARTNER_CONTRACT")
+                                .description("Approved partner contract")
+                                .displayName(fileName)
+                                .build()
+                );
+            }
+        }
+
         if (payload.getContractDraftIds() != null) {
             String referenceCompanyId = ownerOrganizationService.getOwnerCompanyId();
 
             for (String draftId : payload.getContractDraftIds()) {
                 PartnerContractExtractionDraft draft = draftRepository.findById(draftId)
                         .orElseThrow(() -> new BusinessValidationException("Draft not found: " + draftId));
+                if (draft.getRawDocumentId() != null) {
+                    RawDocument rawDocument = rawDocumentRepository.findById(draft.getRawDocumentId())
+                            .orElseThrow(() -> new BusinessValidationException("RawDocument not found: " + draft.getRawDocumentId()));
+                    if (!String.valueOf(payload.getProjectId()).equals(rawDocument.getProjectId())) {
+                        throw new BusinessValidationException("RawDocument project mismatch: " + draft.getRawDocumentId());
+                    }
+                    if (!String.valueOf(payload.getTaskId()).equals(rawDocument.getTaskId())) {
+                        throw new BusinessValidationException("RawDocument task mismatch: " + draft.getRawDocumentId());
+                    }
+                    if (!isPartnerContractRawDocument(rawDocument)) {
+                        throw new BusinessValidationException("RawDocument is not a PARTNER_CONTRACT document: " + draft.getRawDocumentId());
+                    }
+                }
 
                 // Finalize ALL clauses to ACCEPT if not set
                 if (draft.getClauseCandidates() != null) {
@@ -145,6 +253,23 @@ public class PartnerContractCollectionApprovalHandler implements ProjectTaskSubm
                     version = versionRepository.save(version);
                     auditLogService.log(reviewerId, com.apms.common.enums.AuditAction.PARTNER_CONTRACT_APPROVED, "PartnerContractVersion", version.getId().toString(), "Contract version 1 created upon approval");
 
+                    if (org.springframework.util.StringUtils.hasText(contract.getRawDocumentId())) {
+                        companyDocumentPublisher.publishApprovedDocument(
+                                payload.getTargetCompanyProfileId(),
+                                contract.getRawDocumentId(),
+                                reviewerId,
+                                contract.getApprovedAt(),
+                                com.apms.domain.document.dto.PublicationContext.builder()
+                                        .sourceProjectId(String.valueOf(payload.getProjectId()))
+                                        .sourceTaskId(String.valueOf(payload.getTaskId()))
+                                        .sourceSubmissionId(String.valueOf(submission.getId()))
+                                        .documentType("PARTNER_CONTRACT")
+                                        .description("Approved partner contract")
+                                        .displayName(contract.getContractTitle())
+                                        .build()
+                        );
+                    }
+
                     if (draft.getClauseCandidates() != null) {
                         for (var clause : draft.getClauseCandidates()) {
                             if (clause.getReviewDecision() == ContractExtractionReviewDecision.ACCEPT ||
@@ -186,6 +311,19 @@ public class PartnerContractCollectionApprovalHandler implements ProjectTaskSubm
         PartnerContractCollectionSubmissionPayload payload = payloadRepository.findBySubmissionId(submission.getId())
                 .orElseThrow(() -> new BusinessValidationException("Submission payload not found"));
 
+        if (payload.getRawDocumentIds() != null) {
+            for (String rawDocumentId : payload.getRawDocumentIds()) {
+                String fileName = org.springframework.util.StringUtils.hasText(rawDocumentId)
+                        ? rawDocumentRepository.findById(rawDocumentId)
+                            .map(RawDocument::getSource)
+                            .map(RawDocument.Source::getFileName)
+                            .filter(org.springframework.util.StringUtils::hasText)
+                            .orElse(rawDocumentId)
+                        : "Partner contract document";
+                notificationService.notifyDocumentRejected(submission, rawDocumentId, fileName, reviewerId, reviewComment);
+            }
+        }
+
         if (payload.getContractDraftIds() != null) {
             for (String draftId : payload.getContractDraftIds()) {
                 PartnerContractExtractionDraft draft = draftRepository.findById(draftId)
@@ -210,7 +348,23 @@ public class PartnerContractCollectionApprovalHandler implements ProjectTaskSubm
 
                 draft.setReviewStatus(ContractExtractionReviewStatus.REVIEWED);
                 draftRepository.save(draft);
+
+                String rawDocumentId = draft.getRawDocumentId();
+                String fileName = org.springframework.util.StringUtils.hasText(rawDocumentId)
+                        ? rawDocumentRepository.findById(rawDocumentId)
+                            .map(RawDocument::getSource)
+                            .map(RawDocument.Source::getFileName)
+                            .filter(org.springframework.util.StringUtils::hasText)
+                            .orElse(rawDocumentId)
+                        : "Document package";
+                notificationService.notifyDocumentRejected(submission, rawDocumentId, fileName, reviewerId, reviewComment);
             }
         }
+    }
+
+    private boolean isPartnerContractRawDocument(RawDocument rawDocument) {
+        return rawDocument != null
+                && rawDocument.getSource() != null
+                && "PARTNER_CONTRACT".equalsIgnoreCase(rawDocument.getSource().getType());
     }
 }

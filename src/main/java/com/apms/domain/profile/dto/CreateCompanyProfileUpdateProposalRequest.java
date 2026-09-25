@@ -21,8 +21,14 @@ public class CreateCompanyProfileUpdateProposalRequest {
     private Map<String, Object> proposedInnovation;
     private Map<String, Object> proposedRisk;
     private Map<String, Object> proposedCompliance;
+    private List<Map<String, Object>> proposedCompanyMembers;
 
     private List<String> sourceDocumentIds;
     private String extractionId;
     private String changeSummary;
+    private String proposedRelationship;
+
+    private List<String> changedFieldPaths;
+    private Map<String, Object> originalValues;
+    private List<com.apms.domain.ai.dto.FieldEvidence> fieldEvidence;
 }

@@ -2,188 +2,165 @@ package com.apms.domain.security.service;
 
 import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.SystemRole;
-import com.apms.common.exception.BusinessValidationException;
-import com.apms.common.exception.ResourceNotFoundException;
-import com.apms.common.exception.ServiceUnavailableException;
 import com.apms.domain.audit.service.AuditLogService;
-import com.apms.domain.security.dto.StepUpChallengeResponse;
+import com.apms.domain.profile.service.CompanyProfileAccessService;
 import com.apms.domain.security.dto.StepUpVerifyResponse;
-import com.apms.domain.security.entity.OtpChallenge;
-import com.apms.domain.security.enums.StepUpPurpose;
-import com.apms.domain.security.repository.OtpChallengeRepository;
-import com.apms.domain.user.Account;
-import com.apms.domain.user.repository.sql.AccountRepository;
+import com.apms.domain.security.dto.TotpDto.StepUpStatusResponse;
+import com.apms.domain.security.entity.AccountTotpCredential;
+import com.apms.domain.security.exception.TotpException;
+import com.apms.domain.security.repository.AccountTotpCredentialRepository;
 import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.security.SecureRandom;
 import java.time.LocalDateTime;
-import java.util.List;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class StepUpAuthenticationService {
 
-    private final AccountRepository accountRepository;
-    private final OtpChallengeRepository challengeRepository;
-    private final OtpDeliveryProvider deliveryProvider;
+    public static final String SCOPE_COMPANY_INTERNAL_NEWS = "COMPANY_INTERNAL_NEWS";
+
     private final StepUpTokenService tokenService;
-    private final PasswordEncoder passwordEncoder;
+    private final TotpVerificationService totpVerificationService;
     private final AuditLogService auditLogService;
+    private final CompanyProfileAccessService companyProfileAccessService;
+    private final AccountTotpCredentialRepository credentialRepository;
 
-    @Value("${apms.stepup.otp.pepper:}")
-    private String otpPepper;
 
-    @Value("${apms.stepup.otp.expiration-seconds:300}")
-    private long otpExpirationSeconds;
-
-    @Value("${apms.stepup.otp.max-attempts:5}")
-    private int maxAttempts;
-
-    @Value("${apms.stepup.otp.resend-cooldown-seconds:60}")
-    private long resendCooldownSeconds;
-
-    @Value("${apms.stepup.otp.max-challenges-per-15-minutes:5}")
-    private int maxChallengesPer15Minutes;
-    
     @Value("${apms.stepup.token.expiration-seconds:600}")
     private long tokenExpirationSeconds;
 
-    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
-
-    @Transactional
-    public StepUpChallengeResponse createChallenge(String purposeStr, String requestIp) {
+    public StepUpStatusResponse getStepUpStatus(String scope, String resourceId, String ownerSecureToken) {
         UserDetailsImpl currentUser = getCurrentUser();
 
-        if (!hasRole(currentUser, SystemRole.BUSINESS_OWNER)) {
-            auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_ACCESS_DENIED, "StepUpAuth", null, "User is not a BUSINESS_OWNER");
-            throw new AccessDeniedException("User is not a BUSINESS_OWNER");
+        boolean isOwner = hasRole(currentUser, SystemRole.BUSINESS_OWNER) || hasRole(currentUser, SystemRole.SYSTEM_ADMIN);
+        boolean isManager = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+
+        if (!isOwner && !isManager) {
+            throw new AccessDeniedException("User role is not authorized for secure access");
         }
 
-        StepUpPurpose purpose;
+        if (SCOPE_COMPANY_INTERNAL_NEWS.equals(scope)) {
+            companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile(resourceId, currentUser);
+        } else if (scope == null && resourceId == null) {
+            if (!isOwner) {
+                throw new AccessDeniedException("Only BUSINESS_OWNER can access global secure scope");
+            }
+        } else {
+            throw new AccessDeniedException("STEP_UP_SCOPE_FORBIDDEN");
+        }
+
+        AccountTotpCredential credential = credentialRepository.findByAccountId(currentUser.getId()).orElse(null);
+        boolean configured = credential != null && credential.isEnabled();
+        boolean verified = configured && isOwnerSecureSessionActive(currentUser.getId(), ownerSecureToken);
+        LocalDateTime expiresAt = verified ? credential.getOwnerSecureSessionExpiresAt() : null;
+
+        return StepUpStatusResponse.builder()
+                .required(true)
+                .verified(verified)
+                .expiresAt(expiresAt)
+                .secureAccessActive(verified)
+                .totpConfigured(configured)
+                .scope(scope)
+                .resourceId(resourceId)
+                .build();
+    }
+
+    @Transactional
+    public StepUpVerifyResponse verifyTotpStepUp(String code, String scope, String resourceId) {
+        UserDetailsImpl currentUser = getCurrentUser();
+
+        boolean isOwner = hasRole(currentUser, SystemRole.BUSINESS_OWNER) || hasRole(currentUser, SystemRole.SYSTEM_ADMIN);
+        boolean isManager = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+
+        if (!isOwner && !isManager) {
+            auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_FAILED, "StepUpAuth", resourceId, "User is not authorized for scope: " + scope);
+            throw new AccessDeniedException("User role is not authorized for secure access");
+        }
+
+        if (SCOPE_COMPANY_INTERNAL_NEWS.equals(scope)) {
+            companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile(resourceId, currentUser);
+        } else if (scope == null && resourceId == null) {
+            if (!isOwner) {
+                auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_FAILED, "StepUpAuth", null, "Manager cannot verify global secure scope");
+                throw new AccessDeniedException("Only BUSINESS_OWNER can access global secure scope");
+            }
+        } else {
+            throw new AccessDeniedException("STEP_UP_SCOPE_FORBIDDEN");
+        }
+
         try {
-            purpose = StepUpPurpose.valueOf(purposeStr);
-        } catch (IllegalArgumentException e) {
-            throw new BusinessValidationException("Invalid purpose: " + purposeStr);
+            totpVerificationService.verifyStepUpCode(currentUser.getId(), code);
+        } catch (Exception e) {
+            auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_FAILED, "StepUpAuth", null, "Failed TOTP step-up for scope: " + scope);
+            throw e;
         }
 
-        Account account = accountRepository.findById(currentUser.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
+        StepUpVerifyResponse response = grantOwnerSecureSession(currentUser.getId());
 
-        if (account.getPhoneNumber() == null || account.getPhoneVerifiedAt() == null) {
-            throw new BusinessValidationException("MFA_ENROLLMENT_REQUIRED");
-        }
+        auditLogService.log(currentUser.getId(), AuditAction.TOTP_STEP_UP_SUCCEEDED, "StepUpAuth", resourceId, "Secure session granted with TOTP");
 
-        if (!deliveryProvider.isAvailable()) {
-            throw new ServiceUnavailableException("MFA_DELIVERY_UNAVAILABLE");
-        }
-        
-        if (!tokenService.isConfigured()) {
-            throw new ServiceUnavailableException("STEP_UP_NOT_CONFIGURED");
+        return response;
+    }
+
+    @Transactional
+    public StepUpVerifyResponse grantOwnerSecureSession(Long accountId) {
+        AccountTotpCredential credential = credentialRepository.findByAccountIdWithLock(accountId)
+                .orElseThrow(() -> new TotpException("TOTP_NOT_ENROLLED"));
+        if (!credential.isEnabled()) {
+            throw new TotpException("TOTP_NOT_ENROLLED");
         }
 
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime fifteenMinsAgo = now.minusMinutes(15);
-        int challengesCreated = challengeRepository.countByAccountIdAndPurposeAndCreatedAtAfter(account.getId(), purpose, fifteenMinsAgo);
-        
-        if (challengesCreated >= maxChallengesPer15Minutes) {
-            throw new BusinessValidationException("Rate limit exceeded for step-up challenges");
-        }
+        LocalDateTime expiresAt = now.plusSeconds(tokenExpirationSeconds);
+        credential.setOwnerSecureSessionIssuedAt(now);
+        credential.setOwnerSecureSessionExpiresAt(expiresAt);
+        credentialRepository.save(credential);
 
-        var activeChallenges = challengeRepository.findByAccountIdAndPurposeAndUsedAtIsNullAndInvalidatedAtIsNull(account.getId(), purpose);
-        for (OtpChallenge challenge : activeChallenges) {
-            if (challenge.getCreatedAt().plusSeconds(resendCooldownSeconds).isAfter(now)) {
-                return StepUpChallengeResponse.builder()
-                        .status("COOLDOWN_ACTIVE")
-                        .build();
-            }
-            challenge.setInvalidatedAt(now);
-            challenge.setInvalidationReason("RESEND_REQUESTED");
-        }
-        challengeRepository.saveAll(activeChallenges);
-
-        String otp = String.format("%06d", SECURE_RANDOM.nextInt(1000000));
-        String hashedOtp = passwordEncoder.encode(otp + otpPepper);
-
-        OtpChallenge newChallenge = OtpChallenge.builder()
-                .accountId(account.getId())
-                .purpose(purpose)
-                .otpHash(hashedOtp)
-                .expiresAt(now.plusSeconds(otpExpirationSeconds))
-                .maxAttempts(maxAttempts)
-                .requestIp(requestIp)
-                .createdAt(now)
-                .build();
-        newChallenge = challengeRepository.save(newChallenge);
-
-        deliveryProvider.sendOtp(account.getPhoneNumber(), otp);
-
-        auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_OTP_SENT, "OtpChallenge", String.valueOf(newChallenge.getId()), "OTP sent for " + purpose.name());
-
-        return StepUpChallengeResponse.builder()
-                .challengeId(newChallenge.getId())
-                .maskedPhone(maskPhone(account.getPhoneNumber()))
-                .expiresInSeconds(otpExpirationSeconds)
-                .status("OTP_SENT")
-                .build();
-    }
-
-    @Transactional
-    public StepUpVerifyResponse verifyChallenge(Long challengeId, String otp) {
-        UserDetailsImpl currentUser = getCurrentUser();
-
-        OtpChallenge challenge = challengeRepository.findByIdAndAccountId(challengeId, currentUser.getId())
-                .orElseThrow(() -> new BusinessValidationException("Challenge not found"));
-
-        if (challenge.getInvalidatedAt() != null) {
-             throw new BusinessValidationException("Challenge is invalidated: " + challenge.getInvalidationReason());
-        }
-
-        if (challenge.getUsedAt() != null) {
-            throw new BusinessValidationException("Challenge already used");
-        }
-
-        if (challenge.getExpiresAt().isBefore(LocalDateTime.now())) {
-            throw new BusinessValidationException("Challenge expired");
-        }
-
-        if (challenge.getAttemptCount() >= challenge.getMaxAttempts()) {
-            throw new BusinessValidationException("Maximum attempts reached");
-        }
-
-        challenge.setAttemptCount(challenge.getAttemptCount() + 1);
-        challengeRepository.save(challenge);
-
-        if (!passwordEncoder.matches(otp + otpPepper, challenge.getOtpHash())) {
-            throw new BusinessValidationException("Invalid OTP");
-        }
-
-        challenge.setUsedAt(LocalDateTime.now());
-        challengeRepository.save(challenge);
-
-        String token = tokenService.generateToken(currentUser.getId(), challenge.getPurpose());
-        
-        auditLogService.log(currentUser.getId(), AuditAction.CONFIDENTIAL_NEWS_OTP_VERIFIED, "OtpChallenge", String.valueOf(challenge.getId()), "OTP verified for " + challenge.getPurpose().name());
-
+        String token = tokenService.generateOwnerSecureSessionToken(accountId, expiresAt);
         return StepUpVerifyResponse.builder()
                 .stepUpToken(token)
                 .expiresInSeconds(tokenExpirationSeconds)
+                .expiresAt(expiresAt)
+                .secureAccessGranted(true)
                 .build();
     }
 
-    private String maskPhone(String phone) {
-        if (phone == null || phone.length() < 4) {
-            return "***";
+    @Transactional(readOnly = true)
+    public boolean isOwnerSecureSessionActive(Long accountId, String ownerSecureToken) {
+        if (ownerSecureToken == null || ownerSecureToken.isBlank()) {
+            return false;
         }
-        return "***-***-" + phone.substring(phone.length() - 4);
+        if (!tokenService.validateOwnerSecureSessionToken(ownerSecureToken, accountId)) {
+            return false;
+        }
+
+        AccountTotpCredential credential = credentialRepository.findByAccountId(accountId).orElse(null);
+        if (credential == null || !credential.isEnabled() || credential.getOwnerSecureSessionExpiresAt() == null) {
+            return false;
+        }
+        if (!credential.getOwnerSecureSessionExpiresAt().isAfter(LocalDateTime.now())) {
+            return false;
+        }
+
+        LocalDateTime tokenExpiresAt = tokenService.getOwnerSecureSessionExpiresAt(ownerSecureToken, accountId);
+        return tokenExpiresAt != null && !tokenExpiresAt.isAfter(credential.getOwnerSecureSessionExpiresAt());
+    }
+
+    @Transactional
+    public void invalidateOwnerSecureSession(Long accountId) {
+        credentialRepository.findByAccountIdWithLock(accountId).ifPresent(credential -> {
+            credential.setOwnerSecureSessionIssuedAt(null);
+            credential.setOwnerSecureSessionExpiresAt(null);
+            credentialRepository.save(credential);
+        });
     }
 
     private UserDetailsImpl getCurrentUser() {

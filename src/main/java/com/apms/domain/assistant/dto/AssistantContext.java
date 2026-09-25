@@ -2,7 +2,7 @@ package com.apms.domain.assistant.dto;
 
 import com.apms.domain.graph.dto.CompanyRelationshipDto;
 import com.apms.domain.profile.CompanyProfile;
-import com.apms.domain.score.ScoreSnapshot;
+//import com.apms.domain.score.ScoreSnapshot;
 import lombok.Builder;
 import lombok.Data;
 
@@ -35,7 +35,7 @@ public class AssistantContext {
     private List<String> formattedRelationships;
 
     /** The most recent ScoreSnapshot from SQL Server. Null if none exists. */
-    private ScoreSnapshot latestScore;
+//    private ScoreSnapshot latestScore;
 
     /** Formatted text representation of all context for the AI prompt. */
     private String contextText;

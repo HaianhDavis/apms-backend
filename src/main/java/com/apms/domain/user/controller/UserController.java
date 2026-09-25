@@ -30,6 +30,24 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @PatchMapping({"/users/me/profile", "/users/me"})
+    public ResponseEntity<ApiResponse<UserProfileResponse>> updateMyProfile(
+            @Valid @RequestBody UpdateMyProfileRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        UserProfileResponse response = userService.updateMyProfile(currentUser.getId(), request);
+        return ResponseEntity.ok(ApiResponse.success(response, "Profile updated successfully"));
+    }
+
+    @GetMapping("/users/search")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<List<UserProfileResponse>>> searchUsers(
+            @RequestParam(required = false) String email,
+            @RequestParam(required = false) SystemRole role) {
+
+        return ResponseEntity.ok(ApiResponse.success(userService.searchActiveUsers(email, role)));
+    }
+
     @PostMapping("/users")
     @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<UserProfileResponse>> createUser(
@@ -39,6 +57,12 @@ public class UserController {
         UserProfileResponse response = userService.createUser(request, currentUser.getId());
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(response, "User created successfully"));
+    }
+
+    @GetMapping("/users")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<List<UserProfileResponse>>> listUsers() {
+        return ResponseEntity.ok(ApiResponse.success(userService.listUsers()));
     }
 
     @PatchMapping("/users/{userId}")
@@ -63,6 +87,17 @@ public class UserController {
         return ResponseEntity.ok(ApiResponse.success(null, "User status updated"));
     }
 
+    @PatchMapping("/users/{userId}/password")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> resetPassword(
+            @PathVariable Long userId,
+            @Valid @RequestBody ResetPasswordRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        userService.resetPassword(userId, request, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(null, "Password reset"));
+    }
+
     @GetMapping("/roles")
     @PreAuthorize("hasRole('SYSTEM_ADMIN')")
     public ResponseEntity<ApiResponse<List<SystemRole>>> getRoles() {
@@ -78,5 +113,15 @@ public class UserController {
 
         userService.assignUserRoles(userId, request, currentUser.getId());
         return ResponseEntity.ok(ApiResponse.success(null, "User roles updated"));
+    }
+
+    @PostMapping({"/users/{userId}/reset-authenticator", "/admin/users/{userId}/reset-authenticator"})
+    @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> resetAuthenticator(
+            @PathVariable Long userId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        userService.resetAuthenticator(userId, currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(null, "Authenticator reset successfully. The user must set up Authenticator again on the next sign-in."));
     }
 }

@@ -21,9 +21,9 @@ public class MockExtractionProvider implements ExtractionProvider {
                 .industries(List.of("Technology", "Cloud", "Cybersecurity"))
                 .businessModel("B2B Technology Services")
                 .products(List.of(
-                        ExtractedCompanyData.Product.builder().name("Cloud Services").category("Cloud Computing").description("Enterprise cloud infrastructure and services").build(),
-                        ExtractedCompanyData.Product.builder().name("Cybersecurity Services").category("Security").description("End-to-end cybersecurity solutions").build(),
-                        ExtractedCompanyData.Product.builder().name("Software Outsourcing").category("IT Services").description("Custom software development outsourcing").build()
+                        ExtractedCompanyData.Product.builder().name("Cloud Services").build(),
+                        ExtractedCompanyData.Product.builder().name("Cybersecurity Services").build(),
+                        ExtractedCompanyData.Product.builder().name("Software Outsourcing").build()
                 ))
                 .markets(List.of("Vietnam", "International"))
                 .targetCustomers(List.of("Enterprise", "SME"))

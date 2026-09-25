@@ -5,8 +5,9 @@ import lombok.Data;
 
 @Data
 public class ExtractionReviewRequest {
-    @NotNull
-    private ExtractionReviewStatus reviewStatus;
+    private StaffFieldReviewStatus staffReviewStatus;
+    private ExtractionReviewStatus managerReviewStatus;
     private Object reviewedValue;
     private String comment;
+    private boolean isManager; // Flag to indicate if the reviewer is a manager
 }

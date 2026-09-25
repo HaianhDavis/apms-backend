@@ -11,9 +11,13 @@ import com.apms.domain.news.enums.NewsDraftStatus;
 import com.apms.domain.news.repository.CompanyIntelligenceArticleRepository;
 import com.apms.domain.news.repository.CompanyNewsResearchDraftRepository;
 import com.apms.domain.news.repository.CompanyNewsResearchSubmissionPayloadRepository;
+import com.apms.domain.project.repository.sql.ProjectRepository;
+import com.apms.domain.project.Project;
+import com.apms.common.exception.BusinessValidationException;
 import com.apms.domain.project.ProjectTaskSubmission;
 import com.apms.domain.project.service.ProjectTaskSubmissionApprovalHandler;
 import com.apms.security.UserDetailsImpl;
+import org.springframework.util.StringUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -29,6 +33,7 @@ public class CompanyNewsResearchApprovalHandler implements ProjectTaskSubmission
     private final CompanyNewsResearchSubmissionPayloadRepository payloadRepository;
     private final CompanyNewsResearchDraftRepository draftRepository;
     private final CompanyIntelligenceArticleRepository articleRepository;
+    private final ProjectRepository projectRepository;
     private final AuditLogService auditLogService;
 
     @Override
@@ -45,10 +50,21 @@ public class CompanyNewsResearchApprovalHandler implements ProjectTaskSubmission
                 .map(id -> draftRepository.findById(id).orElseThrow(() -> new IllegalStateException("Draft not found: " + id)))
                 .toList();
 
+        String companyProfileId = payload.getTargetCompanyProfileId();
+        if (!StringUtils.hasText(companyProfileId)) {
+            Project project = projectRepository.findById(payload.getProjectId())
+                    .orElseThrow(() -> new IllegalStateException("Project not found: " + payload.getProjectId()));
+            companyProfileId = project.getTargetCompanyProfileId();
+        }
+
+        if (!StringUtils.hasText(companyProfileId)) {
+            throw new BusinessValidationException("COMPANY_PROFILE_LINK_REQUIRED");
+        }
+
         for (CompanyNewsResearchDraft draft : drafts) {
             if (!articleRepository.existsBySourceDraftId(draft.getId())) {
                 CompanyIntelligenceArticle article = CompanyIntelligenceArticle.builder()
-                        .companyProfileId(payload.getTargetCompanyProfileId())
+                        .companyProfileId(companyProfileId)
                         .title(draft.getTitle())
                         .summary(draft.getSummary())
                         .content(draft.getContent())
@@ -70,7 +86,8 @@ public class CompanyNewsResearchApprovalHandler implements ProjectTaskSubmission
                         .approvedAt(LocalDateTime.now())
                         .build();
 
-                articleRepository.save(article);
+                CompanyIntelligenceArticle savedArticle = articleRepository.save(article);
+                auditLogService.log(reviewerId, AuditAction.INTERNAL_NEWS_PUBLISHED, "CompanyIntelligenceArticle", savedArticle.getId(), "Published internal news from draft");
             }
 
             draft.setReviewStatus(NewsDraftStatus.APPROVED);

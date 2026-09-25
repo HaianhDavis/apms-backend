@@ -4,9 +4,12 @@ import com.apms.common.enums.AuditAction;
 import com.apms.common.enums.SubmissionStatus;
 import com.apms.common.enums.SystemRole;
 import com.apms.common.enums.TaskStatus;
+import com.apms.common.enums.TaskType;
+import com.apms.common.enums.ProjectStatus;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.profile.CompanyProfileUpdateProposal;
+import com.apms.domain.profile.CompanyProfileVersion;
 import com.apms.domain.profile.repository.mongo.CompanyProfileUpdateProposalRepository;
 import com.apms.domain.project.Project;
 import com.apms.domain.project.ProjectTask;
@@ -52,6 +55,8 @@ public class ProjectTaskSubmissionService {
     private final AuditLogService auditLogService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final List<ProjectTaskSubmissionApprovalHandler> approvalHandlers;
+    private final com.apms.domain.notification.service.NotificationService notificationService;
+    private final com.apms.domain.project.repository.sql.ProjectMemberRepository projectMemberRepository;
 
     @org.springframework.beans.factory.annotation.Autowired
     @org.springframework.context.annotation.Lazy
@@ -69,6 +74,10 @@ public class ProjectTaskSubmissionService {
     @org.springframework.context.annotation.Lazy
     private com.apms.domain.profile.service.CompanyProfileUpdateProposalService proposalService;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    @org.springframework.context.annotation.Lazy
+    private com.apms.domain.financial.service.FinancialResearchService financialResearchService;
+
     @Transactional
     public ProjectTaskSubmissionResponse submitTask(Long projectId, Long taskId, CreateProjectTaskSubmissionRequest request) {
         Project project = projectRepository.findById(projectId)
@@ -76,11 +85,18 @@ public class ProjectTaskSubmissionService {
         ProjectTask task = taskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
 
+        if (project.getStatus() == ProjectStatus.CLOSED || project.getStatus() == ProjectStatus.COMPLETED) {
+            throw new com.apms.common.exception.BusinessValidationException("Project is " + project.getStatus() + " and tasks cannot be modified.");
+        }
+
         if (!task.getProject().getId().equals(projectId)) {
             throw new IllegalArgumentException("Task does not belong to project");
         }
-        if (task.getStatus() == TaskStatus.DONE || task.getStatus() == TaskStatus.CANCELLED) {
-            throw new IllegalStateException("Cannot submit work for a task that is DONE or CANCELLED");
+        if (project.getStatus() == ProjectStatus.CLOSED || project.getStatus() == ProjectStatus.COMPLETED) {
+            throw new com.apms.common.exception.BusinessValidationException("Project is " + project.getStatus() + " and tasks cannot be modified.");
+        }
+        if (task.getStatus() == TaskStatus.DONE || task.getStatus() == TaskStatus.CANCELLED || task.getStatus() == TaskStatus.AVAILABLE) {
+            throw new IllegalStateException("Cannot submit work for a task that is DONE, CANCELLED, or AVAILABLE");
         }
 
         List<ProjectTaskSubmission> existingSubmissions = submissionRepository.findByProjectTask_Id(taskId);
@@ -110,6 +126,8 @@ public class ProjectTaskSubmissionService {
         Account submitter = accountRepository.findById(currentUser.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
 
+        LocalDateTime now = LocalDateTime.now();
+
         // 1. Ask the target entity to prepare its field approvals and return the submittedRevisionNumber
         Integer revision = null;
         if (StringUtils.hasText(request.getTargetEntityId())) {
@@ -119,6 +137,9 @@ public class ProjectTaskSubmissionService {
             } else if ("CompanyProfileUpdateProposal".equals(request.getTargetEntityType())) {
                 com.apms.domain.profile.dto.CompanyProfileUpdateProposalResponse draft = proposalService.submitProposal(request.getTargetEntityId(), submitter.getId());
                 revision = draft.getRevisionNumber();
+            } else if ("FinancialResearch".equals(request.getTargetEntityType())) {
+                financialResearchService.submitForReview(projectId, taskId, submitter.getId(), request.getTargetItemIds());
+                revision = null; // FinancialResearch does not use revision numbers
             }
         }
 
@@ -135,7 +156,7 @@ public class ProjectTaskSubmissionService {
                 if (task.getStatus() != TaskStatus.IN_REVIEW) {
                     task.setStatus(TaskStatus.IN_REVIEW);
                     task.setCompletedAt(null);
-                    taskRepository.save(task);
+                    taskRepository.saveAndFlush(task);
                 }
                 return toResponse(existingSub.get());
             }
@@ -153,9 +174,10 @@ public class ProjectTaskSubmissionService {
                 .targetEntityId(request.getTargetEntityId())
                 .status(SubmissionStatus.IN_REVIEW)
                 .note(request.getNote())
+                .submittedAt(now)
                 .submittedRevisionNumber(revision)
-                .submittedAt(LocalDateTime.now())
                 .build();
+        submission.setTargetItemIdList(request.getTargetItemIds());
 
         ProjectTaskSubmission finalSubmission = submission;
         final Integer finalRevision = revision;
@@ -174,7 +196,7 @@ public class ProjectTaskSubmissionService {
                 if (task.getStatus() != TaskStatus.IN_REVIEW) {
                     task.setStatus(TaskStatus.IN_REVIEW);
                     task.setCompletedAt(null);
-                    taskRepository.save(task);
+                    taskRepository.saveAndFlush(task);
                 }
                 return toResponse(existingSub.get());
             } else {
@@ -185,13 +207,114 @@ public class ProjectTaskSubmissionService {
         // Update task status
         task.setStatus(TaskStatus.IN_REVIEW);
         task.setCompletedAt(null);
-        taskRepository.save(task);
+        taskRepository.saveAndFlush(task);
 
         // Target entity is already updated by the delegated submit call above.
 
-        auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMITTED, "ProjectTask", String.valueOf(task.getId()), "Task submitted for review");
+        auditLogService.log(
+                currentUser.getId(),
+                AuditAction.PROJECT_TASK_SUBMITTED,
+                "ProjectTask",
+                String.valueOf(task.getId()),
+                "Task submitted for review");
+
+        // Notify managers
+        Account sender = accountRepository.findById(currentUser.getId()).orElse(null);
+        projectMemberRepository.findByProject_Id(projectId).stream()
+                .filter(m -> m.getProjectRole() == com.apms.common.enums.ProjectRole.LEADER)
+                .forEach(m -> notificationService.notifyTaskSubmitted(task, m.getAccount(), sender));
 
         return toResponse(submission);
+    }
+
+    @Transactional
+    public void cancelSubmission(Long projectId, Long taskId, Long submissionId) {
+        ProjectTask task = taskRepository.findById(taskId)
+                .orElseThrow(() -> new ResourceNotFoundException("Task not found"));
+
+        if (!task.getProject().getId().equals(projectId)) {
+            throw new IllegalArgumentException("Task does not belong to project");
+        }
+
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
+
+        boolean isStaff = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+        boolean isAdmin = hasRole(currentUser, SystemRole.SYSTEM_ADMIN);
+
+        // Ownership check: staff must be assigned to the task (or system admin)
+        if (isStaff && !isAdmin) {
+            if (task.getAssignedToAccount() == null || !task.getAssignedToAccount().getId().equals(currentUser.getId())) {
+                throw new AccessDeniedException("Staff can only cancel submissions for tasks assigned to them");
+            }
+        }
+
+        // Find target submission
+        ProjectTaskSubmission submission;
+        if (submissionId != null) {
+            submission = submissionRepository.findById(submissionId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Submission not found"));
+            if (!submission.getProjectTask().getId().equals(taskId)) {
+                throw new IllegalArgumentException("Submission does not belong to specified task");
+            }
+        } else {
+            submission = submissionRepository.findByProjectTask_Id(taskId).stream()
+                    .filter(s -> s.getStatus() == SubmissionStatus.IN_REVIEW)
+                    .findFirst()
+                    .orElseThrow(() -> new ResourceNotFoundException("No active pending submission found for this task"));
+        }
+
+        // Only submitting staff (or admin) can cancel
+        if (isStaff && !isAdmin && !submission.getSubmittedByAccount().getId().equals(currentUser.getId())) {
+            throw new AccessDeniedException("Only the submitting staff member can cancel this submission");
+        }
+
+        // Race condition check: If Manager already reviewed it (Approved, Rejected, or Revision Requested)
+        if (submission.getStatus() == SubmissionStatus.APPROVED
+                || submission.getStatus() == SubmissionStatus.REJECTED
+                || submission.getStatus() == SubmissionStatus.REVISION_REQUESTED
+                || submission.getStatus() == SubmissionStatus.CHANGES_REQUESTED
+                || task.getStatus() == TaskStatus.DONE) {
+            throw new com.apms.common.exception.BusinessConflictException(
+                    "This submission has already been reviewed by the Manager and can no longer be cancelled.");
+        }
+
+        if (task.getStatus() != TaskStatus.IN_REVIEW || submission.getStatus() != SubmissionStatus.IN_REVIEW) {
+            throw new com.apms.common.exception.BusinessConflictException(
+                    "Only pending submissions waiting for Manager review can be cancelled.");
+        }
+
+        // Restore target entity status so Staff can continue editing
+        if ("CompanyCandidate".equals(submission.getTargetEntityType()) && StringUtils.hasText(submission.getTargetEntityId())) {
+            candidateService.cancelCandidateSubmission(submission.getTargetEntityId());
+        } else if ("CompanyProfileUpdateProposal".equals(submission.getTargetEntityType()) && StringUtils.hasText(submission.getTargetEntityId())) {
+            proposalService.cancelProposalSubmission(submission.getTargetEntityId());
+        } else if ("CompanyMemberResearchDraft".equals(submission.getTargetEntityType()) && StringUtils.hasText(submission.getTargetEntityId())) {
+            if (companyMemberResearchService != null) {
+                companyMemberResearchService.cancelDraftSubmission(submission.getTargetEntityId());
+            }
+        }
+
+        Long subId = submission.getId();
+
+        // Physically delete the pending review envelope
+        submissionRepository.delete(submission);
+        submissionRepository.flush();
+
+        // Return task to IN_PROGRESS
+        task.setStatus(TaskStatus.IN_PROGRESS);
+        task.setCompletedAt(null);
+        taskRepository.saveAndFlush(task);
+
+        // Preserved auditability without creating CompanyProfileVersion
+        auditLogService.log(
+                currentUser.getId(),
+                AuditAction.PROJECT_TASK_SUBMISSION_CANCELLED,
+                "ProjectTaskSubmission",
+                String.valueOf(subId),
+                "Staff cancelled pending submission for task " + taskId
+        );
+        log.info("Cancelled pending submission {} for task {}, status returned to IN_PROGRESS", subId, taskId);
     }
 
     @Transactional(readOnly = true)
@@ -225,6 +348,10 @@ public class ProjectTaskSubmissionService {
         ProjectTaskSubmission submission = submissionRepository.findById(submissionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Submission not found"));
 
+        if (submission.getProject().getStatus() == ProjectStatus.CLOSED || submission.getProject().getStatus() == ProjectStatus.COMPLETED) {
+            throw new com.apms.common.exception.BusinessValidationException("Project is " + submission.getProject().getStatus() + " and tasks cannot be modified.");
+        }
+
         UserDetailsImpl currentUser = getCurrentUser();
         if (currentUser == null) throw new AccessDeniedException("Unauthorized");
 
@@ -235,7 +362,50 @@ public class ProjectTaskSubmissionService {
             throw new IllegalArgumentException("Submission does not belong to specified task");
         }
 
-        if (submission.getProjectTask().getTaskType() == com.apms.common.enums.TaskType.COMPANY_DATA_PREPARATION) {
+        // === PROJECT-SCOPED REVIEW AUTHORIZATION ===
+        ProjectTask task = submission.getProjectTask();
+
+        // 1. Task must be IN_REVIEW
+        if (task.getStatus() != TaskStatus.IN_REVIEW) {
+            throw new com.apms.common.exception.BusinessValidationException("Task is not in review status.");
+        }
+
+        // 2. Self-review protection — applies to ALL reviewers including admin
+        Long reviewerId = currentUser.getId();
+        if (task.getAssignedToAccount() != null && reviewerId.equals(task.getAssignedToAccount().getId())) {
+            throw new com.apms.common.exception.BusinessValidationException("You cannot review your own task submission.");
+        }
+        if (submission.getSubmittedByAccount() != null && reviewerId.equals(submission.getSubmittedByAccount().getId())) {
+            throw new com.apms.common.exception.BusinessValidationException("You cannot review your own task submission.");
+        }
+
+        // 3. Reviewer must be an active project member with LEADER or DEPUTY role, unless SYSTEM_ADMIN
+        boolean isSystemAdmin = hasRole(currentUser, com.apms.common.enums.SystemRole.SYSTEM_ADMIN);
+        if (!isSystemAdmin) {
+            Long actualProjectId = task.getProject().getId();
+            java.util.Optional<com.apms.domain.project.ProjectMember> memberOpt =
+                    projectMemberRepository.findByProject_IdAndAccount_Id(actualProjectId, reviewerId);
+            if (memberOpt.isEmpty()) {
+                throw new AccessDeniedException("You must be an active member of this project to review submissions.");
+            }
+            com.apms.common.enums.ProjectRole projectRole = memberOpt.get().getProjectRole();
+            if (projectRole != com.apms.common.enums.ProjectRole.LEADER
+                    && projectRole != com.apms.common.enums.ProjectRole.DEPUTY) {
+                throw new AccessDeniedException("Only project Leaders and Deputies can review task submissions.");
+            }
+        }
+
+        // 4. Submission must be the latest/current reviewable submission for this task
+        java.util.List<ProjectTaskSubmission> taskSubmissions = submissionRepository.findByProjectTask_Id(taskId);
+        ProjectTaskSubmission latestSubmission = taskSubmissions.stream()
+                .max(java.util.Comparator.comparing(ProjectTaskSubmission::getId))
+                .orElse(null);
+        if (latestSubmission == null || !latestSubmission.getId().equals(submission.getId())) {
+            throw new com.apms.common.exception.BusinessValidationException(
+                    "This submission is not the current reviewable submission. A newer submission exists.");
+        }
+
+        if (submission.getProjectTask().getTaskType() == TaskType.COMPANY_DATA_PREPARATION) {
             validateManagerAuthorization(submission, currentUser, projectId, taskId);
 
             if ("CompanyCandidate".equals(submission.getTargetEntityType())) {
@@ -249,7 +419,12 @@ public class ProjectTaskSubmissionService {
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
 
         LocalDateTime now = LocalDateTime.now();
-        ProjectTask task = submission.getProjectTask();
+
+        if (request.getDecision() == com.apms.common.enums.ReviewDecision.REJECT
+                && isDocumentSubmission(submission)
+                && !StringUtils.hasText(request.getComment())) {
+            throw new com.apms.common.exception.BusinessValidationException("Reject reason is required for document submissions.");
+        }
 
         submission.setReviewedByAccount(reviewer);
         submission.setReviewedAt(now);
@@ -261,6 +436,11 @@ public class ProjectTaskSubmissionService {
                 task.setStatus(TaskStatus.DONE);
                 task.setCompletedAt(now);
                 auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMISSION_APPROVED, "ProjectTaskSubmission", String.valueOf(submissionId), "Submission approved");
+                
+                // Notify assigned staff
+                if (task.getAssignedToAccount() != null) {
+                    notificationService.notifyTaskApproved(task, task.getAssignedToAccount(), reviewer);
+                }
 
                 // Handle proposal apply
                 if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
@@ -279,7 +459,7 @@ public class ProjectTaskSubmissionService {
                         @SuppressWarnings("unchecked")
                         java.util.Map<String, Object> snapshotMap = objectMapper.convertValue(profile, java.util.Map.class);
 
-                        com.apms.domain.profile.CompanyProfileVersion versionSnapshot = com.apms.domain.profile.CompanyProfileVersion.builder()
+                        CompanyProfileVersion versionSnapshot = CompanyProfileVersion.builder()
                                 .companyProfileId(profile.getId())
                                 .companyId(profile.getCompanyId())
                                 .version(profile.getVersion())
@@ -333,7 +513,7 @@ public class ProjectTaskSubmissionService {
                         }
 
                         // 4. Update Version and Metadata
-                        profile.setVersion(profile.getVersion() == null ? 2 : profile.getVersion() + 1);
+                        profile.setVersion(incrementMinorVersion(profile.getVersion()));
                         if (profile.getMetadata() == null) {
                             profile.setMetadata(new com.apms.domain.profile.CompanyProfile.Metadata());
                         }
@@ -349,7 +529,14 @@ public class ProjectTaskSubmissionService {
                         proposalRepository.save(proposal);
 
                         auditLogService.log(currentUser.getId(), AuditAction.PROFILE_UPDATE_PROPOSAL_APPLIED, "CompanyProfileUpdateProposal", proposal.getId(), "Proposal applied and profile updated");
+
+                        log.info("Profile update proposal {} source documents remain as research/evidence only; they are not published to Company Profile documents.", proposal.getId());
                     }
+                } else if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyCandidate".equals(submission.getTargetEntityType())) {
+                    candidateService.approveCandidate(
+                            submission.getTargetEntityId(),
+                            new com.apms.domain.candidate.dto.ApproveCandidateRequest(),
+                            reviewer.getId());
                 } else if (submission.getSubmissionType() == com.apms.common.enums.SubmissionType.COMPANY_MEMBER_RESEARCH) {
                     companyMemberResearchService.handleApproval(submission, reviewer.getId(), request.getComment());
                 } else {
@@ -363,10 +550,16 @@ public class ProjectTaskSubmissionService {
                 break;
 
             case REJECT:
-                submission.setStatus(SubmissionStatus.REJECTED);
+                submission.setStatus(SubmissionStatus.CHANGES_REQUESTED);
                 task.setStatus(TaskStatus.IN_PROGRESS);
                 task.setCompletedAt(null);
                 auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMISSION_REJECTED, "ProjectTaskSubmission", String.valueOf(submissionId), "Submission rejected");
+                
+                // Notify assigned staff
+                if (task.getAssignedToAccount() != null) {
+                    notificationService.notifyTaskChangesRequested(task, submission, task.getAssignedToAccount(), reviewer, request.getComment());
+                }
+
                 if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
                     proposalRepository.findById(submission.getTargetEntityId()).ifPresent(proposal -> {
                         proposal.setStatus(SubmissionStatus.REJECTED);
@@ -374,12 +567,19 @@ public class ProjectTaskSubmissionService {
                         proposal.setReviewComment(request.getComment());
                         proposalRepository.save(proposal);
                     });
+                } else if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyCandidate".equals(submission.getTargetEntityType())) {
+                    candidateService.sendBackCandidate(submission.getTargetEntityId(), reviewer.getId());
                 } else {
+                    boolean handled = false;
                     for (ProjectTaskSubmissionApprovalHandler handler : approvalHandlers) {
                         if (handler.supports(submission.getSubmissionType())) {
                             handler.handleRejection(submission, reviewer.getId(), request.getComment());
+                            handled = true;
                             break;
                         }
+                    }
+                    if (!handled && submission.getSubmissionType() == com.apms.common.enums.SubmissionType.DOCUMENT_COLLECTION) {
+                        notifyDocumentCollectionRejected(submission, reviewer.getId(), request.getComment());
                     }
                 }
                 break;
@@ -389,6 +589,11 @@ public class ProjectTaskSubmissionService {
                 task.setStatus(TaskStatus.IN_PROGRESS);
                 task.setCompletedAt(null);
                 auditLogService.log(currentUser.getId(), AuditAction.PROJECT_TASK_SUBMISSION_REVISION_REQUESTED, "ProjectTaskSubmission", String.valueOf(submissionId), "Revision requested");
+                
+                // Notify assigned staff
+                if (task.getAssignedToAccount() != null) {
+                    notificationService.notifyTaskChangesRequested(task, submission, task.getAssignedToAccount(), reviewer, request.getComment());
+                }
                 if (StringUtils.hasText(submission.getTargetEntityId()) && "CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
                     proposalRepository.findById(submission.getTargetEntityId()).ifPresent(proposal -> {
                         proposal.setStatus(SubmissionStatus.REVISION_REQUESTED);
@@ -403,13 +608,34 @@ public class ProjectTaskSubmissionService {
         submissionRepository.save(submission);
         taskRepository.save(task);
 
+        if (request.getDecision() == com.apms.common.enums.ReviewDecision.REJECT || request.getDecision() == com.apms.common.enums.ReviewDecision.REQUEST_REVISION) {
+            Account recipient = submission.getSubmittedByAccount() != null ? submission.getSubmittedByAccount() : task.getAssignedToAccount();
+            if (recipient != null) {
+                notificationService.notifyTaskChangesRequested(task, submission, recipient, reviewer, request.getComment());
+            }
+        }
+
         return toResponse(submission);
+    }
+
+    private boolean isDocumentSubmission(ProjectTaskSubmission submission) {
+        return submission.getSubmissionType() == com.apms.common.enums.SubmissionType.DOCUMENT_COLLECTION
+                || submission.getSubmissionType() == com.apms.common.enums.SubmissionType.PARTNER_CONTRACT_COLLECTION;
+    }
+
+    private void notifyDocumentCollectionRejected(ProjectTaskSubmission submission, Long reviewerId, String comment) {
+        notificationService.notifyDocumentRejected(submission, null, "Document package", reviewerId, comment);
     }
 
     @Transactional
     public void reviewFields(Long projectId, Long taskId, Long submissionId, com.apms.domain.project.dto.FieldReviewRequest request) {
         ProjectTaskSubmission submission = submissionRepository.findById(submissionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Submission not found"));
+        
+        if (submission.getProject().getStatus() == ProjectStatus.CLOSED || submission.getProject().getStatus() == ProjectStatus.COMPLETED) {
+            throw new com.apms.common.exception.BusinessValidationException("Project is " + submission.getProject().getStatus() + " and tasks cannot be modified.");
+        }
+
         UserDetailsImpl currentUser = getCurrentUser();
         if (currentUser == null) throw new AccessDeniedException("Unauthorized");
 
@@ -430,6 +656,11 @@ public class ProjectTaskSubmissionService {
     public void reopenField(Long projectId, Long taskId, Long submissionId, String fieldPath, com.apms.domain.project.dto.FieldReopenRequest request) {
         ProjectTaskSubmission submission = submissionRepository.findById(submissionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Submission not found"));
+
+        if (submission.getProject().getStatus() == ProjectStatus.CLOSED || submission.getProject().getStatus() == ProjectStatus.COMPLETED) {
+            throw new com.apms.common.exception.BusinessValidationException("Project is " + submission.getProject().getStatus() + " and tasks cannot be modified.");
+        }
+
         UserDetailsImpl currentUser = getCurrentUser();
         if (currentUser == null) throw new AccessDeniedException("Unauthorized");
 
@@ -455,6 +686,34 @@ public class ProjectTaskSubmissionService {
             throw new IllegalArgumentException("Submission does not belong to specified project/task");
         }
 
+        UserDetailsImpl currentUser = getCurrentUser();
+        if (currentUser == null) throw new AccessDeniedException("Unauthorized");
+
+        boolean isSystemAdmin = hasRole(currentUser, com.apms.common.enums.SystemRole.SYSTEM_ADMIN);
+        if (!isSystemAdmin) {
+            java.util.Optional<com.apms.domain.project.ProjectMember> memberOpt =
+                    projectMemberRepository.findByProject_IdAndAccount_Id(projectId, currentUser.getId());
+            if (memberOpt.isEmpty()) {
+                throw new AccessDeniedException("You must be an active member of this project.");
+            }
+            com.apms.common.enums.ProjectRole role = memberOpt.get().getProjectRole();
+            boolean isStaff = hasRole(currentUser, com.apms.common.enums.SystemRole.BUSINESS_DEVELOPMENT_STAFF);
+
+            if (role != com.apms.common.enums.ProjectRole.LEADER && role != com.apms.common.enums.ProjectRole.DEPUTY) {
+                // If not a reviewer, they must be Staff reading their own task's feedback
+                if (!isStaff) {
+                    throw new AccessDeniedException("You do not have permission to view this review summary.");
+                }
+                boolean assignedToMe = submission.getProjectTask().getAssignedToAccount() != null && 
+                                       submission.getProjectTask().getAssignedToAccount().getId().equals(currentUser.getId());
+                boolean submittedByMe = submission.getSubmittedByAccount() != null && 
+                                        submission.getSubmittedByAccount().getId().equals(currentUser.getId());
+                if (!assignedToMe && !submittedByMe) {
+                    throw new AccessDeniedException("You can only read feedback for your own tasks/submissions.");
+                }
+            }
+        }
+
         if ("CompanyCandidate".equals(submission.getTargetEntityType())) {
             return candidateService.getReviewSummary(submission.getTargetEntityId(), submission.getSubmittedRevisionNumber());
         } else if ("CompanyProfileUpdateProposal".equals(submission.getTargetEntityType())) {
@@ -476,8 +735,18 @@ public class ProjectTaskSubmissionService {
     }
 
     private void validateManagerAuthorization(ProjectTaskSubmission submission, UserDetailsImpl currentUser, Long projectId, Long taskId) {
-        if (!hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER)) {
-            throw new AccessDeniedException("Only BUSINESS_DEVELOPMENT_MANAGER can perform this action");
+        // Check if user has global MANAGER role OR is a project LEADER/DEPUTY
+        boolean isGlobalManager = hasRole(currentUser, SystemRole.BUSINESS_DEVELOPMENT_MANAGER);
+        boolean isProjectReviewer = false;
+        java.util.Optional<com.apms.domain.project.ProjectMember> memberOpt =
+                projectMemberRepository.findByProject_IdAndAccount_Id(projectId, currentUser.getId());
+        if (memberOpt.isPresent()) {
+            com.apms.common.enums.ProjectRole role = memberOpt.get().getProjectRole();
+            isProjectReviewer = role == com.apms.common.enums.ProjectRole.LEADER
+                    || role == com.apms.common.enums.ProjectRole.DEPUTY;
+        }
+        if (!isGlobalManager && !isProjectReviewer) {
+            throw new AccessDeniedException("Only project Leaders, Deputies, or Managers can perform this action");
         }
         if (!submission.getProject().getId().equals(projectId)) {
             throw new IllegalArgumentException("Submission does not belong to specified project");
@@ -492,7 +761,7 @@ public class ProjectTaskSubmissionService {
             throw new com.apms.common.exception.BusinessValidationException("Submission target entity is missing");
         }
         if (!projectRepository.existsByIdAndMembersAccountId(projectId, currentUser.getId())) {
-            throw new AccessDeniedException("Manager must be a member of the project");
+            throw new AccessDeniedException("Reviewer must be a member of the project");
         }
     }
 
@@ -502,9 +771,12 @@ public class ProjectTaskSubmissionService {
                 .projectTaskId(sub.getProjectTask().getId())
                 .projectId(sub.getProject().getId())
                 .submittedByUserId(sub.getSubmittedByAccount().getId())
+                .submittedByName(sub.getSubmittedByAccount() != null ? sub.getSubmittedByAccount().getEmail() : null)
+                .submittedRevisionNumber(sub.getSubmittedRevisionNumber())
                 .submissionType(sub.getSubmissionType())
                 .targetEntityType(sub.getTargetEntityType())
                 .targetEntityId(sub.getTargetEntityId())
+                .targetItemIds(sub.getTargetItemIdList())
                 .status(sub.getStatus())
                 .note(sub.getNote())
                 .submittedAt(sub.getSubmittedAt())
@@ -556,6 +828,17 @@ public class ProjectTaskSubmissionService {
         } catch (Exception e) {
             log.error("Error merging section", e);
             return currentSection;
+        }
+    }
+    private String incrementMinorVersion(String currentVersion) {
+        if (currentVersion == null || currentVersion.isEmpty()) return "1.1";
+        try {
+            String[] parts = currentVersion.split("\\.");
+            int major = Integer.parseInt(parts[0]);
+            int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
+            return major + "." + (minor + 1);
+        } catch (Exception e) {
+            return currentVersion + ".1";
         }
     }
 }

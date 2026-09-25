@@ -44,7 +44,7 @@ class ReferenceCompanyContextServiceTest {
         ownerProfile = new CompanyProfile();
         ownerProfile.setId("fpt-id");
         ownerProfile.setReviewStatus("APPROVED");
-        ownerProfile.setVersion(1);
+        ownerProfile.setVersion("1.0");
     }
 
     @Test
@@ -61,7 +61,7 @@ class ReferenceCompanyContextServiceTest {
                 .build());
 
         when(ownerOrganizationService.resolveApprovedOwnerProfile()).thenReturn(ownerProfile);
-        when(versionRepository.findByCompanyProfileIdAndVersion("fpt-id", 1))
+        when(versionRepository.findByCompanyProfileIdAndVersion("fpt-id", "1.0"))
                 .thenReturn(Optional.of(CompanyProfileVersion.builder().build()));
         when(ownerOrganizationService.checkReadiness())
                 .thenReturn(OwnerProfileReadinessResponse.builder().readyForComparison(true).build());

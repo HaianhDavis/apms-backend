@@ -8,6 +8,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.mongodb.core.mapping.Document;
+import com.apms.common.enums.ProposalOrigin;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,8 +22,15 @@ public class CompanyProfileUpdateProposal {
     @Id
     private String id;
 
+    @Builder.Default
+    private ProposalOrigin origin = ProposalOrigin.PROJECT;
+
     private Long projectId;
     private Long taskId;
+
+    public ProposalOrigin getOrigin() {
+        return origin != null ? origin : ProposalOrigin.PROJECT;
+    }
 
     @org.springframework.data.annotation.Version
     private Long documentVersion;
@@ -32,6 +40,7 @@ public class CompanyProfileUpdateProposal {
 
     private List<com.apms.domain.project.fieldapproval.FieldApprovalRecord> fieldApprovals;
     private List<String> changedFieldPaths;
+    private Map<String, Object> originalValues;
     private LocalDateTime lastSubmittedAt;
     private Long lastSubmittedByAccountId;
 
@@ -47,6 +56,9 @@ public class CompanyProfileUpdateProposal {
     private Map<String, Object> proposedInnovation;
     private Map<String, Object> proposedRisk;
     private Map<String, Object> proposedCompliance;
+    private List<Map<String, Object>> proposedCompanyMembers;
+
+    private String proposedRelationship;
 
     private List<String> sourceDocumentIds;
     private String extractionId;        // Legacy: single extraction ID

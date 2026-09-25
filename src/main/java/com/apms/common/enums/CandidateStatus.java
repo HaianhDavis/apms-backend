@@ -5,5 +5,6 @@ public enum CandidateStatus {
     PENDING_REVIEW,
     APPROVED,
     REJECTED,
-    CORRECTED
+    CORRECTED,
+    REVISION_REQUIRED
 }

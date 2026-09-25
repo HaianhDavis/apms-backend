@@ -7,6 +7,7 @@ import com.apms.common.enums.TaskAction;
 import com.apms.common.enums.TaskStatus;
 import com.apms.common.enums.TaskType;
 import com.apms.domain.document.dto.ImportJobResponse;
+import com.apms.domain.financial.dto.FinancialResearchResponse;
 import lombok.Builder;
 import lombok.Data;
 
@@ -40,5 +41,6 @@ public class ProjectTaskWorkbenchResponse {
     /** All proposal drafts generated for this task — staff-created from selected extractions */
     private List<ProposalDraftSummary> profileUpdateProposalDrafts;
     private List<ProjectTaskSubmissionResponse> submissions;
+    private FinancialResearchResponse financialResearch;
 }
 

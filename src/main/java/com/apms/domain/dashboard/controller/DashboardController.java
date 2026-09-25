@@ -22,9 +22,12 @@ public class DashboardController {
     private final DashboardService dashboardService;
 
     @GetMapping("/summary")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
-    public ResponseEntity<ApiResponse<DashboardSummaryDto>> getSummary() {
-        return ResponseEntity.ok(ApiResponse.success(dashboardService.getSummary()));
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<DashboardSummaryDto>> getSummary(
+            @org.springframework.web.bind.annotation.RequestParam(required = false) Boolean createdByMe,
+            @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
+        Long managerId = (createdByMe != null && createdByMe) ? currentUser.getId() : null;
+        return ResponseEntity.ok(ApiResponse.success(dashboardService.getSummary(managerId)));
     }
 
     @GetMapping("/partners")
@@ -51,5 +54,18 @@ public class DashboardController {
         return ResponseEntity.ok(ApiResponse.success(dashboardService.getPotentialPartners()));
     }
 
+    @GetMapping("/recent-scores")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
+    public ResponseEntity<ApiResponse<List<Object>>> getRecentScores() {
+        // Mock empty response to prevent 500 errors on frontend
+        return ResponseEntity.ok(ApiResponse.success(List.of()));
+    }
 
+    @GetMapping("/manager/review-history")
+    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'SYSTEM_ADMIN')")
+    public ResponseEntity<ApiResponse<List<com.apms.domain.dashboard.dto.ManagerReviewHistoryItemResponse>>> getManagerReviewHistory(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal com.apms.security.UserDetailsImpl currentUser) {
+        Long managerId = currentUser != null ? currentUser.getId() : null;
+        return ResponseEntity.ok(ApiResponse.success(dashboardService.getManagerReviewHistory(managerId)));
+    }
 }

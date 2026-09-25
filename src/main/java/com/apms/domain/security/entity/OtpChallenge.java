@@ -32,6 +32,11 @@ public class OtpChallenge {
     @Column(nullable = false)
     private String otpHash;
 
+    @Column(length = 255)
+    private String verificationTicketHash;
+
+    private LocalDateTime ticketExpiresAt;
+
     @Column(nullable = false)
     private LocalDateTime expiresAt;
 

@@ -17,4 +17,5 @@ public class AiChatResponse {
     private String answer;
     private List<AiSourceReference> sources;
     private List<String> suggestedActions;
+    private List<AiNavigationAction> navigationActions;
 }

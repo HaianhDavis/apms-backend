@@ -27,17 +27,18 @@ public class GeminiPartnerContractExtractionProvider implements PartnerContractE
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
-    private final String geminiApiKey;
+    private final GeminiApiKeyManager geminiApiKeyManager;
     private final String geminiModel;
 
     private static final String GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={key}";
 
     public GeminiPartnerContractExtractionProvider(ObjectMapper objectMapper,
-                                                   @Value("${app.ai.gemini.api-key:dummy-key}") String geminiApiKey,
-                                                   @Value("${app.ai.gemini.model:gemini-2.5-flash}") String geminiModel) {
-        this.restClient = RestClient.builder().build();
+                                                   GeminiApiKeyManager geminiApiKeyManager,
+                                                   @Value("${app.ai.gemini.model:gemini-3.8-flash}") String geminiModel) {
+        this.restClient = RestClient.builder()
+                .requestInterceptor(GeminiCredentialDiagnostics.interceptor("PartnerContractExtraction")).build();
         this.objectMapper = objectMapper.copy().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true);
-        this.geminiApiKey = geminiApiKey;
+        this.geminiApiKeyManager = geminiApiKeyManager;
         this.geminiModel = geminiModel;
     }
 
@@ -63,7 +64,7 @@ public class GeminiPartnerContractExtractionProvider implements PartnerContractE
             try {
                 attempt++;
                 String responseBody = restClient.post()
-                        .uri(GEMINI_API_URL, geminiModel, geminiApiKey)
+                        .uri(GEMINI_API_URL, geminiModel, geminiApiKeyManager.getApiKey())
                         .contentType(MediaType.APPLICATION_JSON)
                         .body(requestPayload)
                         .retrieve()

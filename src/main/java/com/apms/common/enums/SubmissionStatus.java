@@ -7,5 +7,7 @@ public enum SubmissionStatus {
     APPROVED,
     REJECTED,
     APPLIED,
-    REVISION_REQUESTED
+    REVISION_REQUESTED,
+    CHANGES_REQUESTED,
+    WITHDRAWN
 }

@@ -16,6 +16,11 @@ import java.util.List;
 @Builder
 public class CandidateDraftSummary {
     private String candidateId;
+    private String candidateName;
+    private String draftName;
+    private Integer draftSequence;
+    private Integer draftNumber;
+    private String candidateIndustry;
     private CandidateStatus status;
     private Long taskId;
     private List<String> extractionIds;

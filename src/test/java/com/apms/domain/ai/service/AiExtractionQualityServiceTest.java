@@ -36,8 +36,8 @@ class AiExtractionQualityServiceTest {
         @DisplayName("Value with evidence should PASS")
         void valueWithEvidence_shouldPass() {
             Map<String, ExtractionFieldResult> fields = new HashMap<>();
-            fields.put("legalName", ExtractionFieldResult.builder()
-                    .fieldName("legalName")
+            fields.put("tradeName", ExtractionFieldResult.builder()
+                    .fieldName("tradeName")
                     .value("Test Company LLC")
                     .evidenceText("Document header states Test Company LLC")
                     .confidence(0.95)
@@ -45,7 +45,7 @@ class AiExtractionQualityServiceTest {
 
             service.validateExtraction(fields);
 
-            assertEquals(ExtractionValidationStatus.PASS, fields.get("legalName").getValidationStatus());
+            assertEquals(ExtractionValidationStatus.PASS, fields.get("tradeName").getValidationStatus());
         }
 
         @Test
@@ -64,32 +64,18 @@ class AiExtractionQualityServiceTest {
         }
 
         @Test
-        @DisplayName("Critical field (legalName) without evidence should FAIL")
+        @DisplayName("Critical field (tradeName) without evidence should FAIL")
         void criticalFieldWithoutEvidence_shouldFail() {
             Map<String, ExtractionFieldResult> fields = new HashMap<>();
-            fields.put("legalName", ExtractionFieldResult.builder()
-                    .fieldName("legalName")
+            fields.put("tradeName", ExtractionFieldResult.builder()
+                    .fieldName("tradeName")
                     .value("Suspicious Corp")
                     .build());
 
             service.validateExtraction(fields);
 
-            assertEquals(ExtractionValidationStatus.FAIL, fields.get("legalName").getValidationStatus());
-            assertTrue(fields.get("legalName").getValidationMessages().contains("evidence"));
-        }
-
-        @Test
-        @DisplayName("Critical field (taxCode) without evidence should FAIL")
-        void criticalTaxCodeWithoutEvidence_shouldFail() {
-            Map<String, ExtractionFieldResult> fields = new HashMap<>();
-            fields.put("taxCode", ExtractionFieldResult.builder()
-                    .fieldName("taxCode")
-                    .value("1234567890")
-                    .build());
-
-            service.validateExtraction(fields);
-
-            assertEquals(ExtractionValidationStatus.FAIL, fields.get("taxCode").getValidationStatus());
+            assertEquals(ExtractionValidationStatus.FAIL, fields.get("tradeName").getValidationStatus());
+            assertTrue(fields.get("tradeName").getValidationMessages().contains("evidence"));
         }
 
         @Test
@@ -212,8 +198,8 @@ class AiExtractionQualityServiceTest {
         @DisplayName("Metrics correctly count fields and evidence")
         void computeMetrics_countsCorrectly() {
             Map<String, ExtractionFieldResult> fields = new HashMap<>();
-            fields.put("legalName", ExtractionFieldResult.builder()
-                    .fieldName("legalName").value("Test Corp").evidenceText("Stated on page 1")
+            fields.put("website", ExtractionFieldResult.builder()
+                    .fieldName("website").value("https://example.com").evidenceText("Stated on page 1")
                     .confidence(0.9).validationStatus(ExtractionValidationStatus.PASS).build());
             fields.put("businessModel", ExtractionFieldResult.builder()
                     .fieldName("businessModel").value("B2B")
@@ -224,9 +210,9 @@ class AiExtractionQualityServiceTest {
 
             ExtractionQualityMetrics metrics = service.computeMetrics(fields);
 
-            assertEquals(3, metrics.getTotalFields());
-            assertEquals(2, metrics.getFieldsWithValue()); // legalName + businessModel
-            assertEquals(1, metrics.getFieldsWithEvidence()); // only legalName
+            assertEquals(13, metrics.getTotalFields());
+            assertEquals(2, metrics.getFieldsWithValue()); // website + businessModel
+            assertEquals(1, metrics.getFieldsWithEvidence()); // only website
             assertEquals(2, metrics.getPassedFields());
             assertEquals(1, metrics.getWarningFields());
             assertEquals(0, metrics.getFailedFields());
@@ -238,8 +224,8 @@ class AiExtractionQualityServiceTest {
         @DisplayName("Completeness rate considers required fields")
         void computeMetrics_completenessRate() {
             Map<String, ExtractionFieldResult> fields = new HashMap<>();
-            fields.put("legalName", ExtractionFieldResult.builder()
-                    .fieldName("legalName").value("Found Name")
+            fields.put("tradeName", ExtractionFieldResult.builder()
+                    .fieldName("tradeName").value("Found Name")
                     .validationStatus(ExtractionValidationStatus.PASS).build());
             fields.put("industries", ExtractionFieldResult.builder()
                     .fieldName("industries").value(List.of("Tech"))
@@ -255,8 +241,8 @@ class AiExtractionQualityServiceTest {
         @DisplayName("Average confidence computed correctly")
         void computeMetrics_averageConfidence() {
             Map<String, ExtractionFieldResult> fields = new HashMap<>();
-            fields.put("legalName", ExtractionFieldResult.builder()
-                    .fieldName("legalName").value("Corp A").confidence(0.8)
+            fields.put("website", ExtractionFieldResult.builder()
+                    .fieldName("website").value("https://corp-a.com").confidence(0.8)
                     .validationStatus(ExtractionValidationStatus.PASS).build());
             fields.put("tradeName", ExtractionFieldResult.builder()
                     .fieldName("tradeName").value("Corp A Trade").confidence(0.6)

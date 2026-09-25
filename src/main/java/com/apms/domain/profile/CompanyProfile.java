@@ -1,5 +1,6 @@
 package com.apms.domain.profile;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -83,9 +84,25 @@ public class CompanyProfile {
     @Builder.Default
     private List<CompanyMember> companyMembers = new ArrayList<>();
 
+    /**
+     * Per-year financial statements of the Owner Organization, embedded so the
+     * Owner and SYSTEM_ADMIN share the same data source.
+     * Each entry stores one report type (e.g. SUMMARY, BALANCE_SHEET) for one
+     * financial year; the same (reportType, reportYear) is unique per profile.
+     */
+    @Builder.Default
+    private List<FinancialReport> financialReports = new ArrayList<>();
+
     // ─────────────────────────────────────────────────────────────
     // Profile Metadata
     // ─────────────────────────────────────────────────────────────
+
+    /**
+     * The ID of the Business Development Manager responsible for this company profile.
+     * Established via Project ownership, enabling exclusive authorization for
+     * managing Company Continuous Monitoring.
+     */
+    private Long responsibleManagerId;
 
     @Builder.Default
     private SourceRefs sourceRefs = new SourceRefs();
@@ -101,10 +118,17 @@ public class CompanyProfile {
     @Builder.Default
     private Boolean isHidden = false;
 
+    @Builder.Default
+    private Boolean isOwnerEnterprise = false;
+
     private Metadata metadata;
 
+    private Integer majorVersion;
+
+    private Integer revision;
+
     @Builder.Default
-    private Integer version = 1;
+    private String version = "1.00";
 
     // ─────────────────────────────────────────────────────────────
     // Nested Classes (mirrors or extends Candidate data structures)
@@ -118,8 +142,15 @@ public class CompanyProfile {
         @TextIndexed
         private String legalName;
         private String tradeName;
+        
+        @Indexed(unique = true, sparse = true)
         private String taxCode;
+        
+        @Indexed(unique = true, sparse = true)
         private String registrationNumber;
+        
+        private String stockTicker;
+        private String stockExchange;
     }
 
     @Data
@@ -129,6 +160,8 @@ public class CompanyProfile {
     public static class Business {
         private java.util.List<String> industries;
         private String businessModel;
+        private Integer foundedYear;
+        private String companyDescription;
         private java.util.List<Product> products;
         private java.util.List<String> markets;
         private java.util.List<String> targetCustomers;
@@ -138,10 +171,9 @@ public class CompanyProfile {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class Product {
         private String name;
-        private String category;
-        private String description;
     }
 
     @Data
@@ -163,6 +195,36 @@ public class CompanyProfile {
         private java.util.List<String> emails;
         private java.util.List<String> phones;
         private java.util.List<Address> addresses;
+        private String address; // legacy compatibility only
+
+        public java.util.List<String> getEffectiveAddressStrings() {
+            if (addresses != null && !addresses.isEmpty()) {
+                java.util.List<String> list = addresses.stream()
+                        .map(Address::getFullAddress)
+                        .filter(a -> a != null && !a.trim().isEmpty())
+                        .map(String::trim)
+                        .toList();
+                if (!list.isEmpty()) {
+                    return list;
+                }
+            }
+            if (address != null && !address.trim().isEmpty()) {
+                return java.util.List.of(address.trim());
+            }
+            return java.util.Collections.emptyList();
+        }
+
+        public static java.util.List<Address> toAddressObjects(java.util.List<String> values) {
+            if (values == null || values.isEmpty()) {
+                return java.util.Collections.emptyList();
+            }
+            return values.stream()
+                    .filter(s -> s != null && !s.trim().isEmpty())
+                    .map(s -> Address.builder()
+                            .fullAddress(s.trim())
+                            .build())
+                    .collect(java.util.stream.Collectors.toList());
+        }
     }
 
     @Data
@@ -224,6 +286,19 @@ public class CompanyProfile {
         private LocalDateTime deletedAt;
     }
 
+    public void incrementMinorVersion() {
+        com.apms.domain.profile.service.CompanyProfileVersionHelper.applyNextRevision(this);
+    }
+
+    public void incrementMajorVersion() {
+        com.apms.domain.profile.service.CompanyProfileVersionHelper.applyNextMajor(this);
+    }
+
+    public String getVersionLabel() {
+        return com.apms.domain.profile.service.CompanyProfileVersionHelper.getVersionLabel(this);
+    }
+
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -237,5 +312,55 @@ public class CompanyProfile {
         private LocalDateTime researchedAt;
         private Long researchedBy;
         private Long taskId;
+    }
+
+    /**
+     * One financial statement (reportType + reportYear) embedded in the profile.
+     * {@code itemsJson} is a JSON {@code FinancialDocument} describing a single
+     * period: { unit, templace:[{code,name}], data:[{data:[{time, data:[{code,value}]}]}] }.
+     */
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class FinancialReport {
+        private String reportType;
+        private String periodType;
+        private Integer reportYear;
+        private String reportPeriod;
+        private String itemsJson;
+        private String sourceUrl;
+    }
+
+    public String resolveDisplayName() {
+        if (identity != null) {
+            if (isValidName(identity.getTradeName())) {
+                return identity.getTradeName().trim();
+            }
+            if (isValidName(identity.getLegalName())) {
+                return identity.getLegalName().trim();
+            }
+        }
+        return "Unknown Company";
+    }
+
+    public static String getCanonicalDisplayName(CompanyProfile profile, String fallback) {
+        if (profile != null) {
+            String resolved = profile.resolveDisplayName();
+            if (!"Unknown Company".equals(resolved)) {
+                return resolved;
+            }
+        }
+        return isValidName(fallback) ? fallback.trim() : "Unknown Company";
+    }
+
+    private static boolean isValidName(String name) {
+        if (name == null) return false;
+        String trimmed = name.trim();
+        return !trimmed.isEmpty()
+                && !trimmed.equalsIgnoreCase("Not updated")
+                && !trimmed.equalsIgnoreCase("N/A")
+                && !trimmed.equalsIgnoreCase("Chưa cập nhật")
+                && !trimmed.equalsIgnoreCase("Chưa có");
     }
 }

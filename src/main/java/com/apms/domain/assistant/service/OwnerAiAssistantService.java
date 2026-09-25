@@ -3,9 +3,12 @@ package com.apms.domain.assistant.service;
 import com.apms.common.exception.BusinessValidationException;
 import com.apms.domain.assistant.AiChatMessage;
 import com.apms.domain.assistant.dto.AiChatResponse;
-import com.apms.domain.assistant.dto.AssistantContext;
+import com.apms.domain.assistant.dto.AiNavigationAction;
+import com.apms.domain.assistant.dto.OwnerContextResult;
 import com.apms.domain.assistant.dto.OwnerAiChatRequest;
+import com.apms.domain.assistant.dto.OwnerIntent;
 import com.apms.domain.assistant.repository.mongo.AiChatMessageRepository;
+import com.apms.domain.profile.CompanyProfile;
 import com.apms.security.UserDetailsImpl;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,16 +22,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/**
- * Orchestrates the Business Owner AI Assistant flow.
- *
- * Design:
- *   - Business Owner does NOT belong to a project.
- *   - Owner org is the context root: APMS Demo Organization (dev hardcode).
- *   - No project resolution. No ProjectSecurityEvaluator.
- *   - Context is assembled from Neo4j (relationships), MongoDB (profiles),
- *     and SQL Server (score snapshots) for the owner org's ecosystem.
- */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -39,21 +32,18 @@ public class OwnerAiAssistantService {
     private final AiChatMessageRepository chatMessageRepository;
 
     public AiChatResponse chat(OwnerAiChatRequest request) {
-        // ── 1. Authentication ─────────────────────────────────────────────────
         UserDetailsImpl currentUser = currentUser();
         if (currentUser == null) {
             throw new BusinessValidationException("User not authenticated.");
         }
 
-        // ── 2. Session ────────────────────────────────────────────────────────
         String sessionId = StringUtils.hasText(request.getSessionId())
                 ? request.getSessionId()
                 : UUID.randomUUID().toString();
 
-        // ── 3. Build owner-org-rooted context ─────────────────────────────────
-        AssistantContext context;
+        OwnerContextResult result;
         try {
-            context = ownerContextService.buildContext(request.getCompanyProfileId(), request.getQuestion());
+            result = ownerContextService.buildContext(request.getCompanyProfileId(), request.getMentions(), request.getQuestion());
         } catch (ClarificationRequiredException e) {
             return AiChatResponse.builder()
                     .sessionId(sessionId)
@@ -63,42 +53,54 @@ public class OwnerAiAssistantService {
                     .build();
         }
 
-        // ── 4. Generate answer ────────────────────────────────────────────────
-        String answer = ownerAssistantProvider.answer(request.getQuestion(), context);
-        List<String> suggestedActions = buildSuggestedActions(context);
+        String answer;
+        if (result.isDeterministic()) {
+            answer = result.getDirectAnswer();
+        } else {
+            answer = ownerAssistantProvider.answer(request.getQuestion(), result.getContext());
+        }
 
-        // ── 5. Persist to MongoDB ─────────────────────────────────────────────
-        List<String> sourceLabels = context.getSources().stream()
+        List<String> suggestedActions = buildSuggestedActions(result.getIntent(), result);
+
+        List<String> sourceLabels = result.getContext().getSources().stream()
                 .map(s -> s.getType())
                 .distinct()
                 .collect(Collectors.toList());
 
-        String companyProfileId = context.getCompanyProfile() != null
-                ? context.getCompanyProfile().getId()
-                : request.getCompanyProfileId(); // keep explicit hint even if profile not resolved
+        String companyProfileId = result.getContext().getCompanyProfile() != null
+                ? result.getContext().getCompanyProfile().getId()
+                : null;
+
+        List<AiNavigationAction> navigationActions = result.getNavigationActions() != null ? result.getNavigationActions() : List.of();
 
         AiChatMessage message = AiChatMessage.builder()
                 .sessionId(sessionId)
                 .userId(currentUser.getId())
-                .projectId(null)       // Owner assistant is not scoped to a project
+                .projectId(null)
                 .companyProfileId(companyProfileId)
                 .question(request.getQuestion())
                 .answer(answer)
                 .sources(sourceLabels)
                 .suggestedActions(suggestedActions)
+                .navigationActions(navigationActions)
+                .mentions(request.getMentions())
                 .createdAt(LocalDateTime.now())
                 .build();
 
         chatMessageRepository.save(message);
-        log.info("Owner AI chat saved: sessionId={}, userId={}", sessionId, currentUser.getId());
+        log.info("Owner AI chat saved: sessionId={}, userId={}, deterministic={}", sessionId, currentUser.getId(), result.isDeterministic());
 
-        // ── 6. Response ───────────────────────────────────────────────────────
         return AiChatResponse.builder()
                 .sessionId(sessionId)
                 .answer(answer)
-                .sources(context.getSources())
+                .sources(result.getContext().getSources())
                 .suggestedActions(suggestedActions)
+                .navigationActions(navigationActions)
                 .build();
+    }
+
+    public List<com.apms.domain.assistant.dto.CompanyAutocompleteItemDto> autocompleteCompanies(String q, int limit) {
+        return ownerContextService.autocompleteCompanies(q, limit);
     }
 
     private UserDetailsImpl currentUser() {
@@ -107,19 +109,121 @@ public class OwnerAiAssistantService {
         return (UserDetailsImpl) auth.getPrincipal();
     }
 
-    private List<String> buildSuggestedActions(AssistantContext context) {
-        if (context.getCompanyProfile() == null) {
-            return List.of(
-                "Who are our strongest partners?",
-                "Which companies are our biggest competitors?",
-                "What are the biggest opportunities in our ecosystem?"
-            );
-        } else {
-            return List.of(
-                "What is this company's overall risk level?",
-                "How does this company fit into our partner strategy?",
-                "What are this company's main strengths and threats?"
-            );
+    private List<String> buildSuggestedActions(OwnerIntent intent, OwnerContextResult result) {
+        String companyName = "this company";
+        if (result.getContext() != null && result.getContext().getCompanyProfile() != null) {
+            CompanyProfile p = result.getContext().getCompanyProfile();
+            if (p.getIdentity() != null) {
+                if (StringUtils.hasText(p.getIdentity().getLegalName())) {
+                    companyName = p.getIdentity().getLegalName();
+                } else if (StringUtils.hasText(p.getIdentity().getTradeName())) {
+                    companyName = p.getIdentity().getTradeName();
+                }
+            }
         }
+
+        return switch (intent) {
+            case GREETING, THANK_YOU, CAPABILITIES -> List.of(
+                    "Who are our current partners?",
+                    "Who are our current competitors?",
+                    "What risks should I pay attention to?",
+                    "What should I focus on strategically?"
+            );
+case COMPANY_PROFILE -> List.of(
+                    "What is our relationship with " + companyName + "?",
+                    "How close is our relationship with " + companyName + "?",
+                    "Should we strengthen our relationship with " + companyName + "?",
+                    "Show recent public updates about " + companyName + "."
+            );
+            case COMPANY_RELATIONSHIP -> List.of(
+                    "How close is our relationship with " + companyName + "?",
+                    "Show recent public updates about " + companyName + ".",
+                    "What opportunities do we have with " + companyName + "?"
+            );
+            case COMPANY_PUBLIC_NEWS -> List.of(
+                    "What do we know about " + companyName + "?",
+                    "What is our relationship with " + companyName + "?",
+                    "What risks should I know about " + companyName + "?"
+            );
+            case RELATIONSHIP_CLOSENESS -> List.of(
+                    "What is our relationship with " + companyName + "?",
+                    "Should we strengthen our relationship with " + companyName + "?",
+                    "What risks should I know about " + companyName + "?"
+            );
+            case RELATIONSHIP_STRENGTHEN -> List.of(
+                    "How close is our relationship with " + companyName + "?",
+                    "What risks should I know about " + companyName + "?",
+                    "What opportunities do we have with " + companyName + "?"
+            );
+            case PARTNERS -> List.of(
+                    "Which partners should I prioritize?",
+                    "Are there any partner relationships that need attention?",
+                    "What should I focus on strategically?"
+            );
+            case PARTNER_PRIORITY -> List.of(
+                    "Which relationships need my attention?",
+                    "What should I focus on strategically?"
+            );
+            case RELATIONSHIP_ATTENTION -> List.of(
+                    "Which partners should I prioritize?",
+                    "What should I focus on strategically?"
+            );
+            case POTENTIAL_PARTNERS -> List.of(
+                    "Which potential partners have opportunity signals?",
+                    "Which potential partner relationships are strongest?",
+                    "What should I focus on strategically?"
+            );
+            case COMPETITORS -> List.of(
+                    "Which competitors have recent risk signals?",
+                    "Compare two competitors.",
+                    "What should I focus on strategically?"
+            );
+            case COMPANY_COMPARE -> List.of(
+                    "What are the biggest risks in our ecosystem?",
+                    "What opportunities should we pursue?",
+                    "What should I focus on strategically?"
+            );
+            case RISKS -> {
+                if (result.getContext() != null && result.getContext().getCompanyProfile() != null) {
+                    yield List.of(
+                            "What opportunities do we have with " + companyName + "?",
+                            "What is our relationship with " + companyName + "?",
+                            "How close is our relationship with " + companyName + "?",
+                            "Show recent public updates about " + companyName + "."
+                    );
+                }
+                yield List.of(
+                        "What opportunities should we pursue?",
+                        "Which relationships need my attention?",
+                        "What should I focus on strategically?"
+                );
+            }
+            case OPPORTUNITIES -> {
+                if (result.getContext() != null && result.getContext().getCompanyProfile() != null) {
+                    yield List.of(
+                            "What risks should I know about " + companyName + "?",
+                            "What is our relationship with " + companyName + "?",
+                            "How close is our relationship with " + companyName + "?",
+                            "Show recent public updates about " + companyName + "."
+                    );
+                }
+                yield List.of(
+                        "What are the biggest risks in our ecosystem?",
+                        "Which partners should I prioritize?",
+                        "What should I focus on strategically?"
+                );
+            }
+            case STRATEGIC_RECOMMENDATION -> List.of(
+                    "What risks should I review?",
+                    "What opportunities have been detected?",
+                    "Which relationships need attention?"
+            );
+            default -> List.of(
+                    "What risks should I pay attention to?",
+                    "What opportunities have been detected?",
+                    "Which relationships need attention?",
+                    "What should I focus on strategically?"
+            );
+        };
     }
 }

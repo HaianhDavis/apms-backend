@@ -37,6 +37,33 @@ public class CompanyRelationshipCloseness {
     @Column(name = "rated_by_account_id", nullable = false)
     private Long ratedByAccountId;
 
+    @Column(name = "rated_by_role", length = 80)
+    private String ratedByRole;
+
+    @Column(name = "manager_stars")
+    private Integer managerStars;
+
+    @Column(name = "manager_note", length = 1000)
+    private String managerNote;
+
+    @Column(name = "manager_rated_by_account_id")
+    private Long managerRatedByAccountId;
+
+    @Column(name = "manager_rated_at")
+    private LocalDateTime managerRatedAt;
+
+    @Column(name = "owner_stars")
+    private Integer ownerStars;
+
+    @Column(name = "owner_note", length = 1000)
+    private String ownerNote;
+
+    @Column(name = "owner_rated_by_account_id")
+    private Long ownerRatedByAccountId;
+
+    @Column(name = "owner_rated_at")
+    private LocalDateTime ownerRatedAt;
+
     @CreationTimestamp
     @Column(name = "rated_at", nullable = false, updatable = false)
     private LocalDateTime ratedAt;

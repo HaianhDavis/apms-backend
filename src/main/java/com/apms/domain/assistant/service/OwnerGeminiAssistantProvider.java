@@ -1,6 +1,7 @@
 package com.apms.domain.assistant.service;
 
 import com.apms.common.exception.BusinessValidationException;
+import com.apms.domain.ai.service.provider.GeminiApiKeyManager;
 import com.apms.domain.assistant.dto.AssistantContext;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,39 +24,42 @@ public class OwnerGeminiAssistantProvider implements AssistantProvider {
             "https://generativelanguage.googleapis.com/v1/models/{model}:generateContent?key={key}";
 
     private static final String EXECUTIVE_SYSTEM_PROMPT = """
-            You are an elite APMS (Acquisition & Partnership Management System) executive AI assistant.
+            You are an elite APMS (Acquisition & Partnership Management System) executive decision-support AI assistant.
             You are directly assisting a Business Owner.
 
             CRITICAL RULES:
-            1. Answer ONLY using the approved APMS data provided in the context below.
+            1. Answer ONLY using the approved APMS facts supplied in the context below.
             2. Do NOT use any external knowledge or general knowledge about companies.
-            3. Do NOT invent or assume any facts not present in the provided context.
+            3. Do NOT invent or assume any facts not present in the provided context. Never infer unsupported: revenue, market share, financial performance, market growth, contract value, dependency level, or company ranking.
             4. If the context does not contain enough information to answer the question, explicitly state:
                "The APMS system does not have enough approved information to answer this question."
-            5. Answer as an executive assistant for a business owner. Keep answers business-focused, strategic, and action-oriented.
-            6. Prioritize the provided Neo4j relationships when answering relationship or classification questions.
-            7. Prioritize score_snapshots when answering questions about risk, fit, or competition.
-            8. Include source references where possible.
-            9. Format output with clear markdown headings and bullet points when summarizing ecosystems.
+            5. Separate factual evidence from your recommendation. Every recommendation must be directly explainable by the APMS facts in the context.
+            6. Do NOT create numerical scores (e.g. 87%, 92/100) unless they explicitly exist in the context. Relationship closeness remains 1-5 stars. Never convert closeness to 0-100. Do NOT use Score or AHP terminology.
+            7. For cross-company analysis (e.g. strategic comparison, ecosystem risks, global opportunities): synthesize evidence, identify trade-offs, prioritize only where evidence supports it, and explicitly state when evidence is insufficient to recommend one company over another.
+            8. For analytical queries, prefer concise executive formats with 'Recommendation', 'Why', 'Risks / Trade-offs', and 'Suggested Next Action'.
+            9. Do NOT append any fabricated "Data Source:" lines or source labels in the text. The UI handles sources independently.
+            10. Format output with clear markdown headings and bullet points.
             """;
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
-    private final String geminiApiKey;
+    private final GeminiApiKeyManager geminiApiKeyManager;
     private final String geminiModel;
 
     public OwnerGeminiAssistantProvider(
             ObjectMapper objectMapper,
-            @Value("${app.ai.gemini.api-key:dummy-key}") String geminiApiKey,
-            @Value("${app.ai.gemini.model:gemini-2.5-flash}") String geminiModel) {
-        this.restClient = RestClient.builder().build();
+            GeminiApiKeyManager geminiApiKeyManager,
+            @Value("${app.ai.gemini.model:gemini-3.8-flash}") String geminiModel) {
+        this.restClient = RestClient.builder()
+                .requestInterceptor(com.apms.domain.ai.service.provider.GeminiCredentialDiagnostics.interceptor("OwnerGeminiAssistantProvider")).build();
         this.objectMapper = objectMapper;
-        this.geminiApiKey = geminiApiKey;
+        this.geminiApiKeyManager = geminiApiKeyManager;
         this.geminiModel = geminiModel;
     }
 
     @Override
     public String answer(String question, AssistantContext context) {
+        String geminiApiKey = geminiApiKeyManager.getApiKey();
         boolean useMock = !StringUtils.hasText(geminiApiKey) || "dummy-key".equals(geminiApiKey);
         if (useMock) {
             log.info("Gemini API key not configured. Using mock owner assistant response.");
@@ -121,7 +125,6 @@ public class OwnerGeminiAssistantProvider implements AssistantProvider {
 
     private String buildMockAnswer(String question, AssistantContext context) {
         StringBuilder answer = new StringBuilder();
-        answer.append("[MOCK EXECUTIVE RESPONSE — Gemini key not configured]\n\n");
         answer.append("Based on the approved APMS context:\n\n");
 
         if (context.getCompanyProfile() != null) {
@@ -129,16 +132,14 @@ public class OwnerGeminiAssistantProvider implements AssistantProvider {
                 ? context.getCompanyProfile().getIdentity().getLegalName()
                 : "Unknown";
             answer.append("Focusing on specific company: **").append(name).append("**.\n");
-        } else {
+        } else if (context.getProjectId() != null) {
             answer.append("Providing an ecosystem executive summary for project ID: ").append(context.getProjectId()).append(".\n");
+        } else {
+            answer.append("Providing an ecosystem executive summary.\n");
         }
 
         if (context.getFormattedRelationships() != null && !context.getFormattedRelationships().isEmpty()) {
             answer.append("- Tracked Relationships: ").append(context.getFormattedRelationships().size()).append("\n");
-        }
-
-        if (context.getLatestScore() != null) {
-            answer.append("- Total Score (Selected Company): ").append(context.getLatestScore().getTotalScore()).append("\n");
         }
 
         answer.append("\nQuestion received: ").append(question);

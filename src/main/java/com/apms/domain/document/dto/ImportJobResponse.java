@@ -22,6 +22,11 @@ public class ImportJobResponse {
     private String fileName;
     private ImportJobStatus status;
     private Long uploadedBy;
+    private String uploadedByName;
+    private String mimeType;
+    private Long fileSizeBytes;
+    private String taskId;
+    private LocalDateTime uploadedAt;
     private LocalDateTime startedAt;
     private LocalDateTime completedAt;
     private String errorMessage;

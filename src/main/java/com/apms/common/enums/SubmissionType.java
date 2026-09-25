@@ -10,5 +10,6 @@ public enum SubmissionType {
     COMPANY_REPORT,
     ROLE_EVALUATION,
     COMPANY_NEWS_RESEARCH,
+    FINANCIAL_RESEARCH,
     OTHER
 }

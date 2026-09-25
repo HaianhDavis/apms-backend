@@ -11,6 +11,13 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.apms.domain.companymember.dto.MemberImageUploadResponse;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.web.multipart.MultipartFile;
+import java.nio.file.Files;
+
 @RestController
 @RequestMapping("/api/v1/projects/{projectId}/tasks/{taskId}/company-members")
 @Tag(name = "Company Member Research", description = "Endpoints for managing company member research drafts")
@@ -36,6 +43,43 @@ public class CompanyMemberResearchController {
             @Valid @RequestBody CompanyMemberResearchDraftRequest request) {
         CompanyMemberResearchDraftResponse response = researchService.saveDraft(projectId, taskId, request);
         return ResponseEntity.ok(ApiResponse.success(response, "Draft saved successfully"));
+    }
+
+    @Operation(summary = "Upload image for company member")
+    @PostMapping(value = "/images", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<MemberImageUploadResponse>> uploadImage(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @RequestParam("file") MultipartFile file) {
+        MemberImageUploadResponse response = researchService.uploadImage(projectId, taskId, file);
+        return ResponseEntity.ok(ApiResponse.success(response, "Image uploaded successfully"));
+    }
+
+    @Operation(summary = "Get uploaded company member image")
+    @GetMapping("/images/{filename}")
+    public ResponseEntity<Resource> getImage(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @PathVariable String filename) {
+        try {
+            Resource resource = researchService.getImage(filename);
+            String contentType = null;
+            try {
+                if (resource.getFile() != null) {
+                    contentType = Files.probeContentType(resource.getFile().toPath());
+                }
+            } catch (Exception ignored) {
+            }
+            if (contentType == null) {
+                contentType = MediaType.APPLICATION_OCTET_STREAM_VALUE;
+            }
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType(contentType))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + resource.getFilename() + "\"")
+                    .body(resource);
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     @Operation(summary = "Submit company member research draft for review")

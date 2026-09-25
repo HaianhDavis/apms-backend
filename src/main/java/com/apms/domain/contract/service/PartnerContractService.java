@@ -12,7 +12,6 @@ import com.apms.domain.contract.enums.ContractLifecycleStatus;
 import com.apms.domain.contract.enums.ContractReviewStatus;
 import com.apms.domain.contract.enums.ContractExtractionApplicationStatus;
 import com.apms.domain.contract.enums.ContractExtractionReviewDecision;
-import com.apms.domain.contract.entity.PartnerContractApprovalSyncRecord;
 import com.apms.domain.contract.repository.sql.PartnerContractRepository;
 import com.apms.domain.contract.repository.sql.PartnerContractVersionRepository;
 import com.apms.domain.document.RawDocument;
@@ -46,7 +45,6 @@ public class PartnerContractService {
     private final AuditLogService auditService;
     private final com.apms.domain.contract.repository.mongo.PartnerContractExtractionDraftRepository draftRepository;
     private final com.apms.domain.contract.repository.sql.PartnerContractClauseVersionRepository clauseVersionRepository;
-    private final com.apms.domain.contract.repository.sql.PartnerContractApprovalSyncRepository syncRepository;
 
     @Transactional
     public PartnerContractResponse createDraft(Long projectId, CreatePartnerContractRequest request, Long accountId) {
@@ -299,18 +297,6 @@ public class PartnerContractService {
                 }
 
                 auditService.log(accountId, AuditAction.PARTNER_CONTRACT_CLAUSES_APPROVED, "PartnerContract", contract.getId().toString(), "Contract clauses approved via extraction");
-
-                PartnerContractApprovalSyncRecord syncRecord = PartnerContractApprovalSyncRecord.builder()
-                        .extractionDraftId(draft.getId())
-                        .contractId(contract.getId())
-                        .contractVersionId(finalVersionId)
-                        .contractVersionNumber(contract.getCurrentVersion())
-                        .clauseSetHash(draft.getClauseSetHash())
-                        .status("PENDING")
-                        .retryCount(0)
-                        .createdAt(LocalDateTime.now())
-                        .build();
-                syncRepository.save(syncRecord);
             }
 
             auditService.log(accountId, AuditAction.PARTNER_CONTRACT_APPROVED, "PartnerContract", contract.getId().toString(), "Contract approved, version " + contract.getCurrentVersion() + " created");

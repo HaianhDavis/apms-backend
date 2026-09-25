@@ -47,6 +47,13 @@ public class Project {
     private String targetCompanyName;
 
     /**
+     * Nullable. Required when projectType = RESEARCH_NEW_COMPANY.
+     * Contains the tax code of the company being researched for duplicate detection.
+     */
+    @Column(nullable = true)
+    private String targetCompanyTaxCode;
+
+    /**
      * The official business relationship type for the target company.
      * Selected by the Manager at project creation time.
      */
@@ -54,8 +61,15 @@ public class Project {
     @Column(name = "target_relationship_type", nullable = true, length = 50)
     private com.apms.common.enums.RelationshipType targetRelationshipType;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "original_relationship_type", nullable = true, length = 50)
+    private com.apms.common.enums.RelationshipType originalRelationshipType;
+
     @Column(columnDefinition = "NVARCHAR(MAX)")
     private String description;
+
+    @Column(columnDefinition = "NVARCHAR(MAX)")
+    private String objective;
 
     @Column(name = "planned_end_date")
     private LocalDate plannedEndDate;
@@ -88,4 +102,16 @@ public class Project {
 
     @UpdateTimestamp
     private LocalDateTime updatedAt;
+
+    @Column(name = "closed_at")
+    private LocalDateTime closedAt;
+
+    @Column(name = "close_reason", columnDefinition = "NVARCHAR(MAX)")
+    private String closeReason;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "closed_by", nullable = true)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private com.apms.domain.user.Account closedByAccount;
 }

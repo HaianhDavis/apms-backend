@@ -50,7 +50,9 @@ public class OwnerInsightsService {
         List<String> targetBusinessCompanyIds = getTargetBusinessCompanyIds(ownerCompanyId);
         
         // 2. Map UUIDs to Mongo IDs
-        List<CompanyProfile> targetProfiles = targetBusinessCompanyIds.isEmpty() ? List.of() : profileRepository.findByCompanyIdIn(targetBusinessCompanyIds);
+        List<CompanyProfile> targetProfiles = targetBusinessCompanyIds.isEmpty() ? List.of() : profileRepository.findByCompanyIdIn(targetBusinessCompanyIds)
+                .stream().filter(p -> "APPROVED".equals(p.getReviewStatus()) && !Boolean.TRUE.equals(p.getIsHidden()))
+                .collect(Collectors.toList());
         Map<String, CompanyProfile> targetProfileMap = targetProfiles.stream().collect(Collectors.toMap(CompanyProfile::getId, p -> p));
         Set<String> distinctTargetMongoIds = targetProfileMap.keySet();
         

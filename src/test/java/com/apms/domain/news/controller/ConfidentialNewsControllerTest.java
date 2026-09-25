@@ -4,9 +4,8 @@ import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.news.entity.CompanyIntelligenceArticle;
 import com.apms.domain.news.repository.CompanyIntelligenceArticleRepository;
 import com.apms.domain.profile.CompanyProfile;
-import com.apms.domain.profile.repository.mongo.CompanyProfileRepository;
-import com.apms.domain.security.enums.StepUpPurpose;
-import com.apms.domain.security.service.StepUpTokenService;
+import com.apms.domain.profile.service.CompanyProfileAccessService;
+import com.apms.domain.security.service.StepUpAuthenticationService;
 import com.apms.domain.document.service.StorageService;
 import com.apms.common.exception.ResourceNotFoundException;
 import com.apms.security.UserDetailsImpl;
@@ -41,9 +40,9 @@ class ConfidentialNewsControllerTest {
     @Mock
     private CompanyIntelligenceArticleRepository articleRepository;
     @Mock
-    private CompanyProfileRepository companyProfileRepository;
+    private CompanyProfileAccessService companyProfileAccessService;
     @Mock
-    private StepUpTokenService stepUpTokenService;
+    private StepUpAuthenticationService stepUpAuthenticationService;
     @Mock
     private AuditLogService auditLogService;
     @Mock
@@ -78,18 +77,14 @@ class ConfidentialNewsControllerTest {
         SecurityContextHolder.setContext(securityContext);
     }
 
-    @Mock
-    private com.apms.domain.profile.service.OwnerOrganizationService ownerOrganizationService;
-
     @Test
     void listArticles_Success() {
         mockSecurityContext(ownerUser);
         request.addHeader("X-Step-Up-Token", "valid-token");
-        
-        when(ownerOrganizationService.isOwnerCompany("profile-1")).thenReturn(true);
+
         CompanyProfile profile = CompanyProfile.builder().id("profile-1").build();
-        when(companyProfileRepository.findById("profile-1")).thenReturn(Optional.of(profile));
-        when(stepUpTokenService.validateToken("valid-token", 1L, StepUpPurpose.CONFIDENTIAL_COMPANY_NEWS)).thenReturn(true);
+        when(companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile("profile-1", ownerUser)).thenReturn(profile);
+        when(stepUpAuthenticationService.isOwnerSecureSessionActive(1L, "valid-token")).thenReturn(true);
 
         CompanyIntelligenceArticle article = CompanyIntelligenceArticle.builder().id("art-1").build();
         Page<CompanyIntelligenceArticle> page = new PageImpl<>(List.of(article));
@@ -105,9 +100,9 @@ class ConfidentialNewsControllerTest {
     @Test
     void listArticles_FailsIfNoToken() {
         mockSecurityContext(ownerUser);
-        when(ownerOrganizationService.isOwnerCompany("profile-1")).thenReturn(true);
+
         CompanyProfile profile = CompanyProfile.builder().id("profile-1").build();
-        when(companyProfileRepository.findById("profile-1")).thenReturn(Optional.of(profile));
+        when(companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile("profile-1", ownerUser)).thenReturn(profile);
         // No header added
 
         assertThrows(AccessDeniedException.class, () -> 
@@ -115,33 +110,24 @@ class ConfidentialNewsControllerTest {
     }
 
     @Test
-    void listArticles_FailsIfNotOwnerCompanyScope() {
+    void listArticles_FailsIfProfileAccessDenied() {
         mockSecurityContext(ownerUser);
-        when(ownerOrganizationService.isOwnerCompany("profile-1")).thenReturn(false);
+
+        when(companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile("profile-1", ownerUser))
+            .thenThrow(new AccessDeniedException("COMPANY_PROFILE_ACCESS_DENIED"));
 
         assertThrows(AccessDeniedException.class, () -> 
                 controller.listArticles("profile-1", 0, 20, request, response));
     }
 
     @Test
-    void listArticles_FailsIfHiddenProfile() {
+    void listArticles_FailsIfProfileNotFound() {
         mockSecurityContext(ownerUser);
-        when(ownerOrganizationService.isOwnerCompany("profile-1")).thenReturn(true);
-        CompanyProfile profile = CompanyProfile.builder().id("profile-1").isHidden(true).build();
-        when(companyProfileRepository.findById("profile-1")).thenReturn(Optional.of(profile));
 
-        assertThrows(AccessDeniedException.class, () -> 
-                controller.listArticles("profile-1", 0, 20, request, response));
-    }
+        when(companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile("profile-1", ownerUser))
+            .thenThrow(new ResourceNotFoundException("COMPANY_PROFILE_NOT_FOUND"));
 
-    @Test
-    void listArticles_FailsIfDeletedProfile() {
-        mockSecurityContext(ownerUser);
-        when(ownerOrganizationService.isOwnerCompany("profile-1")).thenReturn(true);
-        CompanyProfile profile = CompanyProfile.builder().id("profile-1").isDeleted(true).build();
-        when(companyProfileRepository.findById("profile-1")).thenReturn(Optional.of(profile));
-
-        assertThrows(AccessDeniedException.class, () -> 
+        assertThrows(ResourceNotFoundException.class, () -> 
                 controller.listArticles("profile-1", 0, 20, request, response));
     }
 
@@ -162,11 +148,10 @@ class ConfidentialNewsControllerTest {
     void getArticle_FailsIfFromAnotherCompany() {
         mockSecurityContext(ownerUser);
         request.addHeader("X-Step-Up-Token", "valid-token");
-        
-        when(ownerOrganizationService.isOwnerCompany("profile-1")).thenReturn(true);
+
         CompanyProfile profile = CompanyProfile.builder().id("profile-1").build();
-        when(companyProfileRepository.findById("profile-1")).thenReturn(Optional.of(profile));
-        when(stepUpTokenService.validateToken("valid-token", 1L, StepUpPurpose.CONFIDENTIAL_COMPANY_NEWS)).thenReturn(true);
+        when(companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile("profile-1", ownerUser)).thenReturn(profile);
+        when(stepUpAuthenticationService.isOwnerSecureSessionActive(1L, "valid-token")).thenReturn(true);
 
         when(articleRepository.findByIdAndCompanyProfileIdAndIsDeletedFalseAndApprovedAtIsNotNull("art-1", "profile-1"))
                 .thenReturn(Optional.empty()); // simulate article belongs to another company or not found
@@ -179,11 +164,10 @@ class ConfidentialNewsControllerTest {
     void getArticleImage_Success() throws Exception {
         mockSecurityContext(ownerUser);
         request.addHeader("X-Step-Up-Token", "valid-token");
-        
-        when(ownerOrganizationService.isOwnerCompany("profile-1")).thenReturn(true);
+
         CompanyProfile profile = CompanyProfile.builder().id("profile-1").build();
-        when(companyProfileRepository.findById("profile-1")).thenReturn(Optional.of(profile));
-        when(stepUpTokenService.validateToken("valid-token", 1L, StepUpPurpose.CONFIDENTIAL_COMPANY_NEWS)).thenReturn(true);
+        when(companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile("profile-1", ownerUser)).thenReturn(profile);
+        when(stepUpAuthenticationService.isOwnerSecureSessionActive(1L, "valid-token")).thenReturn(true);
 
         CompanyIntelligenceArticle article = CompanyIntelligenceArticle.builder()
                 .id("art-1")
@@ -211,9 +195,9 @@ class ConfidentialNewsControllerTest {
     @Test
     void getArticleImage_FailsIfNoToken() {
         mockSecurityContext(ownerUser);
-        when(ownerOrganizationService.isOwnerCompany("profile-1")).thenReturn(true);
+
         CompanyProfile profile = CompanyProfile.builder().id("profile-1").build();
-        when(companyProfileRepository.findById("profile-1")).thenReturn(Optional.of(profile));
+        when(companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile("profile-1", ownerUser)).thenReturn(profile);
 
         assertThrows(AccessDeniedException.class, () -> 
                 controller.getArticleImage("profile-1", "art-1", request, response));
@@ -223,11 +207,10 @@ class ConfidentialNewsControllerTest {
     void getArticleImage_FailsIfDeletedArticle() {
         mockSecurityContext(ownerUser);
         request.addHeader("X-Step-Up-Token", "valid-token");
-        
-        when(ownerOrganizationService.isOwnerCompany("profile-1")).thenReturn(true);
+
         CompanyProfile profile = CompanyProfile.builder().id("profile-1").build();
-        when(companyProfileRepository.findById("profile-1")).thenReturn(Optional.of(profile));
-        when(stepUpTokenService.validateToken("valid-token", 1L, StepUpPurpose.CONFIDENTIAL_COMPANY_NEWS)).thenReturn(true);
+        when(companyProfileAccessService.requireOwnerAccessibleOfficialCompanyProfile("profile-1", ownerUser)).thenReturn(profile);
+        when(stepUpAuthenticationService.isOwnerSecureSessionActive(1L, "valid-token")).thenReturn(true);
 
         when(articleRepository.findByIdAndCompanyProfileIdAndIsDeletedFalseAndApprovedAtIsNotNull("art-1", "profile-1"))
                 .thenReturn(Optional.empty());

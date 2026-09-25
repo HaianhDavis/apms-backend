@@ -7,6 +7,7 @@ import com.apms.domain.candidate.dto.CandidateResponse;
 import com.apms.domain.candidate.dto.RejectCandidateRequest;
 import com.apms.domain.candidate.dto.UpdateCandidateRequest;
 import com.apms.domain.candidate.service.CandidateService;
+import com.apms.domain.contract.dto.ConfirmCompanyMatchRequest;
 import com.apms.security.UserDetailsImpl;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -55,19 +56,34 @@ public class CandidateController {
     }
 
     // ─────────────────────────────────────────────
+    // POST /api/v1/projects/{projectId}/tasks/{taskId}/candidates/manual
+    // ─────────────────────────────────────────────
+    @PostMapping("/projects/{projectId}/tasks/{taskId}/candidates/manual")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.isMember(#projectId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> createManualCandidate(
+            @PathVariable Long projectId,
+            @PathVariable Long taskId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        CandidateResponse response = candidateService.createManualCandidate(projectId, taskId, currentUser.getId());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(response, "Draft manual candidate created successfully"));
+    }
+
+    // ─────────────────────────────────────────────
     // GET /api/v1/projects/{projectId}/candidates
     // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
     // ─────────────────────────────────────────────
     @GetMapping("/projects/{projectId}/candidates")
-    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.isMemberOrOwner(#projectId == null ? -1 : Long.parseLong(#projectId))")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.isMemberOrOwner(#projectId)")
     public ResponseEntity<ApiResponse<PageResponse<CandidateResponse>>> getProjectCandidates(
-            @PathVariable String projectId,
+            @PathVariable Long projectId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "candidateOrder"));
         PageResponse<CandidateResponse> response = PageResponse.of(
-                candidateService.getProjectCandidates(projectId, pageable));
+                candidateService.getProjectCandidates(String.valueOf(projectId), pageable));
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -76,12 +92,18 @@ public class CandidateController {
     // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER, BUSINESS_OWNER
     // ─────────────────────────────────────────────
     @GetMapping("/candidates/{candidateId}")
-    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.canAccessCandidate(#candidateId)")
+    @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_OWNER') and @projectSecurity.canAccessCandidate(#candidateId))")
     public ResponseEntity<ApiResponse<CandidateResponse>> getCandidate(
             @PathVariable String candidateId) {
 
         return ResponseEntity.ok(ApiResponse.success(candidateService.getCandidate(candidateId)));
     }
+
+    @GetMapping("/candidates/{candidateId}/test")
+    public ResponseEntity<String> getCandidateTest(@PathVariable String candidateId) {
+        return ResponseEntity.ok(candidateService.getCandidate(candidateId).getProjectId());
+    }
+
 
     // ─────────────────────────────────────────────
     // PATCH /api/v1/candidates/{candidateId}
@@ -99,9 +121,33 @@ public class CandidateController {
     }
 
     // ─────────────────────────────────────────────
+    // PATCH /api/v1/candidates/{candidateId}/rename
+    // Role: BUSINESS_DEVELOPMENT_STAFF
+    // ─────────────────────────────────────────────
+    @PatchMapping("/candidates/{candidateId}/rename")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> renameCandidateDraft(
+            @PathVariable String candidateId,
+            @jakarta.validation.Valid @RequestBody com.apms.domain.candidate.dto.RenameCandidateDraftRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        CandidateResponse response = candidateService.renameCandidateDraft(candidateId, request.getDraftName(), currentUser.getId());
+        return ResponseEntity.ok(ApiResponse.success(response, "Candidate draft renamed successfully"));
+    }
+
+    // ─────────────────────────────────────────────
     // POST /api/v1/candidates/{candidateId}/submit
     // Role: BUSINESS_DEVELOPMENT_STAFF
     // ─────────────────────────────────────────────
+    @DeleteMapping("/candidates/{candidateId}")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
+    public ResponseEntity<ApiResponse<Void>> deleteDraftCandidate(
+            @PathVariable String candidateId) {
+
+        candidateService.deleteDraftCandidate(candidateId);
+        return ResponseEntity.ok(ApiResponse.success(null, "Draft candidate deleted successfully"));
+    }
+
     @PostMapping("/candidates/{candidateId}/submit")
     @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_STAFF') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> submitCandidate(
@@ -110,6 +156,25 @@ public class CandidateController {
 
         return ResponseEntity.ok(ApiResponse.success(
                 candidateService.submitCandidate(candidateId, currentUser.getId()), "Candidate submitted for review"));
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/v1/candidates/{candidateId}/confirm-company
+    // Role: BUSINESS_DEVELOPMENT_STAFF, BUSINESS_DEVELOPMENT_MANAGER
+    // ─────────────────────────────────────────────
+    @PostMapping("/candidates/{candidateId}/confirm-company")
+    @PreAuthorize("hasAnyRole('BUSINESS_DEVELOPMENT_STAFF', 'BUSINESS_DEVELOPMENT_MANAGER', 'SYSTEM_ADMIN') and @projectSecurity.canModifyCandidate(#candidateId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> confirmCompanyMatch(
+            @PathVariable String candidateId,
+            @Valid @RequestBody ConfirmCompanyMatchRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+
+        CandidateResponse response = candidateService.confirmCompanyMatch(
+                candidateId,
+                request.isConfirmed(),
+                currentUser != null ? currentUser.getId() : null
+        );
+        return ResponseEntity.ok(ApiResponse.success(response, "Company match confirmation updated successfully"));
     }
 
     // ─────────────────────────────────────────────
@@ -130,7 +195,7 @@ public class CandidateController {
     // Role: BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @PostMapping("/candidates/{candidateId}/reject")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> rejectCandidate(
             @PathVariable String candidateId,
             @Valid @RequestBody RejectCandidateRequest request,
@@ -145,7 +210,7 @@ public class CandidateController {
     // Role: BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @PostMapping("/candidates/{candidateId}/approve")
-    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.canModifyCandidate(#candidateId)")
     public ResponseEntity<ApiResponse<CandidateResponse>> approveCandidate(
             @PathVariable String candidateId,
             @RequestBody(required = false) ApproveCandidateRequest request,
@@ -157,5 +222,60 @@ public class CandidateController {
 
         return ResponseEntity.ok(ApiResponse.success(
                 candidateService.approveCandidate(candidateId, request, currentUser.getId()), "Candidate approved"));
+    }
+
+    // ─────────────────────────────────────────────
+    // PATCH /api/v1/projects/{projectId}/candidates/{candidateId}/review
+    // ─────────────────────────────────────────────
+    @PatchMapping("/projects/{projectId}/candidates/{candidateId}/review")
+    @PreAuthorize("(hasRole('BUSINESS_DEVELOPMENT_STAFF') or hasRole('BUSINESS_DEVELOPMENT_MANAGER')) and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> reviewCandidate(
+            @PathVariable Long projectId,
+            @PathVariable String candidateId,
+            @RequestBody com.apms.domain.candidate.dto.CandidateReviewRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(ApiResponse.success(
+                candidateService.reviewCandidate(String.valueOf(projectId), candidateId, request, currentUser.getId()), "Candidate fields reviewed successfully"));
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/v1/projects/{projectId}/candidates/{candidateId}/review/complete
+    // ─────────────────────────────────────────────
+    @PostMapping("/projects/{projectId}/candidates/{candidateId}/review/complete")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> completeCandidateReview(
+            @PathVariable Long projectId,
+            @PathVariable String candidateId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(ApiResponse.success(
+                candidateService.completeCandidateFieldReview(candidateId, currentUser.getId()), "Candidate field review completed successfully"));
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/v1/projects/{projectId}/candidates/{candidateId}/send-back
+    // ─────────────────────────────────────────────
+    @PostMapping("/projects/{projectId}/candidates/{candidateId}/send-back")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> sendBackCandidate(
+            @PathVariable Long projectId,
+            @PathVariable String candidateId,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(ApiResponse.success(
+                candidateService.sendBackCandidate(candidateId, currentUser.getId()), "Candidate sent back for revision successfully"));
+    }
+
+    // ─────────────────────────────────────────────
+    // POST /api/v1/projects/{projectId}/candidates/{candidateId}/review/bulk-approve
+    // ─────────────────────────────────────────────
+    @PostMapping("/projects/{projectId}/candidates/{candidateId}/review/bulk-approve")
+    @PreAuthorize("hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @projectSecurity.isMemberOrOwner(#projectId)")
+    public ResponseEntity<ApiResponse<CandidateResponse>> bulkApproveCandidateFields(
+            @PathVariable Long projectId,
+            @PathVariable String candidateId,
+            @RequestBody(required = false) com.apms.domain.candidate.dto.BulkApproveFieldsRequest request,
+            @AuthenticationPrincipal UserDetailsImpl currentUser) {
+        return ResponseEntity.ok(ApiResponse.success(
+                candidateService.bulkApproveCandidateFields(String.valueOf(projectId), candidateId, request != null ? request.getFieldPaths() : null, currentUser.getId()),
+                "Pending candidate fields approved successfully"));
     }
 }

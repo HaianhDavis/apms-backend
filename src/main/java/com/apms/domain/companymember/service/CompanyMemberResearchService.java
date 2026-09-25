@@ -12,6 +12,10 @@ import com.apms.domain.audit.service.AuditLogService;
 import com.apms.domain.companymember.CompanyMemberResearchDraft;
 import com.apms.domain.companymember.CompanyMemberResearchItem;
 import com.apms.domain.companymember.dto.CompanyMemberResearchDraftRequest;
+import com.apms.domain.companymember.dto.MemberImageUploadResponse;
+import com.apms.domain.document.service.StorageService;
+import org.springframework.core.io.Resource;
+import org.springframework.web.multipart.MultipartFile;
 import com.apms.domain.companymember.dto.CompanyMemberResearchDraftResponse;
 import com.apms.domain.companymember.dto.CompanyMemberResearchItemRequest;
 import com.apms.domain.companymember.repository.CompanyMemberResearchDraftRepository;
@@ -54,6 +58,7 @@ public class CompanyMemberResearchService {
     private final ProjectTaskSubmissionService submissionService;
     private final ProjectTaskSubmissionRepository submissionRepository;
     private final AuditLogService auditLogService;
+    private final StorageService storageService;
 
     @Transactional
     public CompanyMemberResearchDraftResponse saveDraft(Long projectId, Long taskId, CompanyMemberResearchDraftRequest request) {
@@ -99,6 +104,42 @@ public class CompanyMemberResearchService {
         return toResponse(draft);
     }
 
+    public MemberImageUploadResponse uploadImage(Long projectId, Long taskId, MultipartFile file) {
+        UserDetailsImpl currentUser = getCurrentUser();
+        validateTaskAndAccess(projectId, taskId, currentUser, true);
+
+        long maxImageSizeBytes = 2 * 1024 * 1024; // 2 MB
+        if (file == null || file.isEmpty()) {
+            throw new BusinessValidationException("Image file cannot be empty");
+        }
+        if (file.getSize() > maxImageSizeBytes) {
+            throw new BusinessValidationException("Image size exceeds limit of 2 MB");
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || (!contentType.equals("image/jpeg") && !contentType.equals("image/png") && !contentType.equals("image/webp"))) {
+            throw new BusinessValidationException("Only JPEG, PNG, and WebP images are allowed");
+        }
+
+        String filename = storageService.store(file);
+        String imageUrl = String.format("/api/v1/projects/%d/tasks/%d/company-members/images/%s", projectId, taskId, filename);
+
+        auditLogService.log(currentUser.getId(), AuditAction.COMPANY_MEMBER_RESEARCH_DRAFT_UPDATED, "CompanyMemberResearchDraft", null, "Image uploaded: " + filename);
+
+        return MemberImageUploadResponse.builder()
+                .imageUrl(imageUrl)
+                .filename(filename)
+                .build();
+    }
+
+    public Resource getImage(String filename) {
+        try {
+            return storageService.loadAsResource(filename);
+        } catch (Exception e) {
+            throw new ResourceNotFoundException("Image not found: " + filename);
+        }
+    }
+
     @Transactional
     public void submitDraft(Long projectId, Long taskId) {
         UserDetailsImpl currentUser = getCurrentUser();
@@ -134,6 +175,15 @@ public class CompanyMemberResearchService {
         auditLogService.log(currentUser.getId(), AuditAction.COMPANY_MEMBER_RESEARCH_SUBMITTED, "CompanyMemberResearchDraft", draft.getId(), "Draft submitted");
     }
 
+    @Transactional
+    public void cancelDraftSubmission(String draftId) {
+        if (!StringUtils.hasText(draftId)) return;
+        draftRepository.findById(draftId).ifPresent(draft -> {
+            draft.setSubmissionId(null);
+            draftRepository.save(draft);
+        });
+    }
+
     /**
      * Called when a COMPANY_MEMBER_RESEARCH submission is approved.
      * Handled within ProjectTaskSubmissionService, or called by a listener/hook.
@@ -148,8 +198,9 @@ public class CompanyMemberResearchService {
         CompanyMemberResearchDraft draft = draftRepository.findById(submission.getTargetEntityId())
                 .orElseThrow(() -> new ResourceNotFoundException("Draft not found: " + submission.getTargetEntityId()));
 
-        CompanyProfile profile = profileRepository.findByCompanyId(draft.getCompanyProfileId())
-                .orElseThrow(() -> new ResourceNotFoundException("Company profile not found: " + draft.getCompanyProfileId()));
+        CompanyProfile profile = resolveTargetProfile(draft, submission);
+        draft.setCompanyProfileId(profile.getId());
+        draftRepository.save(draft);
 
         List<CompanyProfile.CompanyMember> existingMembers = profile.getCompanyMembers();
         if (existingMembers == null) {
@@ -176,7 +227,7 @@ public class CompanyMemberResearchService {
         }
 
         if (addedCount > 0) {
-            profile.setVersion(profile.getVersion() + 1);
+            profile.setVersion(incrementMinorVersion(profile.getVersion()));
             if (profile.getMetadata() == null) {
                 profile.setMetadata(new CompanyProfile.Metadata());
             }
@@ -202,6 +253,37 @@ public class CompanyMemberResearchService {
         }
 
         auditLogService.log(reviewerId, AuditAction.COMPANY_MEMBER_RESEARCH_APPROVED, "CompanyMemberResearchDraft", draft.getId(), "Draft approved");
+    }
+
+    private CompanyProfile resolveTargetProfile(CompanyMemberResearchDraft draft, ProjectTaskSubmission submission) {
+        List<String> lookupKeys = new ArrayList<>();
+        if (StringUtils.hasText(draft.getCompanyProfileId())) {
+            lookupKeys.add(draft.getCompanyProfileId());
+        }
+        if (submission.getProject() != null && StringUtils.hasText(submission.getProject().getTargetCompanyProfileId())) {
+            lookupKeys.add(submission.getProject().getTargetCompanyProfileId());
+        }
+
+        for (String key : lookupKeys) {
+            Optional<CompanyProfile> byDocumentId = profileRepository.findById(key);
+            if (byDocumentId.isPresent()) {
+                return byDocumentId.get();
+            }
+
+            Optional<CompanyProfile> byCompanyId = profileRepository.findByCompanyId(key);
+            if (byCompanyId.isPresent()) {
+                return byCompanyId.get();
+            }
+        }
+
+        if (submission.getProject() != null && submission.getProject().getId() != null) {
+            List<CompanyProfile> profiles = profileRepository.findByProjectId(String.valueOf(submission.getProject().getId()));
+            if (!profiles.isEmpty()) {
+                return profiles.get(0);
+            }
+        }
+
+        throw new ResourceNotFoundException("Company profile not found for company member research task: " + draft.getTaskId());
     }
 
     private boolean isDuplicate(List<CompanyProfile.CompanyMember> existing, CompanyMemberResearchItem draftItem) {
@@ -285,5 +367,17 @@ public class CompanyMemberResearchService {
 
     private boolean hasRole(UserDetailsImpl user, SystemRole role) {
         return user.getAuthorities().stream().anyMatch(a -> a.getAuthority().equals("ROLE_" + role.name()));
+    }
+
+    private String incrementMinorVersion(String currentVersion) {
+        if (currentVersion == null || currentVersion.isEmpty()) return "1.1";
+        try {
+            String[] parts = currentVersion.split("\\.");
+            int major = Integer.parseInt(parts[0]);
+            int minor = parts.length > 1 ? Integer.parseInt(parts[1]) : 0;
+            return major + "." + (minor + 1);
+        } catch (Exception e) {
+            return currentVersion + ".1";
+        }
     }
 }

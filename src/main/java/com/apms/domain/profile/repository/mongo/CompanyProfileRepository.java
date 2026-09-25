@@ -14,7 +14,9 @@ public interface CompanyProfileRepository extends MongoRepository<CompanyProfile
     
     java.util.List<CompanyProfile> findByCompanyIdIn(java.util.Collection<String> companyIds);
 
-    @Query("{ 'identity.name': { $regex: ?0, $options: 'i' } }")
+    java.util.List<CompanyProfile> findByResponsibleManagerId(Long responsibleManagerId);
+
+    @Query("{ $or: [ { 'identity.legalName': { $regex: ?0, $options: 'i' } }, { 'identity.tradeName': { $regex: ?0, $options: 'i' } } ] }")
     Page<CompanyProfile> searchByName(String name, Pageable pageable);
 
     @Query("{ 'sourceRefs.candidateIds': ?0 }")
@@ -22,4 +24,11 @@ public interface CompanyProfileRepository extends MongoRepository<CompanyProfile
 
     @Query("{ 'sourceRefs.projectIds': ?0 }")
     java.util.List<CompanyProfile> findByProjectId(String projectId);
+
+    Optional<CompanyProfile> findByIdentityTaxCode(String taxCode);
+
+    Optional<CompanyProfile> findFirstByIsOwnerEnterpriseTrue();
+    boolean existsByIsOwnerEnterpriseTrue();
+
+    boolean existsByIdentityTaxCode(String identityTaxCode);
 }

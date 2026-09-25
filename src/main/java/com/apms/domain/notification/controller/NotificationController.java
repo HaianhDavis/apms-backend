@@ -3,6 +3,7 @@ package com.apms.domain.notification.controller;
 import com.apms.common.enums.NotificationType;
 import com.apms.common.response.ApiResponse;
 import com.apms.common.response.PageResponse;
+import com.apms.domain.notification.dto.BatchMarkReadRequest;
 import com.apms.domain.notification.dto.NotificationResponse;
 import com.apms.domain.notification.dto.SendNotificationRequest;
 import com.apms.domain.notification.service.NotificationService;
@@ -13,6 +14,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/notifications")
@@ -34,6 +37,18 @@ public class NotificationController {
                 notificationService.getNotifications(unreadOnly, type, userId, pageable));
 
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @GetMapping("/relationship-assessments/unread")
+    public ResponseEntity<ApiResponse<List<NotificationResponse>>> getUnreadRelationshipAssessmentNotifications() {
+        List<NotificationResponse> response = notificationService.getUnreadRelationshipAssessmentNotifications();
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @PatchMapping("/read")
+    public ResponseEntity<ApiResponse<Void>> markAsReadBatch(@Valid @RequestBody BatchMarkReadRequest request) {
+        notificationService.markAsReadBatch(request.getNotificationIds());
+        return ResponseEntity.ok(ApiResponse.success(null, "Notifications marked as read"));
     }
 
     @PatchMapping("/{notificationId}/read")

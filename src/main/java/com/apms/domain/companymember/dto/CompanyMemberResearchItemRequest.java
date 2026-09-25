@@ -12,7 +12,6 @@ public class CompanyMemberResearchItemRequest {
     @NotBlank(message = "Position is required")
     private String position;
 
-    @URL(message = "Image URL must be a valid URL")
     private String imageUrl;
 
     @NotBlank(message = "Source URL is required")

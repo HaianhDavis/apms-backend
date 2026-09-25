@@ -7,12 +7,15 @@ import com.apms.domain.ai.dto.AiExtractionResult;
 import com.apms.domain.ai.dto.ExtractedCompanyData;
 import com.apms.domain.ai.repository.mongo.AiExtractionCacheRepository;
 import com.apms.domain.ai.service.provider.GeminiExtractionProvider;
+import com.apms.domain.ai.service.provider.GeminiApiKeyManager;
 import com.apms.domain.ai.service.provider.MockExtractionProvider;
 import com.apms.domain.ai.service.provider.OpenAiExtractionProvider;
 import com.apms.domain.document.ImportJob;
 import com.apms.domain.document.RawDocument;
 import com.apms.domain.document.repository.mongo.RawDocumentRepository;
 import com.apms.domain.document.repository.sql.ImportJobRepository;
+import com.apms.domain.project.Project;
+import com.apms.domain.project.repository.sql.ProjectRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
@@ -41,18 +44,18 @@ public class AiExtractionService {
     private final GeminiExtractionProvider geminiProvider;
     private final OpenAiExtractionProvider openAiProvider;
     private final AiExtractionQualityService qualityService;
+    private final ProjectRepository projectRepository;
     private final ObjectMapper objectMapper;
+    private final GeminiApiKeyManager geminiApiKeyManager;
 
     @Value("${app.ai.provider:gemini}")
     private String aiProvider;
 
-    @Value("${app.ai.gemini.api-key:dummy-key}")
-    private String geminiApiKey;
 
     @Value("${spring.ai.openai.api-key:dummy-key}")
     private String openAiApiKey;
 
-    @Value("${app.ai.gemini.model:gemini-2.5-flash}")
+    @Value("${app.ai.gemini.model:gemini-3.8-flash}")
     private String geminiModel;
 
     @Value("${app.storage.upload-dir:uploads/}")
@@ -65,7 +68,9 @@ public class AiExtractionService {
                                GeminiExtractionProvider geminiProvider,
                                OpenAiExtractionProvider openAiProvider,
                                AiExtractionQualityService qualityService,
-                               ObjectMapper objectMapper) {
+                               ProjectRepository projectRepository,
+                               ObjectMapper objectMapper,
+                               GeminiApiKeyManager geminiApiKeyManager) {
         this.importJobRepository = importJobRepository;
         this.rawDocumentRepository = rawDocumentRepository;
         this.extractionCacheRepository = extractionCacheRepository;
@@ -73,7 +78,9 @@ public class AiExtractionService {
         this.geminiProvider = geminiProvider;
         this.openAiProvider = openAiProvider;
         this.qualityService = qualityService;
+        this.projectRepository = projectRepository;
         this.objectMapper = objectMapper;
+        this.geminiApiKeyManager = geminiApiKeyManager;
     }
 
     // ─────────────────────────────────────────────
@@ -119,6 +126,13 @@ public class AiExtractionService {
                 usedModel = geminiModel;
             }
         }
+
+        Project project = null;
+        if (importJob.getProjectId() != null) {
+            project = projectRepository.findById(importJob.getProjectId()).orElse(null);
+        }
+        applyProjectControlledIdentity(rawOutputObj, project);
+        removeAnalysisExtractionFields(rawOutputObj);
 
         // Apply Quality Validation
         qualityService.validateExtraction(rawOutputObj.getFieldResults());
@@ -206,20 +220,47 @@ public class AiExtractionService {
             cache.getFieldResults().put(fieldName, fieldResult);
         }
 
-        fieldResult.setReviewStatus(request.getReviewStatus());
-        if (request.getReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED) {
-            if (request.getReviewedValue() == null) {
-                throw new BusinessValidationException("EDITED review status requires a reviewedValue.");
+        if (request.isManager()) {
+            if (request.getManagerReviewStatus() != null) {
+                fieldResult.setManagerReviewStatus(request.getManagerReviewStatus());
             }
-            fieldResult.setReviewedValue(request.getReviewedValue());
+            if (request.getReviewedValue() != null || request.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED) {
+                if (request.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.EDITED && request.getReviewedValue() == null) {
+                    throw new BusinessValidationException("EDITED review status requires a reviewedValue.");
+                }
+                fieldResult.setStaffReviewedValue(request.getReviewedValue());
+            } else {
+                fieldResult.setStaffReviewedValue(request.getReviewedValue());
+            }
+            fieldResult.setManagerReviewComment(request.getComment());
+            fieldResult.setManagerReviewedByUserId(userId);
+            fieldResult.setManagerReviewedAt(LocalDateTime.now());
         } else {
-            // ACCEPTED, REJECTED, NEEDS_REVIEW
-            fieldResult.setReviewedValue(request.getReviewedValue());
-        }
+            if (fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.ACCEPTED) {
+                throw new BusinessValidationException("Cannot edit field because manager has already ACCEPTED it.");
+            }
+            if (request.getStaffReviewStatus() != null) {
+                fieldResult.setStaffReviewStatus(request.getStaffReviewStatus());
+            }
+            if (request.getReviewedValue() != null || request.getStaffReviewStatus() == com.apms.domain.ai.dto.StaffFieldReviewStatus.EDITED) {
+                if (request.getStaffReviewStatus() == com.apms.domain.ai.dto.StaffFieldReviewStatus.EDITED && request.getReviewedValue() == null) {
+                    throw new BusinessValidationException("EDITED review status requires a reviewedValue.");
+                }
+                fieldResult.setStaffReviewedValue(request.getReviewedValue());
+            } else {
+                fieldResult.setStaffReviewedValue(request.getReviewedValue());
+            }
+            
+            if ((fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.REJECTED || 
+                 fieldResult.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW) &&
+                request.getStaffReviewStatus() == com.apms.domain.ai.dto.StaffFieldReviewStatus.EDITED) {
+                fieldResult.setManagerReviewStatus(com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING);
+            }
 
-        fieldResult.setReviewComment(request.getComment());
-        fieldResult.setReviewedByUserId(userId);
-        fieldResult.setReviewedAt(LocalDateTime.now());
+            fieldResult.setStaffReviewComment(request.getComment());
+            fieldResult.setStaffReviewedByUserId(userId);
+            fieldResult.setStaffReviewedAt(LocalDateTime.now());
+        }
 
         cache.setLastModifiedBy(String.valueOf(userId));
         cache.setUpdatedAt(LocalDateTime.now());
@@ -236,8 +277,8 @@ public class AiExtractionService {
             for (Map.Entry<String, com.apms.domain.ai.dto.ExtractionFieldResult> entry : cache.getFieldResults().entrySet()) {
                 com.apms.domain.ai.dto.ExtractionFieldResult result = entry.getValue();
                 if ("legalName".equals(entry.getKey()) || "taxCode".equals(entry.getKey())) {
-                    if (result.getReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW ||
-                       (result.getReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING &&
+                    if (result.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.NEEDS_REVIEW ||
+                       (result.getManagerReviewStatus() == com.apms.domain.ai.dto.ExtractionReviewStatus.PENDING &&
                         result.getValidationStatus() == com.apms.domain.ai.dto.ExtractionValidationStatus.FAIL)) {
                         throw new BusinessValidationException("Cannot complete review. Critical field '" + entry.getKey() + "' requires review.");
                     }
@@ -261,12 +302,58 @@ public class AiExtractionService {
     private boolean isMockMode() {
         if ("mock".equalsIgnoreCase(aiProvider)) return true;
         if ("gemini".equalsIgnoreCase(aiProvider)) {
-            return "dummy-key".equals(geminiApiKey) || !StringUtils.hasText(geminiApiKey);
+            return !hasRealGeminiCredential();
         }
         if ("openai".equalsIgnoreCase(aiProvider)) {
             return "dummy-key".equals(openAiApiKey) || !StringUtils.hasText(openAiApiKey);
         }
         return true;
+    }
+
+    private boolean hasRealGeminiCredential() {
+        String key = geminiApiKeyManager.getApiKey();
+        return StringUtils.hasText(key) && !"dummy-key".equals(key);
+    }
+
+    private void applyProjectControlledIdentity(com.apms.domain.ai.dto.RawExtractionOutput output, Project project) {
+        if (output == null || project == null) return;
+
+        if (output.getExtractedData() == null) {
+            output.setExtractedData(new ExtractedCompanyData());
+        }
+        output.getExtractedData().setLegalName(project.getTargetCompanyName());
+        output.getExtractedData().setTaxCode(project.getTargetCompanyTaxCode());
+
+        if (output.getFieldResults() != null) {
+            output.getFieldResults().remove("legalName");
+            output.getFieldResults().remove("taxCode");
+            output.getFieldResults().remove("identity.legalName");
+            output.getFieldResults().remove("identity.taxCode");
+        }
+    }
+
+    private void removeAnalysisExtractionFields(com.apms.domain.ai.dto.RawExtractionOutput output) {
+        if (output == null) return;
+
+        if (output.getExtractedData() != null) {
+            output.getExtractedData().setStrengths(null);
+            output.getExtractedData().setWeaknesses(null);
+            output.getExtractedData().setOpportunities(null);
+            output.getExtractedData().setThreats(null);
+            output.getExtractedData().setFinancial(null);
+            output.getExtractedData().setInnovation(null);
+            output.getExtractedData().setMarket(null);
+            output.getExtractedData().setRisk(null);
+            output.getExtractedData().setCompliance(null);
+        }
+
+        if (output.getFieldResults() != null) {
+            for (String field : java.util.List.of(
+                    "strengths", "weaknesses", "opportunities", "threats",
+                    "financial", "innovation", "market", "risk", "compliance")) {
+                output.getFieldResults().remove(field);
+            }
+        }
     }
 
     private void saveToCache(Long importJobId, String rawDocumentId,

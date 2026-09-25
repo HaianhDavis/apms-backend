@@ -20,7 +20,7 @@ class AiExtractionResponseMapperTest {
     void testMapResponse_NestedSchema() throws Exception {
         String json = """
             {
-              "legalName": {
+              "tradeName": {
                 "value": "Test Company LLC",
                 "confidence": 0.95,
                 "evidenceText": "According to Test Company LLC report"
@@ -36,20 +36,20 @@ class AiExtractionResponseMapperTest {
 
         assertNotNull(output);
         assertNotNull(output.getExtractedData());
-        assertEquals("Test Company LLC", output.getExtractedData().getLegalName());
+        assertEquals("Test Company LLC", output.getExtractedData().getTradeName());
         assertTrue(output.getExtractedData().getIndustries().contains("Technology"));
 
         assertNotNull(output.getFieldResults());
-        assertTrue(output.getFieldResults().containsKey("legalName"));
-        assertEquals("Test Company LLC", output.getFieldResults().get("legalName").getValue());
-        assertEquals(0.95, output.getFieldResults().get("legalName").getConfidence());
+        assertTrue(output.getFieldResults().containsKey("tradeName"));
+        assertEquals("Test Company LLC", output.getFieldResults().get("tradeName").getValue());
+        assertEquals(0.95, output.getFieldResults().get("tradeName").getConfidence());
     }
 
     @Test
     void testMapResponse_FlatSchemaFallback() throws Exception {
         String json = """
             {
-              "legalName": "Old Flat Company",
+              "tradeName": "Old Flat Company",
               "industries": ["Finance"]
             }
             """;
@@ -58,11 +58,11 @@ class AiExtractionResponseMapperTest {
 
         assertNotNull(output);
         assertNotNull(output.getExtractedData());
-        assertEquals("Old Flat Company", output.getExtractedData().getLegalName());
+        assertEquals("Old Flat Company", output.getExtractedData().getTradeName());
 
         assertNotNull(output.getFieldResults());
-        assertTrue(output.getFieldResults().containsKey("legalName"));
-        assertEquals("Old Flat Company", output.getFieldResults().get("legalName").getValue());
-        assertNull(output.getFieldResults().get("legalName").getConfidence()); // Fallback won't have confidence
+        assertTrue(output.getFieldResults().containsKey("tradeName"));
+        assertEquals("Old Flat Company", output.getFieldResults().get("tradeName").getValue());
+        assertNull(output.getFieldResults().get("tradeName").getConfidence()); // Fallback won't have confidence
     }
 }

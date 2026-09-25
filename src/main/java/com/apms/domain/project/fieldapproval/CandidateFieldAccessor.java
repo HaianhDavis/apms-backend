@@ -1,9 +1,11 @@
 package com.apms.domain.project.fieldapproval;
 
 import com.apms.domain.candidate.CompanyCandidate;
+import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BiConsumer;
@@ -11,23 +13,21 @@ import java.util.function.Function;
 
 public class CandidateFieldAccessor {
 
+    public static final java.util.Set<String> REVIEWABLE_FIELD_PATHS = java.util.Set.of(
+        "identity.tradeName",
+        "contact.addresses", "contact.website", "contact.emails", "contact.phones",
+        "business.businessModel", "business.industries", "business.foundedYear", "business.companyDescription",
+        "business.markets", "business.targetCustomers", "business.products",
+        "companySize.employeeCount"
+    );
+
     private static final Map<String, FieldDefinition<CompanyCandidate>> REGISTRY = new HashMap<>();
 
     static {
         // identity
-        register("identity.legalName", true, false, false,
-                c -> c.getIdentity() != null ? c.getIdentity().getLegalName() : null,
-                (c, v) -> ensureIdentity(c).setLegalName((String) v));
         register("identity.tradeName", false, false, false,
                 c -> c.getIdentity() != null ? c.getIdentity().getTradeName() : null,
                 (c, v) -> ensureIdentity(c).setTradeName((String) v));
-        register("identity.taxCode", false, false, false,
-                c -> c.getIdentity() != null ? c.getIdentity().getTaxCode() : null,
-                (c, v) -> ensureIdentity(c).setTaxCode((String) v));
-        register("identity.registrationNumber", false, false, false,
-                c -> c.getIdentity() != null ? c.getIdentity().getRegistrationNumber() : null,
-                (c, v) -> ensureIdentity(c).setRegistrationNumber((String) v));
-
         // business
         register("business.industries", false, true, false,
                 c -> c.getBusiness() != null ? c.getBusiness().getIndustries() : null,
@@ -35,6 +35,12 @@ public class CandidateFieldAccessor {
         register("business.businessModel", false, false, false,
                 c -> c.getBusiness() != null ? c.getBusiness().getBusinessModel() : null,
                 (c, v) -> ensureBusiness(c).setBusinessModel((String) v));
+        register("business.foundedYear", false, false, false,
+                c -> c.getBusiness() != null ? c.getBusiness().getFoundedYear() : null,
+                (c, v) -> ensureBusiness(c).setFoundedYear(v instanceof Number ? ((Number) v).intValue() : null));
+        register("business.companyDescription", false, false, false,
+                c -> c.getBusiness() != null ? c.getBusiness().getCompanyDescription() : null,
+                (c, v) -> ensureBusiness(c).setCompanyDescription((String) v));
         register("business.products", false, true, true,
                 c -> c.getBusiness() != null ? c.getBusiness().getProducts() : null,
                 (c, v) -> ensureBusiness(c).setProducts((List<CompanyCandidate.Product>) v));
@@ -52,6 +58,9 @@ public class CandidateFieldAccessor {
         register("companySize.employeeCount", false, false, false,
                 c -> c.getCompanySize() != null ? c.getCompanySize().getEmployeeCount() : null,
                 (c, v) -> ensureCompanySize(c).setEmployeeCount((Integer) v));
+        register("companySize.revenueTier", false, false, false,
+                c -> c.getCompanySize() != null ? c.getCompanySize().getRevenueTier() : null,
+                (c, v) -> ensureCompanySize(c).setRevenueTier((String) v));
 
         // contact
         register("contact.website", false, false, false,
@@ -63,9 +72,32 @@ public class CandidateFieldAccessor {
         register("contact.phones", false, true, false,
                 c -> c.getContact() != null ? c.getContact().getPhones() : null,
                 (c, v) -> ensureContact(c).setPhones((List<String>) v));
-        register("contact.addresses", false, true, true,
-                c -> c.getContact() != null ? c.getContact().getAddresses() : null,
-                (c, v) -> ensureContact(c).setAddresses((List<CompanyCandidate.Address>) v));
+        register("contact.addresses", false, true, false,
+                c -> {
+                    if (c.getContact() == null) {
+                        return null;
+                    }
+                    List<String> list = c.getContact().getEffectiveAddressStrings();
+                    return list.isEmpty() ? null : list;
+                },
+                (c, v) -> {
+                    CompanyCandidate.Contact contact = ensureContact(c);
+                    List<String> normalized = normalizeAddressList(v);
+                    contact.setAddresses(CompanyCandidate.Contact.toAddressObjects(normalized));
+                });
+        register("contact.address", false, false, false,
+                c -> {
+                    if (c.getContact() == null) {
+                        return null;
+                    }
+                    List<String> list = c.getContact().getEffectiveAddressStrings();
+                    return list.isEmpty() ? null : list.get(0);
+                },
+                (c, v) -> {
+                    CompanyCandidate.Contact contact = ensureContact(c);
+                    List<String> normalized = normalizeAddressList(v);
+                    contact.setAddresses(CompanyCandidate.Contact.toAddressObjects(normalized));
+                });
 
         // insights
         register("insights.strengths", false, true, false,
@@ -80,6 +112,23 @@ public class CandidateFieldAccessor {
         register("insights.threats", false, true, false,
                 c -> c.getInsights() != null ? c.getInsights().getThreats() : null,
                 (c, v) -> ensureInsights(c).setThreats((List<String>) v));
+
+        // analysis
+        register("financial", false, false, false,
+                CompanyCandidate::getFinancial,
+                (c, v) -> c.setFinancial((com.apms.domain.company.model.FinancialInfo) v));
+        register("innovation", false, false, false,
+                CompanyCandidate::getInnovation,
+                (c, v) -> c.setInnovation((com.apms.domain.company.model.InnovationInfo) v));
+        register("market", false, false, false,
+                CompanyCandidate::getMarket,
+                (c, v) -> c.setMarket((com.apms.domain.company.model.MarketInfo) v));
+        register("risk", false, false, false,
+                CompanyCandidate::getRisk,
+                (c, v) -> c.setRisk((com.apms.domain.company.model.RiskInfo) v));
+        register("compliance", false, false, false,
+                CompanyCandidate::getCompliance,
+                (c, v) -> c.setCompliance((com.apms.domain.company.model.ComplianceInfo) v));
     }
 
     private static void register(String path, boolean required, boolean collection, boolean ordered,
@@ -97,6 +146,12 @@ public class CandidateFieldAccessor {
 
     public static List<FieldDefinition<CompanyCandidate>> getAllDefinitions() {
         return new ArrayList<>(REGISTRY.values());
+    }
+
+    public static List<FieldDefinition<CompanyCandidate>> getReviewableDefinitions() {
+        return REGISTRY.values().stream()
+                .filter(def -> REVIEWABLE_FIELD_PATHS.contains(def.getCanonicalPath()))
+                .toList();
     }
 
     public static FieldDefinition<CompanyCandidate> getDefinition(String path) {
@@ -126,5 +181,51 @@ public class CandidateFieldAccessor {
     private static CompanyCandidate.Insights ensureInsights(CompanyCandidate c) {
         if (c.getInsights() == null) c.setInsights(new CompanyCandidate.Insights());
         return c.getInsights();
+    }
+
+    public static List<String> normalizeAddressList(Object value) {
+        if (value == null) {
+            return Collections.emptyList();
+        }
+        List<String> rawList = new ArrayList<>();
+        if (value instanceof java.util.Collection<?> col) {
+            for (Object item : col) {
+                if (item != null) {
+                    if (item instanceof CompanyCandidate.Address addr) {
+                        if (StringUtils.hasText(addr.getFullAddress())) {
+                            rawList.add(addr.getFullAddress());
+                        }
+                    } else {
+                        rawList.add(String.valueOf(item));
+                    }
+                }
+            }
+        } else if (value instanceof CompanyCandidate.Address addr) {
+            if (StringUtils.hasText(addr.getFullAddress())) {
+                rawList.add(addr.getFullAddress());
+            }
+        } else if (value instanceof String s) {
+            rawList.add(s);
+        }
+
+        List<String> normalized = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (String raw : rawList) {
+            if (!StringUtils.hasText(raw)) {
+                continue;
+            }
+            String cleaned = raw.trim().replaceAll("\\s+", " ");
+            if (cleaned.isEmpty() || "N/A".equalsIgnoreCase(cleaned) || "NA".equalsIgnoreCase(cleaned)) {
+                continue;
+            }
+            if (cleaned.length() > 500) {
+                cleaned = cleaned.substring(0, 500).trim();
+            }
+            String lower = cleaned.toLowerCase(java.util.Locale.ROOT);
+            if (seen.add(lower)) {
+                normalized.add(cleaned);
+            }
+        }
+        return normalized;
     }
 }

@@ -92,6 +92,12 @@ class CompanyNewsResearchApprovalHandlerTest {
         
         when(articleRepository.existsBySourceDraftId("draft1")).thenReturn(false);
         when(articleRepository.existsBySourceDraftId("draft2")).thenReturn(false);
+        
+        when(articleRepository.save(any(CompanyIntelligenceArticle.class))).thenAnswer(invocation -> {
+            CompanyIntelligenceArticle article = invocation.getArgument(0);
+            article.setId("dummy_id");
+            return article;
+        });
 
         handler.handleApproval(submission, 1L, "Looks good");
 

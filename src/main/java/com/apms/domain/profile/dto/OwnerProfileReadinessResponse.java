@@ -8,7 +8,7 @@ import java.util.List;
 @Builder
 public class OwnerProfileReadinessResponse {
     private String companyProfileId;
-    private Integer profileVersion;
+    private String profileVersion;
     private boolean approved;
     private List<String> completedSections;
     private List<String> missingSections;

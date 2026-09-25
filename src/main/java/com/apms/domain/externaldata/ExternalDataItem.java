@@ -33,6 +33,8 @@ public class ExternalDataItem {
     private String relatedCompanyName;
     private String relatedCompanyId;
 
+    private String imageUrl;
+
     @CreatedDate
     private LocalDateTime createdAt;
 

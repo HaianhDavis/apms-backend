@@ -20,4 +20,14 @@ public class ExtractionQualityMetrics {
     private Double evidenceCoverageRate;
     private Double completenessRate;
     private int hallucinationRiskCount;
+
+    @com.fasterxml.jackson.annotation.JsonProperty("extractedFields")
+    public int getExtractedFields() {
+        return fieldsWithValue;
+    }
+
+    @com.fasterxml.jackson.annotation.JsonProperty("validatedFields")
+    public int getValidatedFields() {
+        return passedFields;
+    }
 }
