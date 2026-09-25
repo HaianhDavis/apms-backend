@@ -67,7 +67,8 @@ public class SecurityConfig {
                                         "/webjars/**",
                                         "/favicon.ico",
                                         "/ws/**",
-                                        "/health"
+                                        "/health",
+                                        "/api/v1/health"
                                 ).permitAll()
                                 .requestMatchers(HttpMethod.GET, "/api/v1/projects/*/tasks/*/company-members/images/**", "/api/v1/admin/my-enterprise/leadership/images/**").permitAll()
                                 .anyRequest().authenticated()
