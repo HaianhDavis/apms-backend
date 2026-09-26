@@ -216,19 +216,22 @@ public class ProjectTaskService {
                 
         List<com.apms.domain.project.dto.ProjectTaskActivityResponse> responseLogs = new ArrayList<>(logs.stream().map(log -> {
             String actorName = "System";
+            String actorEmail = null;
             if (log.getActorAccountId() != null) {
-                actorName = accountRepository.findById(log.getActorAccountId())
-                        .map(acc -> {
-                            String email = acc.getEmail();
-                            return email != null ? email.split("@")[0] : "Unknown";
-                        })
-                        .orElse("Unknown User");
+                Account actorAcc = accountRepository.findById(log.getActorAccountId()).orElse(null);
+                if (actorAcc != null) {
+                    actorEmail = actorAcc.getEmail();
+                    actorName = actorEmail != null ? actorEmail : "Unknown User";
+                } else {
+                    actorName = "Unknown User";
+                }
             }
 
             return com.apms.domain.project.dto.ProjectTaskActivityResponse.builder()
                     .id(log.getId())
                     .actorId(log.getActorAccountId())
                     .actorName(actorName)
+                    .actorEmail(actorEmail)
                     .action(log.getAction() != null ? log.getAction().name() : "UNKNOWN")
                     .detail(log.getDetail())
                     .occurredAt(log.getTimestamp())
@@ -244,6 +247,7 @@ public class ProjectTaskService {
                     .id(-1L)
                     .actorId(null)
                     .actorName("System")
+                    .actorEmail(null)
                     .action(com.apms.common.enums.AuditAction.PROJECT_TASK_CREATED.name())
                     .detail(detail)
                     .occurredAt(task.getCreatedAt())
@@ -800,8 +804,10 @@ public class ProjectTaskService {
 
     private ProjectTaskResponse toResponse(ProjectTask task) {
         String assignedName = null;
+        String assignedEmail = null;
         if (task.getAssignedToAccount() != null) {
-            assignedName = task.getAssignedToAccount().getEmail(); // fallback to email for MVP
+            assignedEmail = task.getAssignedToAccount().getEmail();
+            assignedName = assignedEmail; // fallback to email for MVP
         }
 
         UserDetailsImpl currentUser = null;
@@ -823,6 +829,7 @@ public class ProjectTaskService {
                 .description(task.getDescription())
                 .assignedToUserId(task.getAssignedToAccount() != null ? task.getAssignedToAccount().getId() : null)
                 .assignedToName(assignedName)
+                .assignedToEmail(assignedEmail)
                 .createdByUserId(task.getCreatedByAccount() != null ? task.getCreatedByAccount().getId() : null)
                 .status(task.getStatus())
                 .priority(task.getPriority())

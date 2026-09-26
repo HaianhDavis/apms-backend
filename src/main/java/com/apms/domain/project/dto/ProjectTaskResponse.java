@@ -18,6 +18,7 @@ public class ProjectTaskResponse {
     private String description;
     private Long assignedToUserId;
     private String assignedToName;
+    private String assignedToEmail;
     private Long createdByUserId;
     private TaskStatus status;
     private TaskPriority priority;
