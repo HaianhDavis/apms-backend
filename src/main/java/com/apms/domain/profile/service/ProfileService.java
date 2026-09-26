@@ -1202,22 +1202,37 @@ public class ProfileService {
             }
         }
 
-        // Priority 3 & 4: Fallback via Tax Code or Target Company Name
+        // Priority 3: Fallback via Tax Code
         if (profile.getIdentity() != null) {
             String rawTax = profile.getIdentity().getTaxCode();
             String normTax = StringUtils.hasText(rawTax) ? rawTax.replaceAll("[\\s\\-]", "").trim() : null;
-            String legalName = profile.getIdentity().getLegalName();
-            if (StringUtils.hasText(normTax) || StringUtils.hasText(legalName)) {
-                List<Project> byTaxOrName = projectRepository.findProjectsByTaxCodeOrName(
-                        rawTax,
-                        normTax,
-                        StringUtils.hasText(legalName) ? legalName.trim().toLowerCase() : null
-                );
-                if (byTaxOrName != null) {
-                    byTaxOrName.stream()
+            if (StringUtils.hasText(normTax)) {
+                List<Project> byTax = projectRepository.findProjectsByTaxCode(rawTax, normTax);
+                if (byTax != null) {
+                    byTax.stream()
                             .filter(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)
                             .forEach(candidates::add);
                 }
+            }
+        }
+
+        // Priority 4: Fallback via Company Names (tradeName, legalName)
+        Set<String> searchNames = new LinkedHashSet<>();
+        if (profile.getIdentity() != null) {
+            if (StringUtils.hasText(profile.getIdentity().getLegalName())) {
+                searchNames.add(profile.getIdentity().getLegalName().trim().toLowerCase());
+            }
+            if (StringUtils.hasText(profile.getIdentity().getTradeName())) {
+                searchNames.add(profile.getIdentity().getTradeName().trim().toLowerCase());
+            }
+        }
+
+        if (!searchNames.isEmpty()) {
+            List<Project> byNames = projectRepository.findProjectsByTargetCompanyNames(searchNames);
+            if (byNames != null) {
+                byNames.stream()
+                        .filter(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)
+                        .forEach(candidates::add);
             }
         }
 
@@ -1225,14 +1240,17 @@ public class ProfileService {
             return Optional.empty();
         }
 
+        java.util.function.Predicate<Project> isFinished =
+                p -> p != null && (p.getStatus() == ProjectStatus.COMPLETED || p.getStatus() == ProjectStatus.CLOSED);
+
         // Context project handling:
         if (contextProject != null) {
-            if (contextProject.getStatus() == ProjectStatus.COMPLETED) {
+            if (isFinished.test(contextProject)) {
                 return Optional.of(contextProject);
             }
             // If another linked research project for this company was completed, prefer the completed one
             Optional<Project> anyCompleted = candidates.stream()
-                    .filter(p -> p.getStatus() == ProjectStatus.COMPLETED)
+                    .filter(isFinished)
                     .max(Comparator.comparing(Project::getId));
             if (anyCompleted.isPresent()) {
                 return anyCompleted;
@@ -1240,9 +1258,9 @@ public class ProfileService {
             return Optional.of(contextProject);
         }
 
-        // 1. Any COMPLETED research project satisfies the completion requirement
+        // 1. Any COMPLETED or CLOSED research project satisfies the completion requirement
         Optional<Project> completed = candidates.stream()
-                .filter(p -> p.getStatus() == ProjectStatus.COMPLETED)
+                .filter(isFinished)
                 .max(Comparator.comparing(Project::getId));
         if (completed.isPresent()) {
             return completed;
@@ -1288,16 +1306,28 @@ public class ProfileService {
         if (profile.getIdentity() != null) {
             String rawTax = profile.getIdentity().getTaxCode();
             String normTax = StringUtils.hasText(rawTax) ? rawTax.replaceAll("[\\s\\-]", "").trim() : null;
-            String legalName = profile.getIdentity().getLegalName();
-            if (StringUtils.hasText(normTax) || StringUtils.hasText(legalName)) {
-                List<Project> byTaxOrName = projectRepository.findProjectsByTaxCodeOrName(
-                        rawTax,
-                        normTax,
-                        StringUtils.hasText(legalName) ? legalName.trim().toLowerCase() : null
-                );
-                if (byTaxOrName != null && byTaxOrName.stream().anyMatch(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)) {
+            if (StringUtils.hasText(normTax)) {
+                List<Project> byTax = projectRepository.findProjectsByTaxCode(rawTax, normTax);
+                if (byTax != null && byTax.stream().anyMatch(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)) {
                     return true;
                 }
+            }
+        }
+
+        Set<String> searchNames = new LinkedHashSet<>();
+        if (profile.getIdentity() != null) {
+            if (StringUtils.hasText(profile.getIdentity().getLegalName())) {
+                searchNames.add(profile.getIdentity().getLegalName().trim().toLowerCase());
+            }
+            if (StringUtils.hasText(profile.getIdentity().getTradeName())) {
+                searchNames.add(profile.getIdentity().getTradeName().trim().toLowerCase());
+            }
+        }
+
+        if (!searchNames.isEmpty()) {
+            List<Project> byNames = projectRepository.findProjectsByTargetCompanyNames(searchNames);
+            if (byNames != null && byNames.stream().anyMatch(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)) {
+                return true;
             }
         }
 
@@ -1366,8 +1396,8 @@ public class ProfileService {
             Optional<Project> originatingProjectOpt = findOriginatingResearchNewCompanyProject(profile, contextProjectId);
             if (originatingProjectOpt.isPresent()) {
                 Project originatingProject = originatingProjectOpt.get();
-                // Clearly linked to RESEARCH_NEW_COMPANY -> require status == COMPLETED
-                if (originatingProject.getStatus() != ProjectStatus.COMPLETED) {
+                // Clearly linked to RESEARCH_NEW_COMPANY -> require status == COMPLETED or CLOSED
+                if (originatingProject.getStatus() != ProjectStatus.COMPLETED && originatingProject.getStatus() != ProjectStatus.CLOSED) {
                     return "Available after the New Company Research project is completed.";
                 }
             } else {

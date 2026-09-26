@@ -100,7 +100,8 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
     @Query("""
             SELECT p FROM Project p
             WHERE ((:rawTax IS NOT NULL AND p.targetCompanyTaxCode = :rawTax)
-                   OR (:normTax IS NOT NULL AND p.targetCompanyTaxCode = :normTax)
+                   OR (:normTax IS NOT NULL AND (p.targetCompanyTaxCode = :normTax
+                       OR REPLACE(REPLACE(p.targetCompanyTaxCode, '-', ''), ' ', '') = :normTax))
                    OR (:companyName IS NOT NULL AND LOWER(TRIM(p.targetCompanyName)) = LOWER(TRIM(:companyName))))
               AND p.status <> com.apms.common.enums.ProjectStatus.CANCELLED
             ORDER BY p.id DESC
@@ -109,6 +110,27 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
             @Param("rawTax") String rawTax,
             @Param("normTax") String normTax,
             @Param("companyName") String companyName);
+
+    @Query("""
+            SELECT p FROM Project p
+            WHERE ((:rawTax IS NOT NULL AND p.targetCompanyTaxCode = :rawTax)
+                   OR (:normTax IS NOT NULL AND (p.targetCompanyTaxCode = :normTax
+                       OR REPLACE(REPLACE(p.targetCompanyTaxCode, '-', ''), ' ', '') = :normTax)))
+              AND p.status <> com.apms.common.enums.ProjectStatus.CANCELLED
+            ORDER BY p.id DESC
+            """)
+    List<Project> findProjectsByTaxCode(
+            @Param("rawTax") String rawTax,
+            @Param("normTax") String normTax);
+
+    @Query("""
+            SELECT p FROM Project p
+            WHERE LOWER(TRIM(p.targetCompanyName)) IN :names
+              AND p.status <> com.apms.common.enums.ProjectStatus.CANCELLED
+            ORDER BY p.id DESC
+            """)
+    List<Project> findProjectsByTargetCompanyNames(
+            @Param("names") java.util.Collection<String> names);
 
     @Query("""
             SELECT p FROM Project p
