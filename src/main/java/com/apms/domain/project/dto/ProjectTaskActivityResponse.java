@@ -11,6 +11,7 @@ public class ProjectTaskActivityResponse {
     private Long id;
     private Long actorId;
     private String actorName;
+    private String actorEmail;
     private String action;
     private String detail;
     private LocalDateTime occurredAt;

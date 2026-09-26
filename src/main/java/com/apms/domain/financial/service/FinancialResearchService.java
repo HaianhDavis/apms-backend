@@ -22,6 +22,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import com.apms.security.UserDetailsImpl;
 import org.springframework.web.multipart.MultipartFile;
 import com.apms.domain.document.service.DocumentService;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -122,7 +123,13 @@ public class FinancialResearchService {
                     .reports(new ArrayList<>())
                     .metrics(new ArrayList<>())
                     .build();
-            research = researchRepository.save(research);
+            try {
+                research = researchRepository.save(research);
+            } catch (DuplicateKeyException ex) {
+                log.info("FinancialResearch document for taskId {} was created concurrently. Loading existing record.", taskId);
+                research = researchRepository.findByTaskId(taskId)
+                        .orElseThrow(() -> ex);
+            }
         } else {
             if (research.getTargetResearchPeriod() == null || research.getTargetResearchPeriod().getYear() == null) {
                 Integer targetYear = resolveTaskTargetYear(taskId, research);

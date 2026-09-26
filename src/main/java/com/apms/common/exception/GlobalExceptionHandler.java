@@ -129,7 +129,9 @@ public class GlobalExceptionHandler {
         log.warn("Duplicate key error: {}", ex.getMessage());
         String message = "Thông tin đã tồn tại trên hệ thống.";
         if (ex.getMessage() != null) {
-            if (ex.getMessage().contains("taxCode")) {
+            if (ex.getMessage().contains("financial_researches") || (ex.getMessage().contains("taskId") && ex.getMessage().contains("dup key"))) {
+                message = "A financial report already exists for this task.";
+            } else if (ex.getMessage().contains("taxCode")) {
                 message = "Mã số thuế này đã tồn tại trên hệ thống.";
             } else if (ex.getMessage().contains("registrationNumber")) {
                 message = "Mã số doanh nghiệp này đã tồn tại trên hệ thống.";
