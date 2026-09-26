@@ -126,8 +126,34 @@ class ContractResearchServiceTest {
     }
 
     @Test
-    @DisplayName("Hard delete is rejected if contract was ever in any historical submission")
-    void deleteContractEntry_FailsIfAppearedInHistoricalSubmission() {
+    @DisplayName("Delete succeeds for recalled DRAFT contract even if it appeared in historical WITHDRAWN submission")
+    void deleteContractEntry_SucceedsIfAppearedInHistoricalWithdrawnSubmission() {
+        ContractEntry c1 = ContractEntry.builder().id("contract-1").reviewStatus(ContractEntryReviewStatus.DRAFT).build();
+        ContractResearch research = ContractResearch.builder()
+                .id("res-1")
+                .taskId(taskId)
+                .contracts(new ArrayList<>(List.of(c1)))
+                .build();
+
+        when(contractResearchRepository.findByTaskId(taskId)).thenReturn(Optional.of(research));
+        when(contractResearchRepository.save(any(ContractResearch.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ProjectTaskSubmission historicalSub = ProjectTaskSubmission.builder()
+                .id(101L)
+                .targetItemIds("contract-1,contract-2")
+                .status(SubmissionStatus.WITHDRAWN)
+                .build();
+        when(projectTaskSubmissionRepository.findByProjectTask_Id(taskId)).thenReturn(List.of(historicalSub));
+
+        ContractResearchResponse response = contractResearchService.deleteContractEntry(taskId, "contract-1", staffId);
+
+        assertThat(response).isNotNull();
+        assertThat(research.getContracts()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Delete is rejected if contract is currently part of an active submission awaiting review")
+    void deleteContractEntry_FailsIfInActiveSubmission() {
         ContractEntry c1 = ContractEntry.builder().id("contract-1").reviewStatus(ContractEntryReviewStatus.DRAFT).build();
         ContractResearch research = ContractResearch.builder()
                 .id("res-1")
@@ -137,18 +163,18 @@ class ContractResearchServiceTest {
 
         when(contractResearchRepository.findByTaskId(taskId)).thenReturn(Optional.of(research));
 
-        ProjectTaskSubmission historicalSub = ProjectTaskSubmission.builder()
+        ProjectTaskSubmission activeSub = ProjectTaskSubmission.builder()
                 .id(101L)
                 .targetItemIds("contract-1,contract-2")
-                .status(SubmissionStatus.WITHDRAWN)
+                .status(SubmissionStatus.IN_REVIEW)
                 .build();
-        when(projectTaskSubmissionRepository.findByProjectTask_Id(taskId)).thenReturn(List.of(historicalSub));
+        when(projectTaskSubmissionRepository.findByProjectTask_Id(taskId)).thenReturn(List.of(activeSub));
 
         BusinessValidationException ex = assertThrows(BusinessValidationException.class, () ->
                 contractResearchService.deleteContractEntry(taskId, "contract-1", staffId)
         );
 
-        assertThat(ex.getMessage()).contains("Contract cannot be deleted because it exists in historical submissions");
+        assertThat(ex.getMessage()).contains("Contract cannot be deleted while it is under active review");
     }
 
     @Test

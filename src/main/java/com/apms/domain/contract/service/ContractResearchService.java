@@ -383,17 +383,24 @@ public class ContractResearchService {
             throw new BusinessValidationException("CANNOT_DELETE_CONTRACT", "Only DRAFT contracts can be deleted.");
         }
 
-        // Check if contract has ever appeared in any submission history
-        List<ProjectTaskSubmission> historicalSubmissions = projectTaskSubmissionRepository.findByProjectTask_Id(taskId);
-        for (ProjectTaskSubmission sub : historicalSubmissions) {
-            if (sub.getTargetItemIdList().contains(contractId)) {
+        // Block delete if contract is currently part of an active submission awaiting review
+        List<ProjectTaskSubmission> submissions = projectTaskSubmissionRepository.findByProjectTask_Id(taskId);
+        for (ProjectTaskSubmission sub : submissions) {
+            if ((sub.getStatus() == SubmissionStatus.IN_REVIEW || sub.getStatus() == SubmissionStatus.SUBMITTED)
+                    && sub.getTargetItemIdList().contains(contractId)) {
                 throw new BusinessValidationException("CANNOT_DELETE_SUBMITTED_CONTRACT",
-                        "Contract cannot be deleted because it exists in historical submissions. Deletion rejected to preserve audit history.");
+                        "Contract cannot be deleted while it is under active review.");
             }
         }
 
         research.getContracts().removeIf(c -> c.getId().equals(contractId));
+        research.setStatus(computePackageStatusPrecedence(research));
+        research.setUpdatedAt(LocalDateTime.now());
         research = contractResearchRepository.save(research);
+
+        auditLogService.log(userId, AuditAction.CONTRACT_RESEARCH_UPDATED, "CONTRACT_ENTRY", contractId,
+                "Task " + taskId + ": Deleted contract " + (entry.getTitle() != null ? entry.getTitle() : contractId));
+
         return toResponse(research);
     }
 
