@@ -461,6 +461,10 @@ public class ProfileService {
 
     @Transactional(readOnly = true)
     public ProfileResponse getProfileByCompanyId(String companyId) {
+        return getProfileByCompanyId(companyId, null);
+    }
+
+    public ProfileResponse getProfileByCompanyId(String companyId, Long contextProjectId) {
         CompanyProfile profile = profileRepository.findByCompanyId(companyId)
                 .or(() -> profileRepository.findById(companyId))
                 .orElseThrow(() -> new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId));
@@ -469,7 +473,7 @@ public class ProfileService {
             throw new ResourceNotFoundException("CompanyProfile not found for companyId: " + companyId);
         }
 
-        return toResponse(profile);
+        return toResponse(profile, contextProjectId);
     }
 
     @Transactional(readOnly = true)
@@ -1090,6 +1094,10 @@ public class ProfileService {
     }
 
     public ProfileResponse updateVisibility(String companyId, com.apms.domain.profile.dto.UpdateProfileVisibilityRequest request, Long actorId) {
+        return updateVisibility(companyId, request, actorId, null);
+    }
+
+    public ProfileResponse updateVisibility(String companyId, com.apms.domain.profile.dto.UpdateProfileVisibilityRequest request, Long actorId, Long contextProjectId) {
         CompanyProfile profile = profileRepository.findByCompanyId(companyId)
                 .or(() -> profileRepository.findById(companyId))
                 .orElseThrow(() -> new ResourceNotFoundException("Company profile not found"));
@@ -1117,11 +1125,11 @@ public class ProfileService {
         boolean newIsHidden = request.getVisibility() == com.apms.common.enums.ProfileVisibility.HIDDEN;
 
         if (!newIsHidden) {
-            validateMinimumPublishability(profile);
+            validateMinimumPublishability(profile, contextProjectId);
         }
 
         if (Boolean.valueOf(newIsHidden).equals(profile.getIsHidden())) {
-            return toResponse(profile);
+            return toResponse(profile, contextProjectId);
         }
 
         profile.setIsHidden(newIsHidden);
@@ -1130,12 +1138,31 @@ public class ProfileService {
         AuditAction action = newIsHidden ? AuditAction.COMPANY_PROFILE_HIDDEN : AuditAction.COMPANY_PROFILE_PUBLISHED;
         auditLogService.log(actorId, action, "CompanyProfile", companyId, "Profile visibility updated to " + request.getVisibility());
 
-        return toResponse(profile);
+        return toResponse(profile, contextProjectId);
     }
 
     public Optional<Project> findOriginatingResearchNewCompanyProject(CompanyProfile profile) {
+        return findOriginatingResearchNewCompanyProject(profile, null);
+    }
+
+    public Optional<Project> findOriginatingResearchNewCompanyProject(CompanyProfile profile, Long contextProjectId) {
         if (profile == null) {
             return Optional.empty();
+        }
+
+        Set<Project> candidates = new LinkedHashSet<>();
+
+        // Context project if explicitly provided
+        Project contextProject = null;
+        if (contextProjectId != null) {
+            Optional<Project> cpOpt = projectRepository.findById(contextProjectId);
+            if (cpOpt.isPresent()) {
+                Project cp = cpOpt.get();
+                if (cp.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY) {
+                    contextProject = cp;
+                    candidates.add(cp);
+                }
+            }
         }
 
         // Priority 1: Direct linkage from CompanyProfile.sourceRefs.projectIds
@@ -1151,24 +1178,9 @@ public class ProfileService {
             if (!sourceProjectIds.isEmpty()) {
                 List<Project> sourceProjects = projectRepository.findAllById(sourceProjectIds);
                 if (sourceProjects != null) {
-                    List<Project> researchProjects = sourceProjects.stream()
+                    sourceProjects.stream()
                             .filter(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)
-                            .toList();
-                    if (!researchProjects.isEmpty()) {
-                        if (researchProjects.size() == 1) {
-                            return Optional.of(researchProjects.get(0));
-                        }
-                        // If multiple research projects linked in sourceRefs, prefer the one explicitly targeting this profile
-                        String canonicalCompanyId = profile.getCompanyId();
-                        Optional<Project> matchingTarget = researchProjects.stream()
-                                .filter(p -> StringUtils.hasText(canonicalCompanyId) && canonicalCompanyId.equals(p.getTargetCompanyProfileId()))
-                                .findFirst();
-                        if (matchingTarget.isPresent()) {
-                            return matchingTarget;
-                        }
-                        // Fallback tie-breaker among directly linked: earliest created / ID
-                        return researchProjects.stream().min(Comparator.comparing(Project::getId));
-                    }
+                            .forEach(candidates::add);
                 }
             }
         }
@@ -1184,33 +1196,63 @@ public class ProfileService {
         if (!targetIds.isEmpty()) {
             List<Project> byTarget = projectRepository.findByTargetCompanyProfileIdIn(targetIds);
             if (byTarget != null) {
-                List<Project> targetResearchProjects = byTarget.stream()
+                byTarget.stream()
                         .filter(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)
-                        .toList();
-                if (!targetResearchProjects.isEmpty()) {
-                    if (targetResearchProjects.size() == 1) {
-                        return Optional.of(targetResearchProjects.get(0));
-                    }
-                    return targetResearchProjects.stream().min(Comparator.comparing(Project::getId));
+                        .forEach(candidates::add);
+            }
+        }
+
+        // Priority 3 & 4: Fallback via Tax Code or Target Company Name
+        if (profile.getIdentity() != null) {
+            String rawTax = profile.getIdentity().getTaxCode();
+            String normTax = StringUtils.hasText(rawTax) ? rawTax.replaceAll("[\\s\\-]", "").trim() : null;
+            String legalName = profile.getIdentity().getLegalName();
+            if (StringUtils.hasText(normTax) || StringUtils.hasText(legalName)) {
+                List<Project> byTaxOrName = projectRepository.findProjectsByTaxCodeOrName(
+                        rawTax,
+                        normTax,
+                        StringUtils.hasText(legalName) ? legalName.trim().toLowerCase() : null
+                );
+                if (byTaxOrName != null) {
+                    byTaxOrName.stream()
+                            .filter(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)
+                            .forEach(candidates::add);
                 }
             }
         }
 
-        // Priority 3: Legacy fallback only when direct persisted linkage is unavailable
-        if (profile.getIdentity() != null && StringUtils.hasText(profile.getIdentity().getTaxCode())) {
-            String normTax = profile.getIdentity().getTaxCode().replaceAll("[\\s\\-]", "").trim();
-            List<Project> byTax = projectRepository.findActiveProjectsByTargetCompanyTaxCode(normTax);
-            if (byTax != null) {
-                List<Project> taxResearchProjects = byTax.stream()
-                        .filter(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)
-                        .toList();
-                if (!taxResearchProjects.isEmpty()) {
-                    return taxResearchProjects.stream().min(Comparator.comparing(Project::getId));
-                }
-            }
+        if (candidates.isEmpty()) {
+            return Optional.empty();
         }
 
-        return Optional.empty();
+        // Context project handling:
+        if (contextProject != null) {
+            if (contextProject.getStatus() == ProjectStatus.COMPLETED) {
+                return Optional.of(contextProject);
+            }
+            // If another linked research project for this company was completed, prefer the completed one
+            Optional<Project> anyCompleted = candidates.stream()
+                    .filter(p -> p.getStatus() == ProjectStatus.COMPLETED)
+                    .max(Comparator.comparing(Project::getId));
+            if (anyCompleted.isPresent()) {
+                return anyCompleted;
+            }
+            return Optional.of(contextProject);
+        }
+
+        // 1. Any COMPLETED research project satisfies the completion requirement
+        Optional<Project> completed = candidates.stream()
+                .filter(p -> p.getStatus() == ProjectStatus.COMPLETED)
+                .max(Comparator.comparing(Project::getId));
+        if (completed.isPresent()) {
+            return completed;
+        }
+
+        // 2. If none completed, pick the most recent non-cancelled project (or latest project overall)
+        return candidates.stream()
+                .filter(p -> p.getStatus() != ProjectStatus.CANCELLED)
+                .max(Comparator.comparing(Project::getId))
+                .or(() -> candidates.stream().max(Comparator.comparing(Project::getId)));
     }
 
     public boolean appearsResearchCreated(CompanyProfile profile) {
@@ -1243,6 +1285,22 @@ public class ProfileService {
             }
         }
 
+        if (profile.getIdentity() != null) {
+            String rawTax = profile.getIdentity().getTaxCode();
+            String normTax = StringUtils.hasText(rawTax) ? rawTax.replaceAll("[\\s\\-]", "").trim() : null;
+            String legalName = profile.getIdentity().getLegalName();
+            if (StringUtils.hasText(normTax) || StringUtils.hasText(legalName)) {
+                List<Project> byTaxOrName = projectRepository.findProjectsByTaxCodeOrName(
+                        rawTax,
+                        normTax,
+                        StringUtils.hasText(legalName) ? legalName.trim().toLowerCase() : null
+                );
+                if (byTaxOrName != null && byTaxOrName.stream().anyMatch(p -> p.getProjectType() == ProjectType.RESEARCH_NEW_COMPANY)) {
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
 
@@ -1253,7 +1311,11 @@ public class ProfileService {
     }
 
     public void validateMinimumPublishability(CompanyProfile profile) {
-        String blockReason = resolvePublishBlockReason(profile, true);
+        validateMinimumPublishability(profile, null);
+    }
+
+    public void validateMinimumPublishability(CompanyProfile profile, Long contextProjectId) {
+        String blockReason = resolvePublishBlockReason(profile, true, contextProjectId);
         if (blockReason != null) {
             if (blockReason.contains("Legal Name and Tax Code")) {
                 throw new com.apms.common.exception.BusinessValidationException("MISSING_LEGAL_NAME_OR_TAX_CODE", blockReason);
@@ -1269,10 +1331,18 @@ public class ProfileService {
     }
 
     public boolean isPublishable(CompanyProfile p, String relType, boolean canManageVisibility) {
-        return resolvePublishBlockReason(p, canManageVisibility) == null;
+        return isPublishable(p, relType, canManageVisibility, null);
+    }
+
+    public boolean isPublishable(CompanyProfile p, String relType, boolean canManageVisibility, Long contextProjectId) {
+        return resolvePublishBlockReason(p, canManageVisibility, contextProjectId) == null;
     }
 
     public String resolvePublishBlockReason(CompanyProfile profile, boolean canManageVisibility) {
+        return resolvePublishBlockReason(profile, canManageVisibility, null);
+    }
+
+    public String resolvePublishBlockReason(CompanyProfile profile, boolean canManageVisibility, Long contextProjectId) {
         if (profile == null || Boolean.TRUE.equals(profile.getIsDeleted())) {
             return "Company profile not found or deleted.";
         }
@@ -1287,21 +1357,25 @@ public class ProfileService {
             return "Profile requires Legal Name and Tax Code before it can be published.";
         }
 
+        if (appearsResearchCreated(profile) && !"APPROVED".equalsIgnoreCase(profile.getReviewStatus())) {
+            return "Profile must be approved before it can be published.";
+        }
+
         // Evaluate originating New Company Research project gate
         if (appearsResearchCreated(profile)) {
-            Optional<Project> originatingProjectOpt = findOriginatingResearchNewCompanyProject(profile);
+            Optional<Project> originatingProjectOpt = findOriginatingResearchNewCompanyProject(profile, contextProjectId);
             if (originatingProjectOpt.isPresent()) {
                 Project originatingProject = originatingProjectOpt.get();
-                // Case A: Clearly linked to RESEARCH_NEW_COMPANY -> require status == COMPLETED
+                // Clearly linked to RESEARCH_NEW_COMPANY -> require status == COMPLETED
                 if (originatingProject.getStatus() != ProjectStatus.COMPLETED) {
                     return "Available after the New Company Research project is completed.";
                 }
             } else {
-                // Case C: Appears research-created but originating project linkage cannot be verified
+                // Appears research-created but originating project linkage cannot be verified
                 return "Unable to verify completion of the originating New Company Research project.";
             }
         }
-        // Case B: Pre-existing / canonical profile that did not originate from New Company Research shell -> gate passed
+        // Pre-existing / canonical profile that did not originate from New Company Research shell -> gate passed
 
         return null;
     }
@@ -2173,6 +2247,10 @@ public class ProfileService {
     // ─────────────────────────────────────────────
 
     public ProfileResponse toResponse(CompanyProfile p) {
+        return toResponse(p, null);
+    }
+
+    public ProfileResponse toResponse(CompanyProfile p, Long contextProjectId) {
         com.apms.common.enums.ProfileVisibility visibility = Boolean.TRUE.equals(p.getIsHidden())
                 ? com.apms.common.enums.ProfileVisibility.HIDDEN
                 : com.apms.common.enums.ProfileVisibility.PUBLISHED;
@@ -2257,8 +2335,8 @@ public class ProfileService {
         } catch (Exception ignored) {}
 
         String relType = resolveRelationshipType(p.getCompanyId());
-        boolean canPublish = isPublishable(p, relType, canManageVisibility);
-        String publishBlockReason = resolvePublishBlockReason(p, canManageVisibility);
+        boolean canPublish = isPublishable(p, relType, canManageVisibility, contextProjectId);
+        String publishBlockReason = resolvePublishBlockReason(p, canManageVisibility, contextProjectId);
         String responsibleManagerName = resolveDisplayName(p.getResponsibleManagerId());
 
         return ProfileResponse.builder()

@@ -99,6 +99,19 @@ public interface ProjectRepository extends JpaRepository<Project, Long> {
 
     @Query("""
             SELECT p FROM Project p
+            WHERE ((:rawTax IS NOT NULL AND p.targetCompanyTaxCode = :rawTax)
+                   OR (:normTax IS NOT NULL AND p.targetCompanyTaxCode = :normTax)
+                   OR (:companyName IS NOT NULL AND LOWER(TRIM(p.targetCompanyName)) = LOWER(TRIM(:companyName))))
+              AND p.status <> com.apms.common.enums.ProjectStatus.CANCELLED
+            ORDER BY p.id DESC
+            """)
+    List<Project> findProjectsByTaxCodeOrName(
+            @Param("rawTax") String rawTax,
+            @Param("normTax") String normTax,
+            @Param("companyName") String companyName);
+
+    @Query("""
+            SELECT p FROM Project p
             WHERE (p.targetCompanyProfileId IN :profileIds
                    OR (:taxCode IS NOT NULL AND p.targetCompanyTaxCode = :taxCode))
               AND p.status NOT IN (com.apms.common.enums.ProjectStatus.COMPLETED, com.apms.common.enums.ProjectStatus.CLOSED)

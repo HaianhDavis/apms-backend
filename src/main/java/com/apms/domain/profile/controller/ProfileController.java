@@ -97,7 +97,7 @@ public class ProfileController {
             @PathVariable String companyId,
             @RequestParam(required = false) Long projectId) {
 
-        return ResponseEntity.ok(ApiResponse.success(profileService.getProfileByCompanyId(companyId)));
+        return ResponseEntity.ok(ApiResponse.success(profileService.getProfileByCompanyId(companyId, projectId)));
     }
 
     @GetMapping("/exists")
@@ -214,11 +214,12 @@ public class ProfileController {
     @PreAuthorize("hasRole('SYSTEM_ADMIN') or (hasRole('BUSINESS_DEVELOPMENT_MANAGER') and @companyScope.canManageCompanyProfile(#companyId))")
     public ResponseEntity<ApiResponse<ProfileResponse>> updateVisibility(
             @PathVariable String companyId,
+            @RequestParam(required = false) Long projectId,
             @jakarta.validation.Valid @RequestBody com.apms.domain.profile.dto.UpdateProfileVisibilityRequest request,
             @AuthenticationPrincipal UserDetailsImpl currentUser) {
 
         Long actorId = currentUser != null ? currentUser.getId() : null;
-        return ResponseEntity.ok(ApiResponse.success(profileService.updateVisibility(companyId, request, actorId)));
+        return ResponseEntity.ok(ApiResponse.success(profileService.updateVisibility(companyId, request, actorId, projectId)));
     }
 
     // ─────────────────────────────────────────────
