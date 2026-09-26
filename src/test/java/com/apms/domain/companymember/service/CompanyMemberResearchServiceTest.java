@@ -202,10 +202,55 @@ class CompanyMemberResearchServiceTest {
 
         CompanyProfile saved = profileCaptor.getValue();
         assertEquals(2, saved.getCompanyMembers().size()); // 1 existing + 1 new (CTO)
-        assertEquals(2, saved.getVersion());
+        assertEquals("1.1", saved.getVersion());
         assertEquals("2", saved.getMetadata().getLastModifiedBy());
 
         verify(profileVersionRepository).save(any());
         verify(auditLogService, times(2)).log(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void validation_OnlyFullNameAndPositionRequired() {
+        jakarta.validation.Validator validator = jakarta.validation.Validation.buildDefaultValidatorFactory().getValidator();
+
+        // 1. Valid with only fullName and position (sourceUrl and imageUrl null)
+        CompanyMemberResearchItemRequest validReq = new CompanyMemberResearchItemRequest();
+        validReq.setFullName("Nguyen Van A");
+        validReq.setPosition("CEO");
+        var violations = validator.validate(validReq);
+        assertTrue(violations.isEmpty(), "Expected no violations when only fullName and position are provided");
+
+        // 2. Valid with blank sourceUrl (normalized to null)
+        validReq.setSourceUrl("   ");
+        violations = validator.validate(validReq);
+        assertTrue(violations.isEmpty(), "Expected no violations when sourceUrl is blank");
+
+        // 3. Valid with valid URL
+        validReq.setSourceUrl("https://company.com/leadership");
+        violations = validator.validate(validReq);
+        assertTrue(violations.isEmpty(), "Expected no violations for valid URL");
+
+        // 4. Invalid when fullName is blank
+        CompanyMemberResearchItemRequest missingName = new CompanyMemberResearchItemRequest();
+        missingName.setPosition("CEO");
+        violations = validator.validate(missingName);
+        assertFalse(violations.isEmpty());
+        assertTrue(violations.stream().anyMatch(v -> v.getPropertyPath().toString().equals("fullName")));
+
+        // 5. Invalid when position is blank
+        CompanyMemberResearchItemRequest missingPos = new CompanyMemberResearchItemRequest();
+        missingPos.setFullName("Nguyen Van A");
+        violations = validator.validate(missingPos);
+        assertFalse(violations.isEmpty());
+        assertTrue(violations.stream().anyMatch(v -> v.getPropertyPath().toString().equals("position")));
+
+        // 6. Invalid when sourceUrl is not a valid URL
+        CompanyMemberResearchItemRequest badUrl = new CompanyMemberResearchItemRequest();
+        badUrl.setFullName("Nguyen Van A");
+        badUrl.setPosition("CEO");
+        badUrl.setSourceUrl("not-a-valid-url");
+        violations = validator.validate(badUrl);
+        assertFalse(violations.isEmpty());
+        assertTrue(violations.stream().anyMatch(v -> v.getPropertyPath().toString().equals("sourceUrl")));
     }
 }

@@ -334,12 +334,14 @@ public class CompanyMemberResearchService {
     }
 
     private CompanyMemberResearchItem mapItemRequestToItem(CompanyMemberResearchItemRequest req) {
+        String sourceUrl = StringUtils.hasText(req.getSourceUrl()) ? req.getSourceUrl().trim() : null;
+        String imageUrl = StringUtils.hasText(req.getImageUrl()) ? req.getImageUrl().trim() : null;
         return CompanyMemberResearchItem.builder()
-                .fullName(req.getFullName())
-                .position(req.getPosition())
-                .imageUrl(req.getImageUrl())
-                .sourceUrl(req.getSourceUrl())
-                .notes(req.getNotes())
+                .fullName(req.getFullName() != null ? req.getFullName().trim() : null)
+                .position(req.getPosition() != null ? req.getPosition().trim() : null)
+                .imageUrl(imageUrl)
+                .sourceUrl(sourceUrl)
+                .notes(req.getNotes() != null ? req.getNotes().trim() : null)
                 .build();
     }
 
