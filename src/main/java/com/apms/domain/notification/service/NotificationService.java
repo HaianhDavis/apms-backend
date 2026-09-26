@@ -254,6 +254,28 @@ public class NotificationService {
     }
 
     @Transactional
+    public void notifyMonitoringAssigned(Account recipient, Account sender, String companyName, String companyProfileId) {
+        if (recipient == null) {
+            return;
+        }
+
+        String title = "Monitoring Assignment";
+        String message = String.format("You have been assigned to monitor %s.", org.springframework.util.StringUtils.hasText(companyName) ? companyName : "the company");
+        Notification notification = createSystemNotification(
+                recipient, sender, title, message, NotificationType.SYSTEM, null, null, null, "MONITORING_ASSIGNED");
+
+        runAfterCommit(() -> pushToUser(
+                recipient.getId(),
+                title,
+                message,
+                java.util.Map.of(
+                        "type", "MONITORING_ASSIGNED",
+                        "notificationId", String.valueOf(notification.getId()),
+                        "companyProfileId", companyProfileId != null ? companyProfileId : ""
+                )));
+    }
+
+    @Transactional
     public void notifyTasksAvailable(Project project, Account recipient, Account sender) {
         if (project == null || recipient == null) {
             return;

@@ -37,7 +37,7 @@ public class CompanyMonitoringAssignment {
     private Account assignedByManager;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
+    @Column(nullable = true)
     private MonitoringFrequency frequency;
 
     @Enumerated(EnumType.STRING)
@@ -47,7 +47,7 @@ public class CompanyMonitoringAssignment {
     @Column(name = "last_reviewed_at")
     private LocalDateTime lastReviewedAt;
 
-    @Column(name = "next_review_at", nullable = false)
+    @Column(name = "next_review_at", nullable = true)
     private LocalDateTime nextReviewAt;
 
     @CreationTimestamp

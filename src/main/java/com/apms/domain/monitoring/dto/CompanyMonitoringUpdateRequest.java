@@ -10,6 +10,5 @@ public class CompanyMonitoringUpdateRequest {
     @NotNull
     private Long assignedStaffId;
 
-    @NotNull
     private MonitoringFrequency frequency;
 }

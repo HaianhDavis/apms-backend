@@ -19,6 +19,7 @@ import com.apms.domain.profile.repository.mongo.CompanyProfileUpdateProposalRepo
 import com.apms.domain.user.Account;
 import com.apms.domain.user.repository.sql.AccountRepository;
 import com.apms.common.enums.SystemRole;
+import com.apms.domain.notification.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -49,6 +50,7 @@ public class CompanyMonitoringService {
     private final AccountRepository accountRepository;
     private final CompanyProfileUpdateProposalRepository proposalRepository;
     private final AuditLogService auditLogService;
+    private final NotificationService notificationService;
     private final com.apms.domain.profile.service.CompanyProfileVersionService versionService;
 
     @Transactional
@@ -77,9 +79,11 @@ public class CompanyMonitoringService {
             // Update existing assignment
             assignment.setAssignedStaff(staff);
             assignment.setAssignedByManager(manager);
-            assignment.setFrequency(request.getFrequency());
+            if (request.getFrequency() != null) {
+                assignment.setFrequency(request.getFrequency());
+            }
             assignment.setStatus(MonitoringStatus.ACTIVE);
-            assignment.setNextReviewAt(calculateNextReviewAt(assignment.getLastReviewedAt(), request.getFrequency()));
+            assignment.setNextReviewAt(null);
             assignment = assignmentRepository.save(assignment);
             auditLogService.log(manager.getId(), AuditAction.MONITORING_REASSIGNED, "CompanyMonitoringAssignment", assignment.getId().toString(), "Reassigned monitoring for company: " + request.getCompanyProfileId());
         } else {
@@ -90,11 +94,13 @@ public class CompanyMonitoringService {
                     .assignedByManager(manager)
                     .frequency(request.getFrequency())
                     .status(MonitoringStatus.ACTIVE)
-                    .nextReviewAt(calculateNextReviewAt(null, request.getFrequency()))
+                    .nextReviewAt(null)
                     .build();
             assignment = assignmentRepository.save(assignment);
             auditLogService.log(manager.getId(), AuditAction.MONITORING_ASSIGNED, "CompanyMonitoringAssignment", assignment.getId().toString(), "Assigned monitoring for company: " + request.getCompanyProfileId());
         }
+
+        notificationService.notifyMonitoringAssigned(staff, manager, resolveCompanyName(companyProfile), assignment.getCompanyProfileId());
 
         return mapToResponse(assignment, companyProfile);
     }
@@ -121,11 +127,18 @@ public class CompanyMonitoringService {
             throw new IllegalArgumentException("Assigned account must have BUSINESS_DEVELOPMENT_STAFF role");
         }
 
+        Account oldStaff = assignment.getAssignedStaff();
         assignment.setAssignedStaff(staff);
-        assignment.setFrequency(request.getFrequency());
-        assignment.setNextReviewAt(calculateNextReviewAt(assignment.getLastReviewedAt(), request.getFrequency()));
+        if (request.getFrequency() != null) {
+            assignment.setFrequency(request.getFrequency());
+        }
+        assignment.setNextReviewAt(null);
 
         assignment = assignmentRepository.save(assignment);
+
+        if (oldStaff == null || !oldStaff.getId().equals(staff.getId())) {
+            notificationService.notifyMonitoringAssigned(staff, manager, resolveCompanyName(companyProfile), assignment.getCompanyProfileId());
+        }
 
         auditLogService.log(manager.getId(), AuditAction.MONITORING_FREQUENCY_CHANGED, "CompanyMonitoringAssignment", assignment.getId().toString(), "Updated assignment for company: " + assignment.getCompanyProfileId());
 
@@ -236,7 +249,7 @@ public class CompanyMonitoringService {
         review = reviewRepository.save(review);
 
         assignment.setLastReviewedAt(now);
-        assignment.setNextReviewAt(calculateNextReviewAt(now, assignment.getFrequency()));
+        assignment.setNextReviewAt(null);
         assignmentRepository.save(assignment);
 
         AuditAction action = request.getResult() == MonitoringReviewResult.NO_CHANGE ? AuditAction.MONITORING_REVIEW_COMPLETED : AuditAction.MONITORING_UPDATE_PROPOSED;
@@ -356,55 +369,16 @@ public class CompanyMonitoringService {
 
     @Transactional(readOnly = true)
     public Page<CompanyMonitoringAssignmentResponse> getDueOrOverdueAssignments(Long currentUserId, Pageable pageable) {
-        LocalDateTime now = LocalDateTime.now();
-        if (currentUserId == null) {
-            return assignmentRepository.findDueOrOverdueActiveAssignments(now, pageable)
-                    .map(assignment -> {
-                        CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
-                        return mapToResponse(assignment, companyProfile);
-                    });
-        }
-
-        Account currentUser = accountRepository.findById(currentUserId)
-                .orElseThrow(() -> new IllegalArgumentException("Account not found"));
-
-        if (currentUser.getRoles().contains(SystemRole.SYSTEM_ADMIN)) {
-            return assignmentRepository.findDueOrOverdueActiveAssignments(now, pageable)
-                    .map(assignment -> {
-                        CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
-                        return mapToResponse(assignment, companyProfile);
-                    });
-        }
-
-        List<CompanyProfile> managedProfiles = companyProfileRepository.findByResponsibleManagerId(currentUserId);
-        Set<String> managedCompanyKeys = managedProfiles.stream()
-                .flatMap(profile -> java.util.stream.Stream.of(profile.getId(), profile.getCompanyId()))
-                .filter(StringUtils::hasText)
-                .collect(Collectors.toSet());
-
-        if (managedCompanyKeys.isEmpty()) {
-            return Page.empty(pageable);
-        }
-
-        return assignmentRepository.findDueOrOverdueActiveAssignmentsForCompanies(now, managedCompanyKeys, pageable)
-                .map(assignment -> {
-                    CompanyProfile companyProfile = findProfile(assignment.getCompanyProfileId());
-                    return mapToResponse(assignment, companyProfile);
-                });
+        return Page.empty(pageable);
     }
 
     @Transactional(readOnly = true)
     public Page<CompanyMonitoringAssignmentResponse> getDueOrOverdueAssignments(Pageable pageable) {
-        return getDueOrOverdueAssignments(null, pageable);
+        return Page.empty(pageable);
     }
 
     public LocalDateTime calculateNextReviewAt(LocalDateTime baseTime, MonitoringFrequency frequency) {
-        LocalDateTime time = baseTime != null ? baseTime : LocalDateTime.now();
-        return switch (frequency) {
-            case MONTHLY -> time.plusMonths(1);
-            case QUARTERLY -> time.plusMonths(3);
-            case SEMI_ANNUALLY -> time.plusMonths(6);
-        };
+        return null;
     }
 
     private CompanyMonitoringAssignmentResponse mapToResponse(CompanyMonitoringAssignment assignment, CompanyProfile companyProfile) {
@@ -563,24 +537,12 @@ public class CompanyMonitoringService {
 
     String calculateDisplayStatus(CompanyMonitoringAssignment assignment) {
         if (assignment == null) {
-            return "ON_SCHEDULE";
+            return "ACTIVE";
         }
         if (assignment.getStatus() == MonitoringStatus.PAUSED) {
             return "PAUSED";
         }
-        if (assignment.getNextReviewAt() == null) {
-            return "ON_SCHEDULE";
-        }
-        LocalDate today = LocalDate.now();
-        LocalDate nextReviewDate = assignment.getNextReviewAt().toLocalDate();
-
-        if (today.isAfter(nextReviewDate)) {
-            return "OVERDUE";
-        }
-        if (today.isEqual(nextReviewDate)) {
-            return "DUE";
-        }
-        return "ON_SCHEDULE";
+        return "ACTIVE";
     }
 
     public void enforceResponsibleManager(CompanyProfile profile, Account manager) {

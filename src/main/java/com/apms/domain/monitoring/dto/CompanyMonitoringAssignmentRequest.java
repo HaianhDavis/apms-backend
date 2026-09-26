@@ -14,6 +14,5 @@ public class CompanyMonitoringAssignmentRequest {
     @NotNull
     private Long assignedStaffId;
 
-    @NotNull
     private MonitoringFrequency frequency;
 }
