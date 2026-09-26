@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import com.apms.domain.security.exception.TotpException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -58,6 +59,21 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(status).body(body);
     }
 
+    @ExceptionHandler(TotpException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTotpException(TotpException ex) {
+        log.warn("TOTP error: {}", ex.getMessage());
+        String msg = switch (ex.getMessage() != null ? ex.getMessage() : "") {
+            case "TOTP_CODE_INVALID" -> "Invalid verification code. Please try again.";
+            case "TOTP_CODE_REPLAYED" -> "The verification code has already been used. Please wait for a new code.";
+            case "TOTP_ACCOUNT_LOCKED" -> "The account has been temporarily locked due to multiple incorrect code entries.";
+            case "TOTP_ENROLLMENT_EXPIRED" -> "The code installation session has expired. Please try again.";
+            case "TOTP_ENROLLMENT_NOT_FOUND" -> "Authenticator installation session not found.";
+            case "TOTP_ALREADY_ENROLLED" -> "Two-factor authentication has been enabled.";
+            case "TOTP_NOT_ENROLLED" -> "Two-factor authentication has not been enabled.";
+            default -> ex.getMessage() != null ? ex.getMessage() : "Authenticator authentication error.";
+        };
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error(msg));
+    }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidationException(MethodArgumentNotValidException ex) {

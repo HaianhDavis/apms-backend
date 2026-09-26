@@ -2,6 +2,7 @@ package com.apms.domain.security.controller;
 
 import com.apms.common.response.ApiResponse;
 import com.apms.domain.security.dto.StepUpVerifyResponse;
+import com.apms.domain.security.dto.TotpDto.TotpDisableRequest;
 import com.apms.domain.security.dto.TotpDto.TotpEnrollmentConfirmRequest;
 import com.apms.domain.security.dto.TotpDto.TotpEnrollmentStartResponse;
 import com.apms.domain.security.dto.TotpDto.TotpStatusResponse;
@@ -31,7 +32,7 @@ public class TotpEnrollmentController {
     }
 
     @PostMapping("/enrollment")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'ROLE_BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'ROLE_BUSINESS_DEVELOPMENT_MANAGER', 'SYSTEM_ADMIN')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<TotpEnrollmentStartResponse>> startEnrollment() {
         UserDetailsImpl currentUser = getCurrentUser();
         TotpEnrollmentStartResponse response = enrollmentService.startEnrollment(currentUser.getId(), currentUser.getUsername());
@@ -42,7 +43,7 @@ public class TotpEnrollmentController {
     }
 
     @PostMapping("/enrollment/confirm")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'ROLE_BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'ROLE_BUSINESS_DEVELOPMENT_MANAGER', 'SYSTEM_ADMIN')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<StepUpVerifyResponse>> confirmEnrollment(@RequestBody TotpEnrollmentConfirmRequest request) {
         UserDetailsImpl currentUser = getCurrentUser();
         StepUpVerifyResponse response = enrollmentService.confirmEnrollment(currentUser.getId(), request.getEnrollmentId(), request.getCode());
@@ -50,6 +51,18 @@ public class TotpEnrollmentController {
                 .cacheControl(CacheControl.noStore())
                 .header("Pragma", "no-cache")
                 .body(ApiResponse.success(response, "Mã Authenticator đã được xác minh thành công."));
+    }
+
+    @PostMapping("/disable")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Void>> disableTotp(@RequestBody(required = false) TotpDisableRequest request) {
+        UserDetailsImpl currentUser = getCurrentUser();
+        String code = request != null ? request.getCode() : null;
+        enrollmentService.disableTotp(currentUser.getId(), code);
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .header("Pragma", "no-cache")
+                .body(ApiResponse.success(null, "Xác thực 2 yếu tố đã được vô hiệu hóa thành công."));
     }
 
     private UserDetailsImpl getCurrentUser() {

@@ -45,6 +45,16 @@ public class LoginMfaService {
     private final TotpEnrollmentService totpEnrollmentService;
     private final TotpVerificationService totpVerificationService;
 
+    @Transactional(readOnly = true)
+    public boolean isTotpEnabledForAccount(Long accountId) {
+        if (accountId == null) {
+            return false;
+        }
+        return credentialRepository.findByAccountId(accountId)
+                .map(AccountTotpCredential::isEnabled)
+                .orElse(false);
+    }
+
     @Transactional
     public LoginMfaChallengeResponse createLoginChallenge(Long accountId, String email) {
         // 1. Invalidate any existing active login MFA challenges for this account (superseded)
@@ -53,57 +63,34 @@ public class LoginMfaService {
         AccountTotpCredential credential = credentialRepository.findByAccountId(accountId).orElse(null);
         boolean isEnrolled = credential != null && credential.isEnabled();
 
+        if (!isEnrolled) {
+            throw new BusinessValidationException("Two-factor authentication is not enabled for this account.");
+        }
+
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime expiresAt = now.plusSeconds(CHALLENGE_LIFETIME_SECONDS);
         String ticketSecret = generateRandomSecret();
         String ticketHash = sha256(ticketSecret);
 
-        if (isEnrolled) {
-            OtpChallenge challenge = OtpChallenge.builder()
-                    .accountId(accountId)
-                    .purpose(StepUpPurpose.LOGIN_MFA)
-                    .otpHash("TOTP")
-                    .verificationTicketHash(ticketHash)
-                    .expiresAt(expiresAt)
-                    .ticketExpiresAt(expiresAt)
-                    .maxAttempts(MAX_FAILED_ATTEMPTS)
-                    .attemptCount(0)
-                    .build();
-            challenge = challengeRepository.save(challenge);
+        OtpChallenge challenge = OtpChallenge.builder()
+                .accountId(accountId)
+                .purpose(StepUpPurpose.LOGIN_MFA)
+                .otpHash("TOTP")
+                .verificationTicketHash(ticketHash)
+                .expiresAt(expiresAt)
+                .ticketExpiresAt(expiresAt)
+                .maxAttempts(MAX_FAILED_ATTEMPTS)
+                .attemptCount(0)
+                .build();
+        challenge = challengeRepository.save(challenge);
 
-            String challengeId = challenge.getId() + "_" + ticketSecret;
-            return LoginMfaChallengeResponse.builder()
-                    .mfaRequired(true)
-                    .mfaEnrollmentRequired(false)
-                    .challengeId(challengeId)
-                    .method("TOTP")
-                    .build();
-        } else {
-            // Unenrolled account: start enrollment and bind challenge to the exact enrollmentId
-            TotpEnrollmentStartResponse startResponse = totpEnrollmentService.startEnrollment(accountId, email);
-
-            OtpChallenge challenge = OtpChallenge.builder()
-                    .accountId(accountId)
-                    .purpose(StepUpPurpose.LOGIN_MFA_ENROLLMENT)
-                    .otpHash(startResponse.getEnrollmentId().toString()) // Server-bound to exact enrollmentId
-                    .verificationTicketHash(ticketHash)
-                    .expiresAt(expiresAt)
-                    .ticketExpiresAt(expiresAt)
-                    .maxAttempts(MAX_FAILED_ATTEMPTS)
-                    .attemptCount(0)
-                    .build();
-            challenge = challengeRepository.save(challenge);
-
-            String challengeId = challenge.getId() + "_" + ticketSecret;
-            return LoginMfaChallengeResponse.builder()
-                    .mfaRequired(false)
-                    .mfaEnrollmentRequired(true)
-                    .challengeId(challengeId)
-                    .method("TOTP")
-                    .qrCodeDataUrl(startResponse.getQrCodeDataUrl())
-                    .manualEntryKey(startResponse.getManualEntryKey())
-                    .build();
-        }
+        String challengeId = challenge.getId() + "_" + ticketSecret;
+        return LoginMfaChallengeResponse.builder()
+                .mfaRequired(true)
+                .mfaEnrollmentRequired(false)
+                .challengeId(challengeId)
+                .method("TOTP")
+                .build();
     }
 
     @Transactional(noRollbackFor = {BusinessValidationException.class, TotpException.class})
@@ -126,7 +113,7 @@ public class LoginMfaService {
         }
 
         // 4. Verify challenge purpose
-        if (challenge.getPurpose() != StepUpPurpose.LOGIN_MFA && challenge.getPurpose() != StepUpPurpose.LOGIN_MFA_ENROLLMENT) {
+        if (challenge.getPurpose() != StepUpPurpose.LOGIN_MFA) {
             throw new BusinessValidationException("Verification session is no longer valid. Please sign in again.");
         }
 
@@ -162,53 +149,21 @@ public class LoginMfaService {
         Long accountId = challenge.getAccountId();
 
         // 9. Execute TOTP evaluation with atomic failure tracking and immediate lockout
-        if (challenge.getPurpose() == StepUpPurpose.LOGIN_MFA) {
-            try {
-                totpVerificationService.verifyTotp(accountId, totpCode);
-            } catch (TotpException e) {
-                int newAttempts = challenge.getAttemptCount() + 1;
-                challenge.setAttemptCount(newAttempts);
-                if (newAttempts >= challenge.getMaxAttempts()) {
-                    challenge.setInvalidatedAt(LocalDateTime.now());
-                    challenge.setInvalidationReason("LOCKED");
-                    challengeRepository.save(challenge);
-                    log.warn("Login MFA challenge {} locked due to max attempts for accountId {}", challenge.getId(), accountId);
-                    throw new BusinessValidationException("Too many incorrect verification attempts. Please sign in again.");
-                }
+        try {
+            totpVerificationService.verifyTotp(accountId, totpCode);
+        } catch (TotpException e) {
+            int newAttempts = challenge.getAttemptCount() + 1;
+            challenge.setAttemptCount(newAttempts);
+            if (newAttempts >= challenge.getMaxAttempts()) {
+                challenge.setInvalidatedAt(LocalDateTime.now());
+                challenge.setInvalidationReason("LOCKED");
                 challengeRepository.save(challenge);
-                log.warn("Login MFA failed attempt {}/{} on challenge {} for accountId {}", newAttempts, challenge.getMaxAttempts(), challenge.getId(), accountId);
-                throw new BusinessValidationException("Incorrect verification code.");
+                log.warn("Login MFA challenge {} locked due to max attempts for accountId {}", challenge.getId(), accountId);
+                throw new BusinessValidationException("Too many incorrect verification attempts. Please sign in again.");
             }
-        } else {
-            try {
-                UUID enrollmentId = UUID.fromString(challenge.getOtpHash());
-                totpEnrollmentService.confirmEnrollmentForLogin(accountId, enrollmentId, totpCode);
-            } catch (TotpException e) {
-                int newAttempts = challenge.getAttemptCount() + 1;
-                challenge.setAttemptCount(newAttempts);
-                if (newAttempts >= challenge.getMaxAttempts()) {
-                    challenge.setInvalidatedAt(LocalDateTime.now());
-                    challenge.setInvalidationReason("LOCKED");
-                    challengeRepository.save(challenge);
-                    log.warn("Login MFA enrollment challenge {} locked due to max attempts for accountId {}", challenge.getId(), accountId);
-                    throw new BusinessValidationException("Too many incorrect verification attempts. Please sign in again.");
-                }
-                challengeRepository.save(challenge);
-                log.warn("Login MFA enrollment failed attempt {}/{} on challenge {} for accountId {}", newAttempts, challenge.getMaxAttempts(), challenge.getId(), accountId);
-                throw new BusinessValidationException("Incorrect verification code.");
-            } catch (Exception e) {
-                int newAttempts = challenge.getAttemptCount() + 1;
-                challenge.setAttemptCount(newAttempts);
-                if (newAttempts >= challenge.getMaxAttempts()) {
-                    challenge.setInvalidatedAt(LocalDateTime.now());
-                    challenge.setInvalidationReason("LOCKED");
-                    challengeRepository.save(challenge);
-                    log.warn("Login MFA enrollment challenge {} locked due to error for accountId {}", challenge.getId(), accountId);
-                    throw new BusinessValidationException("Too many incorrect verification attempts. Please sign in again.");
-                }
-                challengeRepository.save(challenge);
-                throw new BusinessValidationException("Incorrect verification code.");
-            }
+            challengeRepository.save(challenge);
+            log.warn("Login MFA failed attempt {}/{} on challenge {} for accountId {}", newAttempts, challenge.getMaxAttempts(), challenge.getId(), accountId);
+            throw new BusinessValidationException("Incorrect verification code.");
         }
 
         // 10. Atomically consume challenge upon successful verification (single-use)

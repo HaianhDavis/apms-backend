@@ -17,6 +17,7 @@ import com.apms.domain.auth.service.LoginMfaService;
 import com.apms.domain.auth.service.RefreshTokenService;
 import com.apms.domain.security.service.StepUpAuthenticationService;
 import com.apms.domain.user.Account;
+import com.apms.domain.user.repository.sql.AccountRepository;
 import com.apms.security.JwtUtils;
 import com.apms.security.UserDetailsImpl;
 import jakarta.validation.Valid;
@@ -47,6 +48,7 @@ public class AuthController {
     private final StepUpAuthenticationService stepUpAuthenticationService;
     private final EmailVerificationService emailVerificationService;
     private final LoginMfaService loginMfaService;
+    private final AccountRepository accountRepository;
 
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<?>> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
@@ -77,18 +79,29 @@ public class AuthController {
                             .emailDeliveryMessage(issueResult.delivery().reason()).build()).build());
         }
 
-        // Mandatory MFA for all standard APMS accounts:
-        // Do NOT issue access token or refresh token here.
-        // Return limited challenge response for TOTP verification or enrollment.
-        try {
-            LoginMfaChallengeResponse challengeResponse = loginMfaService.createLoginChallenge(
-                    userDetails.getId(), userDetails.getEmail());
-            return ResponseEntity.ok(ApiResponse.success(challengeResponse));
-        } catch (Exception ex) {
-            log.error("Unexpected error creating login MFA challenge for user {}: {}", userDetails.getEmail(), ex.getMessage(), ex);
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(ApiResponse.error("Unable to complete sign in. Please try again."));
+        // Optional MFA: only require TOTP verification if the user has 2FA enabled
+        boolean totpEnabled = loginMfaService.isTotpEnabledForAccount(userDetails.getId());
+        if (totpEnabled) {
+            try {
+                LoginMfaChallengeResponse challengeResponse = loginMfaService.createLoginChallenge(
+                        userDetails.getId(), userDetails.getEmail());
+                return ResponseEntity.ok(ApiResponse.success(challengeResponse));
+            } catch (Exception ex) {
+                log.error("Unexpected error creating login MFA challenge for user {}: {}", userDetails.getEmail(), ex.getMessage(), ex);
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(ApiResponse.error("Unable to complete sign in. Please try again."));
+            }
         }
+
+        // 2FA not enabled: complete login directly
+        Account account = accountRepository.findById(userDetails.getId())
+                .orElseThrow(() -> new RuntimeException("Account not found"));
+        if (Boolean.FALSE.equals(account.getIsActive())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.error(
+                    "Tài khoản đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên."));
+        }
+        JwtResponse jwtResponse = finalizeSuccessfulLogin(account);
+        return ResponseEntity.ok(ApiResponse.success(jwtResponse));
     }
 
     @PostMapping("/mfa/verify")

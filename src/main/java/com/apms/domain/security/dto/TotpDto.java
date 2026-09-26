@@ -43,6 +43,13 @@ public class TotpDto {
         private UUID enrollmentId;
         private String code;
     }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TotpDisableRequest {
+        private String code;
+    }
     
     @Data
     @Builder

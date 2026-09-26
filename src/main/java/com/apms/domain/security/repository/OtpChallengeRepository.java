@@ -23,6 +23,8 @@ public interface OtpChallengeRepository extends JpaRepository<OtpChallenge, Long
     
     Optional<OtpChallenge> findTopByAccountIdAndPurposeAndUsedAtIsNullAndInvalidatedAtIsNullOrderByCreatedAtDesc(Long accountId, StepUpPurpose purpose);
     
+    Optional<OtpChallenge> findTopByAccountIdAndPurposeOrderByCreatedAtDesc(Long accountId, StepUpPurpose purpose);
+    
     int countByAccountIdAndPurposeAndCreatedAtAfter(Long accountId, StepUpPurpose purpose, LocalDateTime after);
 
     List<OtpChallenge> findByAccountIdAndPurposeAndUsedAtIsNullAndInvalidatedAtIsNull(Long accountId, StepUpPurpose purpose);

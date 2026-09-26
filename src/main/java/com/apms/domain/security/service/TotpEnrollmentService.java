@@ -1,12 +1,16 @@
 package com.apms.domain.security.service;
 
+import com.apms.common.exception.BusinessValidationException;
 import com.apms.domain.security.config.TotpProperties;
 import com.apms.domain.security.dto.StepUpVerifyResponse;
 import com.apms.domain.security.dto.TotpDto.TotpEnrollmentStartResponse;
 import com.apms.domain.security.dto.TotpDto.TotpStatusResponse;
 import com.apms.domain.security.entity.AccountTotpCredential;
+import com.apms.domain.security.entity.OtpChallenge;
+import com.apms.domain.security.enums.StepUpPurpose;
 import com.apms.domain.security.exception.TotpException;
 import com.apms.domain.security.repository.AccountTotpCredentialRepository;
+import com.apms.domain.security.repository.OtpChallengeRepository;
 import dev.samstevens.totp.exceptions.QrGenerationException;
 import dev.samstevens.totp.qr.QrData;
 import dev.samstevens.totp.qr.QrGenerator;
@@ -29,6 +33,7 @@ import static dev.samstevens.totp.util.Utils.getDataUriForImage;
 public class TotpEnrollmentService {
 
     private final AccountTotpCredentialRepository repository;
+    private final OtpChallengeRepository challengeRepository;
     private final TotpSecretEncryptionService encryptionService;
     private final TotpVerificationService verificationService;
     private final TotpProperties totpProperties;
@@ -47,7 +52,7 @@ public class TotpEnrollmentService {
         AccountTotpCredential cred = optional.get();
         boolean locked = cred.getLockedUntil() != null && cred.getLockedUntil().isAfter(LocalDateTime.now(clock));
         return TotpStatusResponse.builder()
-                .enrolled(true)
+                .enrolled(cred.isEnabled())
                 .enabled(cred.isEnabled())
                 .locked(locked)
                 .lockedUntil(locked ? cred.getLockedUntil() : null)
@@ -223,4 +228,120 @@ public class TotpEnrollmentService {
         cred.setLastAcceptedTimeStep(matchedTimeStep);
         repository.save(cred);
     }
+
+    private static final int DISABLE_MFA_MAX_FAILED_ATTEMPTS = 5;
+    private static final int DISABLE_MFA_COOLDOWN_MINUTES = 5;
+
+    @Transactional(noRollbackFor = BusinessValidationException.class)
+    public void disableTotp(Long accountId, String code) {
+        // 1. Verify that the account exists and currently has 2FA enabled
+        AccountTotpCredential cred = repository.findByAccountIdWithLock(accountId)
+                .orElseThrow(() -> new BusinessValidationException("Two-factor authentication is not enabled."));
+
+        if (!cred.isEnabled()) {
+            throw new BusinessValidationException("Two-factor authentication is not enabled.");
+        }
+
+        LocalDateTime now = LocalDateTime.now(clock);
+
+        // 2. Check for recent locked challenge within the 5-minute cooldown
+        Optional<OtpChallenge> latestChallengeOpt = challengeRepository
+                .findTopByAccountIdAndPurposeOrderByCreatedAtDesc(accountId, StepUpPurpose.DISABLE_2FA);
+
+        if (latestChallengeOpt.isPresent()) {
+            OtpChallenge latest = latestChallengeOpt.get();
+            if (latest.getInvalidatedAt() != null && "LOCKED".equalsIgnoreCase(latest.getInvalidationReason())) {
+                LocalDateTime lockTime = latest.getInvalidatedAt();
+                LocalDateTime cooldownUntil = lockTime.plusMinutes(DISABLE_MFA_COOLDOWN_MINUTES);
+                if (now.isBefore(cooldownUntil)) {
+                    throw new BusinessValidationException("Too many failed attempts. Please try again later.");
+                }
+            }
+        }
+
+        // 3. Find or create an active (unlocked, unconsumed, unexpired) DISABLE_2FA challenge
+        OtpChallenge challenge = challengeRepository
+                .findTopByAccountIdAndPurposeAndUsedAtIsNullAndInvalidatedAtIsNullOrderByCreatedAtDesc(accountId, StepUpPurpose.DISABLE_2FA)
+                .orElse(null);
+
+        if (challenge != null && challenge.getExpiresAt().isBefore(now)) {
+            challenge.setInvalidatedAt(now);
+            challenge.setInvalidationReason("EXPIRED");
+            challengeRepository.save(challenge);
+            challenge = null;
+        }
+
+        if (challenge == null) {
+            challenge = OtpChallenge.builder()
+                    .accountId(accountId)
+                    .purpose(StepUpPurpose.DISABLE_2FA)
+                    .otpHash("TOTP")
+                    .expiresAt(now.plusMinutes(DISABLE_MFA_COOLDOWN_MINUTES))
+                    .attemptCount(0)
+                    .maxAttempts(DISABLE_MFA_MAX_FAILED_ATTEMPTS)
+                    .build();
+            challenge = challengeRepository.save(challenge);
+        }
+
+        // 4. Validate OTP code format
+        if (code == null || code.trim().length() != 6) {
+            recordFailedDisableAttempt(challenge, now);
+        }
+
+        // 5. Decrypt secret and evaluate TOTP code
+        String secret = encryptionService.decrypt(
+                cred.getEncryptedSecret(),
+                cred.getEncryptionIv(),
+                cred.getEncryptionKeyVersion(),
+                accountId
+        );
+
+        long matchedTimeStep;
+        try {
+            matchedTimeStep = verificationService.verifyAndGetTimeStep(secret, code.trim());
+        } catch (Exception e) {
+            recordFailedDisableAttempt(challenge, now);
+            return;
+        }
+
+        // Replay check against lastAcceptedTimeStep
+        if (cred.getLastAcceptedTimeStep() != null && matchedTimeStep <= cred.getLastAcceptedTimeStep()) {
+            recordFailedDisableAttempt(challenge, now);
+            return;
+        }
+
+        // 6. SUCCESS: Valid OTP before limit!
+        // A) Consume the challenge immediately (single-use)
+        challenge.setUsedAt(now);
+        challenge.setInvalidatedAt(now);
+        challenge.setInvalidationReason("CONSUMED");
+        challengeRepository.save(challenge);
+
+        // B) Disable 2FA on the credential and clear session flags
+        cred.setEnabled(false);
+        cred.setEnrollmentId(null);
+        cred.setEnrollmentExpiresAt(null);
+        cred.setVerifiedAt(null);
+        cred.setFailedAttempts(0);
+        cred.setLockedUntil(null);
+        cred.setLastAcceptedTimeStep(matchedTimeStep);
+        cred.setOwnerSecureSessionIssuedAt(null);
+        cred.setOwnerSecureSessionExpiresAt(null);
+        repository.save(cred);
+    }
+
+    private void recordFailedDisableAttempt(OtpChallenge challenge, LocalDateTime now) {
+        int attempts = challenge.getAttemptCount() + 1;
+        challenge.setAttemptCount(attempts);
+        if (attempts >= DISABLE_MFA_MAX_FAILED_ATTEMPTS) {
+            challenge.setInvalidatedAt(now);
+            challenge.setInvalidationReason("LOCKED");
+            challengeRepository.save(challenge);
+            throw new BusinessValidationException("Too many failed attempts. Please try again later.");
+        } else {
+            challengeRepository.save(challenge);
+            throw new BusinessValidationException("Invalid verification code. Please try again.");
+        }
+    }
 }
+
