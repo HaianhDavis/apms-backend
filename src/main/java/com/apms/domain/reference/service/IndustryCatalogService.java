@@ -38,16 +38,59 @@ public class IndustryCatalogService {
     }
 
     public List<IndustryCatalogResponse> getActiveIndustries(String search) {
-        List<IndustryCatalog> list;
-        if (StringUtils.hasText(search)) {
-            list = industryCatalogRepository.findByNameContainingIgnoreCaseAndStatusOrderByNameAsc(search.trim(), "ACTIVE");
-        } else {
-            list = industryCatalogRepository.findByStatusOrderByNameAsc("ACTIVE");
+        Map<String, String> distinctMap = new LinkedHashMap<>();
+
+        // 1. Primary source: existing non-deleted company profile industries
+        try {
+            Criteria criteria = Criteria.where("isDeleted").ne(true);
+            List<String> profileIndustries = mongoTemplate.findDistinct(
+                    Query.query(criteria),
+                    "business.industries",
+                    CompanyProfile.class,
+                    String.class
+            );
+            if (profileIndustries != null) {
+                for (String raw : profileIndustries) {
+                    if (raw == null) continue;
+                    String clean = cleanDisplayName(raw);
+                    if (clean.isBlank()) continue;
+                    distinctMap.putIfAbsent(clean.toLowerCase(), clean);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to fetch distinct industries from CompanyProfile: {}", e.getMessage());
         }
-        return list.stream()
-                .map(item -> IndustryCatalogResponse.builder()
-                        .id(item.getId())
-                        .name(item.getName())
+
+        // 2. Also include canonical entries from industryCatalogRepository if any
+        try {
+            List<IndustryCatalog> list;
+            if (StringUtils.hasText(search)) {
+                list = industryCatalogRepository.findByNameContainingIgnoreCaseAndStatusOrderByNameAsc(search.trim(), "ACTIVE");
+            } else {
+                list = industryCatalogRepository.findByStatusOrderByNameAsc("ACTIVE");
+            }
+            if (list != null) {
+                for (IndustryCatalog item : list) {
+                    if (item.getName() != null && !item.getName().isBlank()) {
+                        String clean = cleanDisplayName(item.getName());
+                        if (!clean.isBlank()) {
+                            distinctMap.putIfAbsent(clean.toLowerCase(), clean);
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to fetch active industries from repository: {}", e.getMessage());
+        }
+
+        String searchLower = StringUtils.hasText(search) ? search.trim().toLowerCase() : null;
+
+        return distinctMap.values().stream()
+                .filter(name -> searchLower == null || name.toLowerCase().contains(searchLower))
+                .sorted(String.CASE_INSENSITIVE_ORDER)
+                .map(name -> IndustryCatalogResponse.builder()
+                        .id(name)
+                        .name(name)
                         .build())
                 .collect(Collectors.toList());
     }

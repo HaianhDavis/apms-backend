@@ -68,7 +68,7 @@ public class ProfileController {
     // Role: BUSINESS_OWNER, BUSINESS_DEVELOPMENT_MANAGER
     // ─────────────────────────────────────────────
     @GetMapping("/industries")
-    @PreAuthorize("hasAnyRole('BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER')")
+    @PreAuthorize("hasAnyRole('SYSTEM_ADMIN', 'BUSINESS_OWNER', 'BUSINESS_DEVELOPMENT_MANAGER', 'BUSINESS_DEVELOPMENT_STAFF')")
     public ResponseEntity<ApiResponse<java.util.List<String>>> getDistinctIndustries() {
         return ResponseEntity.ok(ApiResponse.success(profileService.getDistinctIndustries(), "Distinct industries retrieved"));
     }

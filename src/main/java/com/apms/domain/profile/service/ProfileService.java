@@ -57,8 +57,11 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -512,11 +515,48 @@ public class ProfileService {
      */
     @Transactional(readOnly = true)
     public java.util.List<String> getDistinctIndustries() {
-        java.util.List<String> catalogIndustries = industryCatalogService.getDistinctActiveIndustryNames();
-        if (catalogIndustries != null && !catalogIndustries.isEmpty()) {
-            return catalogIndustries;
+        String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+        Criteria criteria = Criteria.where("isDeleted").ne(true);
+        if (ownerCompanyId != null && !ownerCompanyId.isBlank()) {
+            criteria = criteria.and("companyId").ne(ownerCompanyId);
         }
-        return mongoTemplate.findDistinct("business.industries", CompanyProfile.class, String.class);
+
+        List<String> rawIndustries = mongoTemplate.findDistinct(
+                Query.query(criteria),
+                "business.industries",
+                CompanyProfile.class,
+                String.class
+        );
+
+        Map<String, String> normalizedMap = new LinkedHashMap<>();
+        if (rawIndustries != null) {
+            for (String raw : rawIndustries) {
+                if (raw == null) continue;
+                String clean = raw.trim().replaceAll("\\s+", " ");
+                if (clean.isBlank()) continue;
+                String key = clean.toLowerCase();
+                normalizedMap.putIfAbsent(key, clean);
+            }
+        }
+
+        // Also merge any active industries from catalog
+        try {
+            List<String> catalogIndustries = industryCatalogService.getDistinctActiveIndustryNames();
+            if (catalogIndustries != null) {
+                for (String raw : catalogIndustries) {
+                    if (raw == null) continue;
+                    String clean = raw.trim().replaceAll("\\s+", " ");
+                    if (clean.isBlank()) continue;
+                    normalizedMap.putIfAbsent(clean.toLowerCase(), clean);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to fetch catalog industries: {}", e.getMessage());
+        }
+
+        List<String> result = new ArrayList<>(normalizedMap.values());
+        result.sort(String.CASE_INSENSITIVE_ORDER);
+        return result;
     }
 
     /**
