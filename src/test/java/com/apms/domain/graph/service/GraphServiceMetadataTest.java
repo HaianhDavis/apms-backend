@@ -28,8 +28,8 @@
 //        neo4jClient.query("MATCH (n) DETACH DELETE n").run();
 //
 //        // Create initial nodes
-//        neo4jClient.query("CREATE (c:Company {companyId: 'C1', name: 'Company 1', industry: 'Tech'})").run();
-//        neo4jClient.query("CREATE (c:Company {companyId: 'C2', name: 'Company 2', industry: 'Finance'})").run();
+//        neo4jClient.query("CREATE (c:Company {companyId: 'C1', name: 'Company 1', industries: ['Tech']})").run();
+//        neo4jClient.query("CREATE (c:Company {companyId: 'C2', name: 'Company 2', industries: ['Finance']})").run();
 //    }
 //
 //    @Test

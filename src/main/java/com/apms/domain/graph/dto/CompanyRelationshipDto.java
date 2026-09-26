@@ -21,7 +21,6 @@ public class CompanyRelationshipDto {
     private String sourceCompanyId;
     private String targetCompanyId;
     private String relationshipType;
-    private Double confidenceScore;
     private String confirmedBy;
     private LocalDateTime confirmedAt;
     private String notes;
