@@ -472,7 +472,7 @@ public class GraphRelationshipRepairService {
             } else if (projectId != null && projectRepository != null) {
                 projectRepository.findById(projectId).ifPresent(p -> {
                     if (StringUtils.hasText(p.getTargetCompanyName())) {
-                        graphService.mergeCompanyNode(canonicalTargetId.trim(), p.getTargetCompanyName().trim(), "Unknown");
+                        graphService.mergeCompanyNode(canonicalTargetId.trim(), p.getTargetCompanyName().trim(), Collections.emptyList());
                     }
                 });
             }
@@ -483,8 +483,7 @@ public class GraphRelationshipRepairService {
             MERGE (c1:Company {companyId: $sourceCompanyId})
             MERGE (c2:Company {companyId: $targetCompanyId})
             MERGE (c1)-[r:%s]->(c2)
-            SET r.confidenceScore = 1.0,
-                r.confirmedBy = $confirmedBy,
+            SET r.confirmedBy = $confirmedBy,
                 r.confirmedAt = coalesce(r.confirmedAt, datetime()),
                 r.projectId = $projectId
             """, targetRel.name());

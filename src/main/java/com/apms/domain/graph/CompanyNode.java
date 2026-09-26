@@ -16,8 +16,6 @@ public class CompanyNode {
 
     private String name;
 
-    private String industry;
-
     private List<String> industries;
 
     private ZonedDateTime createdAt;

@@ -148,15 +148,30 @@ public class GraphService {
 
         List<String> rawIndustries = profile.getBusiness() != null ? profile.getBusiness().getIndustries() : null;
         List<String> industries = normalizeIndustries(rawIndustries);
-        String legacyIndustry = !industries.isEmpty() ? industries.get(0) : "Unknown";
 
-        mergeCompanyNode(companyId.trim(), name, industries, legacyIndustry);
+        mergeCompanyNode(companyId.trim(), name, industries);
     }
 
     public void mergeCompanyNode(String companyId, String name, List<String> industries) {
-        List<String> norm = normalizeIndustries(industries);
-        String legacyIndustry = !norm.isEmpty() ? norm.get(0) : "Unknown";
-        mergeCompanyNode(companyId, name, norm, legacyIndustry);
+        if (!StringUtils.hasText(companyId)) return;
+        String canonicalName = StringUtils.hasText(name) ? name.trim() : "Unknown";
+        List<String> canonicalIndustries = normalizeIndustries(industries);
+
+        String cypher = """
+            MERGE (c:Company {companyId: $companyId})
+            ON CREATE SET c.name = $name, c.industries = $industries, c.createdAt = datetime()
+            ON MATCH SET c.name = $name, c.industries = $industries, c.updatedAt = datetime()
+            """;
+
+        neo4jClient.query(cypher)
+                .bindAll(Map.of(
+                        "companyId", companyId.trim(),
+                        "name", canonicalName,
+                        "industries", canonicalIndustries
+                ))
+                .run();
+
+        log.info("Merged CompanyNode: companyId={}, name={}, industries={}", companyId.trim(), canonicalName, canonicalIndustries);
     }
 
     public void mergeCompanyNode(String companyId, String name, String industry) {
@@ -164,32 +179,12 @@ public class GraphService {
         List<String> industries = (StringUtils.hasText(industry) && !"Unknown".equalsIgnoreCase(industry.trim()))
                 ? List.of(industry.trim())
                 : Collections.emptyList();
-        String legacyIndustry = StringUtils.hasText(industry) ? industry.trim() : "Unknown";
-        mergeCompanyNode(companyId, name, industries, legacyIndustry);
+        mergeCompanyNode(companyId, name, industries);
     }
 
+    @Deprecated
     public void mergeCompanyNode(String companyId, String name, List<String> industries, String legacyIndustry) {
-        if (!StringUtils.hasText(companyId)) return;
-        String canonicalName = StringUtils.hasText(name) ? name.trim() : "Unknown";
-        List<String> canonicalIndustries = industries != null ? industries : Collections.emptyList();
-        String canonicalLegacyIndustry = StringUtils.hasText(legacyIndustry) ? legacyIndustry.trim() : (!canonicalIndustries.isEmpty() ? canonicalIndustries.get(0) : "Unknown");
-
-        String cypher = """
-            MERGE (c:Company {companyId: $companyId})
-            ON CREATE SET c.name = $name, c.industries = $industries, c.industry = $industry, c.createdAt = datetime()
-            ON MATCH SET c.name = $name, c.industries = $industries, c.industry = $industry, c.updatedAt = datetime()
-            """;
-
-        neo4jClient.query(cypher)
-                .bindAll(Map.of(
-                        "companyId", companyId.trim(),
-                        "name", canonicalName,
-                        "industries", canonicalIndustries,
-                        "industry", canonicalLegacyIndustry
-                ))
-                .run();
-
-        log.info("Merged CompanyNode: companyId={}, name={}, industries={}", companyId.trim(), canonicalName, canonicalIndustries);
+        mergeCompanyNode(companyId, name, industries);
     }
 
     public static List<String> normalizeIndustries(List<String> raw) {
@@ -209,7 +204,7 @@ public class GraphService {
         return Collections.unmodifiableList(result);
     }
 
-    public void createRelationship(String sourceCompanyId, String targetCompanyId, String relType, String confirmedBy, String projectId, String candidateId, double confidenceScore) {
+    public void createRelationship(String sourceCompanyId, String targetCompanyId, String relType, String confirmedBy, String projectId, String candidateId) {
         createRelationship(CompanyRelationshipDto.builder()
                 .sourceCompanyId(sourceCompanyId)
                 .targetCompanyId(targetCompanyId)
@@ -217,8 +212,12 @@ public class GraphService {
                 .confirmedBy(confirmedBy)
                 .projectId(projectId)
                 .candidateId(candidateId)
-                .confidenceScore(confidenceScore)
                 .build());
+    }
+
+    @Deprecated
+    public void createRelationship(String sourceCompanyId, String targetCompanyId, String relType, String confirmedBy, String projectId, String candidateId, double confidenceScore) {
+        createRelationship(sourceCompanyId, targetCompanyId, relType, confirmedBy, projectId, candidateId);
     }
 
     public void createRelationship(CompanyRelationshipDto dto) {
@@ -255,8 +254,7 @@ public class GraphService {
             MATCH (c1:Company {companyId: $sourceCompanyId})
             MATCH (c2:Company {companyId: $targetCompanyId})
             MERGE (c1)-[r:%s]->(c2)
-            SET r.confidenceScore = $confidenceScore,
-                r.confirmedBy = $confirmedBy,
+            SET r.confirmedBy = $confirmedBy,
                 r.confirmedAt = coalesce(r.confirmedAt, datetime()),
                 r.projectId = $projectId,
                 r.candidateId = $candidateId,
@@ -273,7 +271,6 @@ public class GraphService {
                         "confirmedBy", dto.getConfirmedBy() != null ? dto.getConfirmedBy() : "SYSTEM",
                         "projectId", dto.getProjectId() != null ? dto.getProjectId() : "",
                         "candidateId", dto.getCandidateId() != null ? dto.getCandidateId() : "",
-                        "confidenceScore", dto.getConfidenceScore() != null ? dto.getConfidenceScore() : 1.0,
                         "startDate", dto.getStartDate() != null ? dto.getStartDate().toString() : "",
                         "endDate", dto.getEndDate() != null ? dto.getEndDate().toString() : "",
                         "status", dto.getStatus() != null ? dto.getStatus() : "",
@@ -409,8 +406,7 @@ public class GraphService {
             MERGE (c1:Company {companyId: $sourceCompanyId})
             MERGE (c2:Company {companyId: $targetCompanyId})
             MERGE (c1)-[r:%s]->(c2)
-            SET r.confidenceScore = 1.0,
-                r.confirmedBy = $confirmedBy,
+            SET r.confirmedBy = $confirmedBy,
                 r.confirmedAt = coalesce(r.confirmedAt, datetime())
             """, canonicalRel);
 
@@ -489,17 +485,13 @@ public class GraphService {
 
         List<String> industries = (node.getIndustries() != null && !node.getIndustries().isEmpty())
                 ? node.getIndustries()
-                : (StringUtils.hasText(node.getIndustry()) && !"Unknown".equalsIgnoreCase(node.getIndustry().trim())
-                ? List.of(node.getIndustry().trim())
-                : List.of());
-        String legacyIndustry = StringUtils.hasText(node.getIndustry())
-                ? node.getIndustry().trim()
-                : (!industries.isEmpty() ? industries.get(0) : "Unknown");
+                : List.of();
+        String primaryIndustry = !industries.isEmpty() ? industries.get(0) : "Unknown";
 
         return GraphCompanyDto.builder()
                 .companyId(node.getCompanyId())
                 .name(node.getName())
-                .industry(legacyIndustry)
+                .industry(primaryIndustry)
                 .industries(industries)
                 .createdAt(node.getCreatedAt())
                 .updatedAt(node.getUpdatedAt())
@@ -516,28 +508,15 @@ public class GraphService {
                 .map(node -> {
                     List<String> industries = (node.getIndustries() != null && !node.getIndustries().isEmpty())
                             ? node.getIndustries()
-                            : (StringUtils.hasText(node.getIndustry()) && !"Unknown".equalsIgnoreCase(node.getIndustry().trim())
-                            ? List.of(node.getIndustry().trim())
-                            : List.of());
-                    String legacyIndustry = StringUtils.hasText(node.getIndustry())
-                            ? node.getIndustry().trim()
-                            : (!industries.isEmpty() ? industries.get(0) : "Unknown");
+                            : List.of();
+                    String primaryIndustry = !industries.isEmpty() ? industries.get(0) : "Unknown";
+                    boolean isOwner = ownerCompanyId != null && ownerCompanyId.equals(node.getCompanyId());
 
                     return GraphCompanyDto.builder()
                             .companyId(node.getCompanyId())
                             .name(node.getName())
-                            .industry(legacyIndustry)
+                            .industry(primaryIndustry)
                             .industries(industries)
-                            .createdAt(node.getCreatedAt())
-                            .updatedAt(node.getUpdatedAt())
-                            .build();
-                })
-                .map(node -> {
-                    boolean isOwner = ownerCompanyId != null && ownerCompanyId.equals(node.getCompanyId());
-                    return GraphCompanyDto.builder()
-                            .companyId(node.getCompanyId())
-                            .name(node.getName())
-                            .industry(node.getIndustry())
                             .createdAt(node.getCreatedAt())
                             .updatedAt(node.getUpdatedAt())
                             .isOwner(isOwner)
@@ -552,7 +531,7 @@ public class GraphService {
         String cypher = """
             MATCH (c1:Company {companyId: $companyIdA})-[r]-(c2:Company {companyId: $companyIdB})
             RETURN type(r) as relType, startNode(r).companyId as sourceCompanyId, endNode(r).companyId as targetCompanyId,
-                   r.confidenceScore as confidenceScore, r.confirmedBy as confirmedBy,
+                   r.confirmedBy as confirmedBy,
                    r.projectId as projectId, r.candidateId as candidateId,
                    r.startDate as startDate, r.endDate as endDate, r.status as status, r.metadata as metadata
             """;
@@ -580,7 +559,6 @@ public class GraphService {
                             .sourceCompanyId((String) record.get("sourceCompanyId"))
                             .targetCompanyId((String) record.get("targetCompanyId"))
                             .relationshipType((String) record.get("relType"))
-                            .confidenceScore((Double) record.get("confidenceScore"))
                             .confirmedBy((String) record.get("confirmedBy"))
                             .projectId((String) record.get("projectId"))
                             .candidateId((String) record.get("candidateId"))
@@ -609,7 +587,6 @@ public class GraphService {
                     CompanyNode c = new CompanyNode();
                     c.setCompanyId(node.get("companyId").asString());
                     c.setName(node.get("name").asString("Unknown"));
-                    c.setIndustry(node.get("industry").asString("Unknown"));
                     if (node.containsKey("industries") && !node.get("industries").isNull()) {
                         try {
                             c.setIndustries(node.get("industries").asList(org.neo4j.driver.Value::asString));
@@ -621,26 +598,15 @@ public class GraphService {
                 .map(node -> {
                     List<String> industries = (node.getIndustries() != null && !node.getIndustries().isEmpty())
                             ? node.getIndustries()
-                            : (StringUtils.hasText(node.getIndustry()) && !"Unknown".equalsIgnoreCase(node.getIndustry().trim())
-                            ? List.of(node.getIndustry().trim())
-                            : List.of());
-                    String legacyIndustry = StringUtils.hasText(node.getIndustry())
-                            ? node.getIndustry().trim()
-                            : (!industries.isEmpty() ? industries.get(0) : "Unknown");
+                            : List.of();
+                    String primaryIndustry = !industries.isEmpty() ? industries.get(0) : "Unknown";
+                    boolean isOwner = ownerCompanyId != null && ownerCompanyId.equals(node.getCompanyId());
 
                     return GraphCompanyDto.builder()
                             .companyId(node.getCompanyId())
                             .name(node.getName())
-                            .industry(legacyIndustry)
+                            .industry(primaryIndustry)
                             .industries(industries)
-                            .build();
-                })
-                .map(node -> {
-                    boolean isOwner = ownerCompanyId != null && ownerCompanyId.equals(node.getCompanyId());
-                    return GraphCompanyDto.builder()
-                            .companyId(node.getCompanyId())
-                            .name(node.getName())
-                            .industry(node.getIndustry())
                             .isOwner(isOwner)
                             .build();
                 })
@@ -652,7 +618,7 @@ public class GraphService {
         String cypher = """
             MATCH (c1:Company {companyId: $companyId})-[r]->(c2:Company)
             RETURN type(r) as relType, c2.companyId as targetCompanyId,
-                   r.confidenceScore as confidenceScore, r.confirmedBy as confirmedBy,
+                   r.confirmedBy as confirmedBy,
                    r.projectId as projectId, r.candidateId as candidateId,
                    r.startDate as startDate, r.endDate as endDate, r.status as status, r.metadata as metadata
             """;
@@ -680,7 +646,6 @@ public class GraphService {
                             .sourceCompanyId(companyId)
                             .targetCompanyId((String) record.get("targetCompanyId"))
                             .relationshipType((String) record.get("relType"))
-                            .confidenceScore((Double) record.get("confidenceScore"))
                             .confirmedBy((String) record.get("confirmedBy"))
                             .projectId((String) record.get("projectId"))
                             .candidateId((String) record.get("candidateId"))
