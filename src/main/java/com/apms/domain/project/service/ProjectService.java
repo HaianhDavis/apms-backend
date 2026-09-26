@@ -2117,12 +2117,6 @@ public class ProjectService {
             projectRepository.save(project);
         }
 
-        // Idempotency: if canonical relationship already matches target, do nothing
-        if (canonicalRel == targetRel) {
-            log.info("Project {} relationship apply skipped: canonical relationship is already {}", project.getId(), targetRel);
-            return;
-        }
-
         String actorName = "SYSTEM";
         if (actorId != null) {
             actorName = userProfileRepository.findByAccountId(actorId)
@@ -2131,15 +2125,19 @@ public class ProjectService {
                     .orElse("User #" + actorId);
         }
 
-        // 1. Update Neo4j graph relationship
+        // 1. Update Neo4j graph relationship (skip if canonical already matches target)
         if (graphService != null) {
-            try {
-                String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
-                graphService.replaceRelationship(ownerCompanyId, targetCompanyId, targetRel.name(), actorName);
-                log.info("Project {} replaced Neo4j relationship between {} and {} with {}",
-                        project.getId(), ownerCompanyId, targetCompanyId, targetRel.name());
-            } catch (Exception e) {
-                log.error("Failed to update Neo4j relationship for project {}: {}", project.getId(), e.getMessage(), e);
+            if (canonicalRel == targetRel) {
+                log.info("Project {} Neo4j relationship update skipped: canonical relationship is already {}", project.getId(), targetRel);
+            } else {
+                try {
+                    String ownerCompanyId = ownerOrganizationService.getOwnerCompanyId();
+                    graphService.replaceRelationship(ownerCompanyId, targetCompanyId, targetRel.name(), actorName);
+                    log.info("Project {} replaced Neo4j relationship between {} and {} with {}",
+                            project.getId(), ownerCompanyId, targetCompanyId, targetRel.name());
+                } catch (Exception e) {
+                    log.error("Failed to update Neo4j relationship for project {}: {}", project.getId(), e.getMessage(), e);
+                }
             }
         }
 
